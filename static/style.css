@@ -123,9 +123,19 @@ a:hover {
     text-decoration: none;
 }
 
-.nav-logo {
+.nav-logo-icon {
     height: 26px;
     width: auto;
+}
+
+.nav-logo-text {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.nav-logo-text span {
+    color: var(--accent);
 }
 
 .nav-links {

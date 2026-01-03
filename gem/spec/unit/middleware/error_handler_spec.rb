@@ -17,6 +17,7 @@ RSpec.describe MiniAPM::Middleware::ErrorHandler do
     build_test_config
     MiniAPM.start!
     stub_request(:post, "http://localhost:3000/ingest/errors").to_return(status: 200)
+    stub_request(:post, "http://localhost:3000/ingest/errors/batch").to_return(status: 200)
   end
 
   after do
@@ -34,7 +35,7 @@ RSpec.describe MiniAPM::Middleware::ErrorHandler do
     it "captures and re-raises exceptions" do
       payload = nil
 
-      stub_request(:post, "http://localhost:3000/ingest/errors")
+      stub_request(:post, "http://localhost:3000/ingest/errors/batch")
         .with { |request| payload = JSON.parse(request.body) }
         .to_return(status: 200)
 
@@ -49,16 +50,17 @@ RSpec.describe MiniAPM::Middleware::ErrorHandler do
       MiniAPM.flush!
       sleep 0.2
 
-      expect(WebMock).to have_requested(:post, "http://localhost:3000/ingest/errors")
-      # Single error format (not batch)
-      expect(payload["exception_class"]).to eq("StandardError")
-      expect(payload["message"]).to eq("Something went wrong")
+      expect(WebMock).to have_requested(:post, "http://localhost:3000/ingest/errors/batch")
+      # Batch format - extract first error
+      error = payload["errors"].first
+      expect(error["exception_class"]).to eq("StandardError")
+      expect(error["message"]).to eq("Something went wrong")
     end
 
     it "reports error with request context" do
       payload = nil
 
-      stub_request(:post, "http://localhost:3000/ingest/errors")
+      stub_request(:post, "http://localhost:3000/ingest/errors/batch")
         .with { |request| payload = JSON.parse(request.body) }
         .to_return(status: 200)
 
@@ -75,9 +77,10 @@ RSpec.describe MiniAPM::Middleware::ErrorHandler do
       MiniAPM.flush!
       sleep 0.2
 
-      # Single error format
-      expect(payload["exception_class"]).to eq("RuntimeError")
-      expect(payload["message"]).to eq("Test error")
+      # Batch format - extract first error
+      error = payload["errors"].first
+      expect(error["exception_class"]).to eq("RuntimeError")
+      expect(error["message"]).to eq("Test error")
     end
 
     it "ignores configured exception types" do
@@ -141,7 +144,7 @@ RSpec.describe MiniAPM::Middleware::ErrorHandler do
     it "extracts user_id from warden session" do
       payload = nil
 
-      stub_request(:post, "http://localhost:3000/ingest/errors")
+      stub_request(:post, "http://localhost:3000/ingest/errors/batch")
         .with { |request| payload = JSON.parse(request.body) }
         .to_return(status: 200)
 
@@ -161,14 +164,15 @@ RSpec.describe MiniAPM::Middleware::ErrorHandler do
       MiniAPM.flush!
       sleep 0.2
 
-      # Single error format
-      expect(payload["user_id"]).to eq("42")
+      # Batch format - extract first error
+      error = payload["errors"].first
+      expect(error["user_id"]).to eq("42")
     end
 
     it "extracts user_id from session" do
       payload = nil
 
-      stub_request(:post, "http://localhost:3000/ingest/errors")
+      stub_request(:post, "http://localhost:3000/ingest/errors/batch")
         .with { |request| payload = JSON.parse(request.body) }
         .to_return(status: 200)
 
@@ -185,14 +189,15 @@ RSpec.describe MiniAPM::Middleware::ErrorHandler do
       MiniAPM.flush!
       sleep 0.2
 
-      # Single error format
-      expect(payload["user_id"]).to eq("123")
+      # Batch format - extract first error
+      error = payload["errors"].first
+      expect(error["user_id"]).to eq("123")
     end
 
     it "includes URL in error context" do
       payload = nil
 
-      stub_request(:post, "http://localhost:3000/ingest/errors")
+      stub_request(:post, "http://localhost:3000/ingest/errors/batch")
         .with { |request| payload = JSON.parse(request.body) }
         .to_return(status: 200)
 
@@ -208,8 +213,9 @@ RSpec.describe MiniAPM::Middleware::ErrorHandler do
       MiniAPM.flush!
       sleep 0.2
 
-      # Single error format - check error fields
-      expect(payload["exception_class"]).to eq("StandardError")
+      # Batch format - extract first error
+      error = payload["errors"].first
+      expect(error["exception_class"]).to eq("StandardError")
     end
   end
 end

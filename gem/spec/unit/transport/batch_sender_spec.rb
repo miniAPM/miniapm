@@ -165,7 +165,7 @@ RSpec.describe MiniAPM::Transport::BatchSender do
     it "batches errors and sends to error exporter" do
       build_test_config(batch_size: 2, flush_interval: 0.1)
 
-      stub_request(:post, "http://localhost:3000/ingest/errors")
+      stub_request(:post, "http://localhost:3000/ingest/errors/batch")
         .to_return(status: 200)
 
       described_class.start!
@@ -182,7 +182,7 @@ RSpec.describe MiniAPM::Transport::BatchSender do
       # Wait for flush
       sleep 0.3
 
-      expect(WebMock).to have_requested(:post, "http://localhost:3000/ingest/errors")
+      expect(WebMock).to have_requested(:post, "http://localhost:3000/ingest/errors/batch")
         .at_least_once
     end
   end
