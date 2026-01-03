@@ -36,8 +36,9 @@ enum Commands {
         backfill: bool,
         #[arg(long, default_value = "7")]
         days: u32,
+        /// Run only once instead of continuously
         #[arg(long)]
-        continuous: bool,
+        once: bool,
     },
     /// Start the MCP server (stdio)
     Mcp,
@@ -98,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
             error_rate,
             backfill,
             days,
-            continuous,
+            once,
         }) => {
             // Get API key from database if not set via env var
             let mut config = config;
@@ -112,7 +113,7 @@ async fn main() -> anyhow::Result<()> {
             if backfill {
                 simulator::backfill(&config, days, requests_per_minute * 60 * 24).await?;
             } else {
-                simulator::run(&config, requests_per_minute, error_rate, continuous).await?;
+                simulator::run(&config, requests_per_minute, error_rate, !once).await?;
             }
         }
         Some(Commands::Mcp) => {
