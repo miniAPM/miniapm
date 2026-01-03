@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}MiniAPM{% endblock %}</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon.png">
     <link rel="stylesheet" href="/static/style.css">
     <script>
         (function() {
@@ -16,15 +18,32 @@
 <body>
     <nav class="navbar">
         <div class="nav-brand">
-            <a href="/">MiniAPM</a>
+            <a href="/">
+                <svg class="nav-logo" viewBox="0 0 140 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <!-- Bar chart icon -->
+                    <rect x="2" y="20" width="6" height="18" rx="2" fill="currentColor"/>
+                    <rect x="12" y="12" width="6" height="26" rx="2" fill="currentColor"/>
+                    <rect x="22" y="6" width="6" height="32" rx="2" fill="currentColor"/>
+                    <rect x="32" y="16" width="6" height="22" rx="2" fill="var(--accent)"/>
+                    <!-- Dot -->
+                    <circle cx="46" cy="8" r="3" fill="var(--accent)"/>
+                    <!-- Text: miniAPM -->
+                    <text x="44" y="33" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="18" font-weight="600" fill="currentColor">miniAPM</text>
+                </svg>
+            </a>
         </div>
         {% block project_selector %}{% endblock %}
         <ul class="nav-links">
             <li><a href="/">Dashboard</a></li>
             <li><a href="/errors">Errors</a></li>
-            <li><a href="/performance">Performance</a></li>
-            <li><a href="/slow">Slow Requests</a></li>
+            <li><a href="/traces">Traces</a></li>
+            <li><a href="/performance">Routes</a></li>
+            <li><a href="/deploys">Deploys</a></li>
+            {% if ctx.projects_enabled %}
             <li><a href="/projects" class="nav-admin">Projects</a></li>
+            {% else %}
+            <li><a href="/api-key" class="nav-admin">API Key</a></li>
+            {% endif %}
             <li><a href="/auth/users" class="nav-admin">Users</a></li>
         </ul>
         <div class="nav-right">

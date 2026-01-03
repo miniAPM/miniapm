@@ -1,11 +1,13 @@
+mod api_key;
 pub mod auth;
 mod auth_middleware;
 mod dashboard;
+mod deploys;
 mod errors;
 mod performance;
 pub mod project_context;
 mod projects;
-mod slow_requests;
+mod traces;
 
 use axum::{middleware, routing::{get, post}, Router};
 
@@ -16,13 +18,17 @@ pub fn routes(pool: DbPool) -> Router<DbPool> {
         .route("/", get(dashboard::index))
         .route("/errors", get(errors::index))
         .route("/errors/:id", get(errors::show))
+        .route("/traces", get(traces::index))
+        .route("/traces/:trace_id", get(traces::show))
         .route("/performance", get(performance::index))
-        .route("/slow", get(slow_requests::index))
+        .route("/deploys", get(deploys::index))
         .route("/projects/switch", post(projects::switch_project))
         .route("/projects", get(projects::index))
         .route("/projects/create", post(projects::create))
         .route("/projects/delete", post(projects::delete))
         .route("/projects/regenerate-key", post(projects::regenerate_key))
+        .route("/api-key", get(api_key::index))
+        .route("/api-key/regenerate", post(api_key::regenerate))
         .layer(middleware::from_fn_with_state(pool, auth_middleware::web_auth_middleware))
 }
 
