@@ -349,9 +349,6 @@ h2 {
     overflow: hidden;
 }
 
-.card + .card {
-    margin-top: 1.5rem;
-}
 
 .card-link {
     display: block;

@@ -46,7 +46,7 @@
     <section class="card chart-card">
         <h2>Traffic (24h)</h2>
         <div class="chart-container" id="traffic-chart">
-            {% if hourly_stats.is_empty() %}
+            {% if requests_24h == 0 %}
             <div class="chart-empty">No data yet</div>
             {% else %}
             <canvas id="trafficCanvas"></canvas>
@@ -56,7 +56,7 @@
     <section class="card chart-card">
         <h2>Avg Latency (24h)</h2>
         <div class="chart-container" id="latency-chart">
-            {% if hourly_stats.is_empty() %}
+            {% if requests_24h == 0 %}
             <div class="chart-empty">No data yet</div>
             {% else %}
             <canvas id="latencyCanvas"></canvas>
@@ -124,7 +124,7 @@
     </section>
 </div>
 
-{% if !hourly_stats.is_empty() %}
+{% if requests_24h > 0 %}
 <script>
 (function() {
     const data = [
