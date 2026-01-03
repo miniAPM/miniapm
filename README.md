@@ -2,7 +2,7 @@
 
 The smallest useful APM. A single-binary, self-hosted application performance monitor and error tracker built on OpenTelemetry.
 
-![MiniAPM Dashboard](https://github.com/hasik/miniapm/raw/main/docs/screenshot.png)
+![MiniAPM Dashboard](https://github.com/miniapm/miniapm/raw/main/docs/screenshot.png)
 
 ## Features
 
@@ -18,7 +18,7 @@ The smallest useful APM. A single-binary, self-hosted application performance mo
 ### Docker (recommended)
 
 ```bash
-docker run -d -p 3000:3000 -v miniapm_data:/data ghcr.io/hasik/miniapm
+docker run -d -p 3000:3000 -v miniapm_data:/data ghcr.io/miniapm/miniapm
 ```
 
 On first run, you'll see your API key in the logs:
@@ -29,7 +29,7 @@ INFO miniapm::server: Single-project mode - API key: proj_abc123...
 ### From Source
 
 ```bash
-git clone https://github.com/hasik/miniapm
+git clone https://github.com/miniapm/miniapm
 cd miniapm
 cargo build --release
 ./target/release/miniapm server
@@ -162,7 +162,7 @@ miniapm simulate            # Run data simulator for testing
 ```yaml
 services:
   miniapm:
-    image: ghcr.io/hasik/miniapm
+    image: ghcr.io/miniapm/miniapm
     ports:
       - "3000:3000"
     volumes:
