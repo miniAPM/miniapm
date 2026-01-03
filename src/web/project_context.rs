@@ -21,6 +21,11 @@ impl WebProjectContext {
     pub fn is_current_project(&self, id: &i64) -> bool {
         self.current_project.as_ref().map(|p| p.id) == Some(*id)
     }
+
+    /// Returns true if project selector should be shown (more than 1 project)
+    pub fn show_selector(&self) -> bool {
+        self.projects_enabled && self.projects.len() > 1
+    }
 }
 
 pub fn get_project_context(pool: &DbPool, cookies: &Cookies) -> WebProjectContext {

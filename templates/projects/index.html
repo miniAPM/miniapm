@@ -19,6 +19,10 @@
 {% block content %}
 <h1>Projects</h1>
 
+{% if let Some(msg) = message %}
+<div class="notice notice-info">{{ msg }}</div>
+{% endif %}
+
 <div class="card">
     <h2>Create Project</h2>
     <form method="POST" action="/projects/create" class="inline-form">

@@ -7,6 +7,7 @@ pub struct Config {
     pub retention_days_requests: i64,
     pub retention_days_errors: i64,
     pub retention_days_hourly_rollups: i64,
+    pub retention_days_spans: i64,
     pub slow_request_threshold_ms: f64,
     pub mini_apm_url: String,
     pub enable_user_accounts: bool,
@@ -31,6 +32,10 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(90),
+            retention_days_spans: env::var("RETENTION_DAYS_SPANS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(7),
             slow_request_threshold_ms: env::var("SLOW_REQUEST_THRESHOLD_MS")
                 .ok()
                 .and_then(|v| v.parse().ok())

@@ -56,7 +56,6 @@ pub fn pick_random() -> &'static Route {
 pub struct SimulatedError {
     pub class: &'static str,
     pub message: &'static str,
-    pub routes: &'static [&'static str],
     pub weight: u32,
 }
 
@@ -64,31 +63,26 @@ pub const ERRORS: &[SimulatedError] = &[
     SimulatedError {
         class: "ActiveRecord::RecordNotFound",
         message: "Couldn't find Product with 'id'={}",
-        routes: &["/products/:id", "/orders/:id"],
         weight: 40,
     },
     SimulatedError {
         class: "ActionController::ParameterMissing",
         message: "param is missing or the value is empty: {}",
-        routes: &["/cart/items", "/checkout"],
         weight: 20,
     },
     SimulatedError {
         class: "ActiveRecord::RecordInvalid",
         message: "Validation failed: {} can't be blank",
-        routes: &["/checkout", "/cart/items"],
         weight: 15,
     },
     SimulatedError {
         class: "Redis::ConnectionError",
         message: "Connection refused - connect(2) for 127.0.0.1:6379",
-        routes: &[],
         weight: 5,
     },
     SimulatedError {
         class: "Net::ReadTimeout",
         message: "Net::ReadTimeout with #<TCPSocket:(closed)>",
-        routes: &["/checkout"],
         weight: 5,
     },
 ];

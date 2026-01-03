@@ -1,4 +1,4 @@
-use super::{patterns, routes};
+use super::{patterns, routes, traces};
 use crate::config::Config;
 use chrono::{Datelike, Duration, Timelike, Utc};
 use rand::Rng;
@@ -16,7 +16,7 @@ pub async fn run(
     let api_key = config.api_key.as_deref().unwrap_or("");
 
     tracing::info!(
-        "Simulator starting: {} req/min, {}% error rate",
+        "Simulator starting: {} req/min, {}% error rate (with OTLP traces)",
         requests_per_minute,
         error_rate * 100.0
     );
@@ -88,6 +88,39 @@ pub async fn run(
             }
         }
 
+        // Send OTLP trace for this request
+        let trace_payload = traces::generate_web_trace(route, total_ms, db_ms, view_ms);
+        let _ = client
+            .post(format!("{}/v1/traces", url))
+            .header("Authorization", format!("Bearer {}", api_key))
+            .json(&trace_payload)
+            .send()
+            .await;
+
+        // Occasionally send background job traces (10% chance)
+        if rng.gen::<f64>() < 0.10 {
+            let job_trace = traces::generate_job_trace();
+            let _ = client
+                .post(format!("{}/v1/traces", url))
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&job_trace)
+                .send()
+                .await;
+            tracing::debug!("Sent background job trace");
+        }
+
+        // Rarely send rake task traces (1% chance)
+        if rng.gen::<f64>() < 0.01 {
+            let rake_trace = traces::generate_rake_trace();
+            let _ = client
+                .post(format!("{}/v1/traces", url))
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&rake_trace)
+                .send()
+                .await;
+            tracing::debug!("Sent rake task trace");
+        }
+
         // Maybe send an error
         if rng.gen::<f64>() < error_rate {
             let error = routes::pick_random_error();
@@ -99,17 +132,36 @@ pub async fn run(
             hasher.update(&message);
             let fingerprint = hex::encode(&hasher.finalize()[..8]);
 
+            // Generate realistic source context
+            let controller_file = format!("app/controllers/{}.rb", route.controller.to_lowercase().replace("::", "/"));
+            let error_line = 42;
+
             let error_payload = serde_json::json!({
                 "exception_class": error.class,
                 "message": message,
                 "backtrace": [
-                    format!("app/controllers/{}.rb:42:in `{}'", route.controller.to_lowercase().replace("::", "/"), route.action),
+                    format!("{}:{}:in `{}'", controller_file, error_line, route.action),
                     "app/controllers/application_controller.rb:15:in `process_action'",
                     "actionpack/lib/action_controller/metal.rb:227:in `dispatch'"
                 ],
                 "fingerprint": fingerprint,
                 "request_id": request_id,
-                "timestamp": timestamp
+                "timestamp": timestamp,
+                "source_context": {
+                    "file": controller_file,
+                    "lineno": error_line,
+                    "pre_context": [
+                        format!("  def {}", route.action),
+                        "    @user = current_user",
+                        "    @items = @user.items.order(created_at: :desc)"
+                    ],
+                    "context_line": format!("    raise {} if @items.empty?", error.class),
+                    "post_context": [
+                        "    respond_to do |format|",
+                        "      format.html { render :index }",
+                        "    end"
+                    ]
+                }
             });
 
             let _ = client

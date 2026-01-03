@@ -1,6 +1,6 @@
 use askama::Template;
 use axum::{
-    extract::State,
+    extract::{Query, State},
     response::{IntoResponse, Redirect},
     Form,
 };
@@ -15,14 +15,28 @@ use super::project_context::{get_project_context, WebProjectContext, PROJECT_COO
 #[template(path = "projects/index.html")]
 pub struct ProjectsTemplate {
     pub projects: Vec<project::Project>,
+    pub message: Option<String>,
     pub ctx: WebProjectContext,
 }
 
-pub async fn index(State(pool): State<DbPool>, cookies: Cookies) -> ProjectsTemplate {
+#[derive(Deserialize)]
+pub struct ProjectsQuery {
+    pub message: Option<String>,
+}
+
+pub async fn index(
+    State(pool): State<DbPool>,
+    cookies: Cookies,
+    Query(query): Query<ProjectsQuery>,
+) -> ProjectsTemplate {
     let ctx = get_project_context(&pool, &cookies);
     let projects = project::list_all(&pool).unwrap_or_default();
 
-    ProjectsTemplate { projects, ctx }
+    ProjectsTemplate {
+        projects,
+        message: query.message,
+        ctx,
+    }
 }
 
 #[derive(Deserialize)]
@@ -51,10 +65,28 @@ pub async fn create(
     State(pool): State<DbPool>,
     Form(form): Form<CreateForm>,
 ) -> impl IntoResponse {
-    if !form.name.trim().is_empty() {
-        let _ = project::create(&pool, form.name.trim());
+    if form.name.trim().is_empty() {
+        return Redirect::to("/projects");
     }
-    Redirect::to("/projects")
+
+    match project::create(&pool, form.name.trim()) {
+        Ok(result) => {
+            let total_migrated = result.migrated_requests + result.migrated_errors + result.migrated_spans;
+            if total_migrated > 0 {
+                let msg = format!(
+                    "Project '{}' created. Migrated existing data: {} requests, {} errors, {} spans.",
+                    result.project.name,
+                    result.migrated_requests,
+                    result.migrated_errors,
+                    result.migrated_spans
+                );
+                Redirect::to(&format!("/projects?message={}", urlencoding::encode(&msg)))
+            } else {
+                Redirect::to("/projects")
+            }
+        }
+        Err(_) => Redirect::to("/projects"),
+    }
 }
 
 #[derive(Deserialize)]

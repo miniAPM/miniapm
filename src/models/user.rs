@@ -183,7 +183,10 @@ pub fn delete_expired_sessions(pool: &DbPool) -> anyhow::Result<usize> {
 pub fn list_all(pool: &DbPool) -> anyhow::Result<Vec<User>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
-        "SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at, created_at, last_login_at FROM users ORDER BY username",
+        r#"SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at,
+                  strftime('%Y-%m-%d %H:%M', created_at),
+                  CASE WHEN last_login_at IS NOT NULL THEN strftime('%Y-%m-%d %H:%M', last_login_at) ELSE NULL END
+           FROM users ORDER BY username"#,
     )?;
 
     let users = stmt
@@ -266,10 +269,10 @@ pub fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<User>> {
     Ok(user)
 }
 
-/// Generate an invite token
+/// Generate an invite token (12 bytes = 24 hex chars, short but secure)
 pub fn generate_invite_token() -> String {
     let mut rng = rand::thread_rng();
-    let bytes: [u8; 32] = rng.gen();
+    let bytes: [u8; 12] = rng.gen();
     hex::encode(bytes)
 }
 

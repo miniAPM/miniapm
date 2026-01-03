@@ -111,12 +111,16 @@ CREATE INDEX IF NOT EXISTS idx_rollups_daily_date ON rollups_daily(date);
 
 CREATE TABLE IF NOT EXISTS deploys (
     id INTEGER PRIMARY KEY,
+    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
     git_sha TEXT NOT NULL,
-    env TEXT NOT NULL,
+    version TEXT,
+    env TEXT,
     deployed_at TEXT NOT NULL,
-    description TEXT
+    description TEXT,
+    deployer TEXT
 );
 
+CREATE INDEX IF NOT EXISTS idx_deploys_project_id ON deploys(project_id);
 CREATE INDEX IF NOT EXISTS idx_deploys_deployed_at ON deploys(deployed_at);
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -152,6 +156,50 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS spans (
+    id INTEGER PRIMARY KEY,
+    project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+    trace_id TEXT NOT NULL,
+    span_id TEXT NOT NULL,
+    parent_span_id TEXT,
+    start_time_unix_nano INTEGER NOT NULL,
+    end_time_unix_nano INTEGER NOT NULL,
+    duration_ms REAL,
+    name TEXT NOT NULL,
+    kind INTEGER NOT NULL DEFAULT 0,
+    status_code INTEGER DEFAULT 0,
+    status_message TEXT,
+    span_category TEXT NOT NULL,
+    root_span_type TEXT,
+    service_name TEXT,
+    http_method TEXT,
+    http_url TEXT,
+    http_status_code INTEGER,
+    db_system TEXT,
+    db_statement TEXT,
+    db_operation TEXT,
+    messaging_system TEXT,
+    messaging_operation TEXT,
+    request_id TEXT,
+    attributes_json TEXT,
+    events_json TEXT,
+    resource_attributes_json TEXT,
+    happened_at TEXT NOT NULL,
+    UNIQUE(trace_id, span_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spans_project_id ON spans(project_id);
+CREATE INDEX IF NOT EXISTS idx_spans_trace_id ON spans(trace_id);
+CREATE INDEX IF NOT EXISTS idx_spans_happened_at ON spans(happened_at);
+CREATE INDEX IF NOT EXISTS idx_spans_root_type ON spans(root_span_type) WHERE root_span_type IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_spans_category ON spans(span_category);
 "#;
 
 pub fn init(config: &Config) -> anyhow::Result<DbPool> {
@@ -172,12 +220,34 @@ pub fn init(config: &Config) -> anyhow::Result<DbPool> {
 fn migrate(pool: &DbPool) -> anyhow::Result<()> {
     let conn = pool.get()?;
 
-    // Execute schema
+    // Run migrations for existing tables BEFORE executing schema
+    // This ensures columns exist before indexes are created
+
+    // Check if deploys table exists and add project_id if missing
+    let deploys_exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='deploys'",
+            [],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+
+    if deploys_exists {
+        let _ = conn.execute(
+            "ALTER TABLE deploys ADD COLUMN project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE",
+            [],
+        );
+    }
+
+    // Execute schema (creates tables if not exist, creates indexes)
     conn.execute_batch(SCHEMA)?;
 
     // Add invite columns if they don't exist (for existing databases)
     let _ = conn.execute("ALTER TABLE users ADD COLUMN invite_token TEXT UNIQUE", []);
     let _ = conn.execute("ALTER TABLE users ADD COLUMN invite_expires_at TEXT", []);
+
+    // Add source_context column if it doesn't exist
+    let _ = conn.execute("ALTER TABLE error_occurrences ADD COLUMN source_context TEXT", []);
 
     tracing::debug!("Database schema initialized");
     Ok(())

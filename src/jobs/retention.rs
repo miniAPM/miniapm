@@ -1,4 +1,4 @@
-use crate::{config::Config, models, DbPool};
+use crate::{config::Config, models::{self, deploy}, DbPool};
 use chrono::{Duration, Utc};
 
 pub fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
@@ -19,6 +19,17 @@ pub fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
         .to_rfc3339();
     let deleted_hourly = models::rollup::delete_hourly_before(pool, &hourly_cutoff)?;
     tracing::info!("Deleted {} old hourly rollups", deleted_hourly);
+
+    // Delete old spans
+    let spans_cutoff = (Utc::now() - Duration::days(config.retention_days_spans))
+        .to_rfc3339();
+    let deleted_spans = models::span::delete_before(pool, &spans_cutoff)?;
+    tracing::info!("Deleted {} old spans", deleted_spans);
+
+    // Delete old deploys (keep for 90 days)
+    let deploys_cutoff = (Utc::now() - Duration::days(90)).to_rfc3339();
+    let deleted_deploys = deploy::delete_before(pool, &deploys_cutoff)?;
+    tracing::info!("Deleted {} old deploys", deleted_deploys);
 
     // Vacuum on Sundays
     if Utc::now().format("%u").to_string() == "7" {

@@ -1,9 +1,9 @@
 {% extends "layout.html" %}
 
-{% block title %}Performance - MiniAPM{% endblock %}
+{% block title %}Routes - MiniAPM{% endblock %}
 
 {% block project_selector %}
-{% if ctx.projects_enabled %}
+{% if ctx.show_selector() %}
 <form method="POST" action="/projects/switch" class="project-selector">
     <select name="slug" onchange="this.form.submit()">
         {% for project in ctx.projects %}
@@ -17,40 +17,108 @@
 {% endblock %}
 
 {% block content %}
-<h1>Performance</h1>
+<h1>Routes</h1>
+<p class="subtitle">{{ total_count }} route{% if total_count != 1 %}s{% endif %} found</p>
 
-<div class="filters">
-    <a href="/performance?period=24h" class="{% if period == "24h" %}active{% endif %}">24h</a>
-    <a href="/performance?period=7d" class="{% if period == "7d" %}active{% endif %}">7 days</a>
-    <a href="/performance?period=30d" class="{% if period == "30d" %}active{% endif %}">30 days</a>
+<div class="filter-bar">
+    <div class="filter-group">
+        <label>Period</label>
+        <div class="filters">
+            <a href="?period=1h&sort={{ sort }}{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "1h" %}active{% endif %}">1h</a>
+            <a href="?period=24h&sort={{ sort }}{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "24h" %}active{% endif %}">24h</a>
+            <a href="?period=7d&sort={{ sort }}{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "7d" %}active{% endif %}">7d</a>
+            <a href="?period=30d&sort={{ sort }}{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "30d" %}active{% endif %}">30d</a>
+        </div>
+    </div>
+
+    <div class="filter-group">
+        <label>Method</label>
+        <div class="filters">
+            <a href="?period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if method.is_none() %}active{% endif %}">All</a>
+            <a href="?period={{ period }}&sort={{ sort }}&method=GET{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if method.as_deref() == Some("GET") %}active{% endif %}">GET</a>
+            <a href="?period={{ period }}&sort={{ sort }}&method=POST{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if method.as_deref() == Some("POST") %}active{% endif %}">POST</a>
+            <a href="?period={{ period }}&sort={{ sort }}&method=PUT{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if method.as_deref() == Some("PUT") %}active{% endif %}">PUT</a>
+            <a href="?period={{ period }}&sort={{ sort }}&method=DELETE{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if method.as_deref() == Some("DELETE") %}active{% endif %}">DELETE</a>
+        </div>
+    </div>
+
+    <div class="filter-group">
+        <label>Sort by</label>
+        <div class="filters">
+            <a href="?period={{ period }}&sort=requests{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "requests" %}active{% endif %}">Requests</a>
+            <a href="?period={{ period }}&sort=avg{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "avg" %}active{% endif %}">Avg</a>
+            <a href="?period={{ period }}&sort=p95{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "p95" %}active{% endif %}">p95</a>
+            <a href="?period={{ period }}&sort=p99{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "p99" %}active{% endif %}">p99</a>
+            <a href="?period={{ period }}&sort=max{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "max" %}active{% endif %}">Max</a>
+            <a href="?period={{ period }}&sort=db{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "db" %}active{% endif %}">DB</a>
+            <a href="?period={{ period }}&sort=errors{% if let Some(m) = method %}&method={{ m }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "errors" %}active{% endif %}">Errors</a>
+        </div>
+    </div>
+
+    <div class="filter-group filter-search">
+        <label>Search</label>
+        <form method="GET" action="/performance" class="search-form">
+            <input type="hidden" name="period" value="{{ period }}">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            {% if let Some(m) = method %}<input type="hidden" name="method" value="{{ m }}">{% endif %}
+            <input type="text" name="search" placeholder="Path..." value="{% if let Some(s) = search %}{{ s }}{% endif %}">
+            <button type="submit">Search</button>
+        </form>
+    </div>
 </div>
 
 {% if routes.is_empty() %}
-<p class="empty">No data yet</p>
+<p class="empty">No data for this period</p>
 {% else %}
-<div class="table-wrapper">
-    <table>
-        <thead>
-            <tr>
-                <th>Route</th>
-                <th class="num">Requests</th>
-                <th class="num">Avg</th>
-                <th class="num">DB</th>
-                <th class="num">Queries</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for route in routes %}
-            <tr>
-                <td class="route-cell">{{ route.method }} {{ route.path }}</td>
-                <td class="num">{{ route.request_count }}</td>
-                <td class="num">{{ route.avg_ms }} ms</td>
-                <td class="num">{{ route.avg_db_ms }} ms</td>
-                <td class="num">{{ route.avg_db_count }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+<div class="routes-table routes-table-wide">
+    <div class="routes-header">
+        <div class="col-route">Route</div>
+        <div class="col-requests">Requests</div>
+        <div class="col-timing">Avg</div>
+        <div class="col-timing">p95</div>
+        <div class="col-timing">p99</div>
+        <div class="col-timing">Max</div>
+        <div class="col-db">DB</div>
+        <div class="col-errors">Errors</div>
+    </div>
+    {% for route in routes %}
+    <div class="routes-row">
+        <div class="col-route">
+            <span class="method method-{{ route.method }}">{{ route.method }}</span>
+            <span class="path">{{ route.path }}</span>
+        </div>
+        <div class="col-requests">
+            <div class="bar-container">
+                <div class="bar bar-requests" style="width: {{ (route.request_count * 100 / max_requests) }}%;"></div>
+            </div>
+            <span class="value">{{ route.request_count }}</span>
+        </div>
+        <div class="col-timing">
+            <span class="timing-avg {% if route.avg_ms > 500 %}timing-slow{% else if route.avg_ms > 200 %}timing-medium{% endif %}">{{ route.avg_ms }}ms</span>
+        </div>
+        <div class="col-timing">
+            <span class="timing-p95 {% if route.p95_ms > 500 %}timing-slow{% else if route.p95_ms > 200 %}timing-medium{% endif %}">{{ route.p95_ms }}ms</span>
+        </div>
+        <div class="col-timing">
+            <span class="timing-p99 {% if route.p99_ms > 500 %}timing-slow{% else if route.p99_ms > 200 %}timing-medium{% endif %}">{{ route.p99_ms }}ms</span>
+        </div>
+        <div class="col-timing">
+            <span class="timing-max">{{ route.max_ms }}ms</span>
+        </div>
+        <div class="col-db">
+            <span class="db-time">{{ route.avg_db_ms }}ms</span>
+            <span class="db-queries">({{ route.avg_db_count }})</span>
+        </div>
+        <div class="col-errors">
+            {% if route.error_count > 0 %}
+            <span class="error-badge">{{ route.error_count }}</span>
+            <span class="error-rate">({{ "{:.1}"|format(route.error_rate) }}%)</span>
+            {% else %}
+            <span class="no-errors">-</span>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
 </div>
 {% endif %}
 {% endblock %}
