@@ -47,6 +47,8 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
             Router::new()
                 .route("/deploys", post(api::ingest_deploys))
                 .route("/v1/traces", post(api::ingest_spans))
+                .route("/errors", post(api::ingest_errors))
+                .route("/errors/batch", post(api::ingest_errors_batch))
                 .layer(middleware::from_fn_with_state(
                     pool.clone(),
                     api::auth_middleware,
