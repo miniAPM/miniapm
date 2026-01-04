@@ -203,9 +203,10 @@ pub async fn change_password_submit(
     }
 
     // Verify current password
-    let password_valid = user.password_hash.as_ref().map_or(false, |h| {
-        models::user::verify_password(&form.current_password, h)
-    });
+    let password_valid = user
+        .password_hash
+        .as_ref()
+        .is_some_and(|h| models::user::verify_password(&form.current_password, h));
     if !password_valid {
         return Html(
             ChangePasswordTemplate {
@@ -486,7 +487,7 @@ pub async fn invite_submit(
     }
 
     // Accept the invite and set password
-    if let Err(_) = models::user::accept_invite(&pool, user.id, &form.password) {
+    if models::user::accept_invite(&pool, user.id, &form.password).is_err() {
         return Html(
             InviteTemplate {
                 username: user.username,

@@ -195,7 +195,7 @@ impl SpanCategory {
         }
     }
 
-    pub fn from_str(s: &str) -> Self {
+    pub fn parse(s: &str) -> Self {
         match s {
             "http_server" => SpanCategory::HttpServer,
             "http_client" => SpanCategory::HttpClient,
@@ -235,7 +235,7 @@ impl RootSpanType {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s {
             "web" => Some(RootSpanType::Web),
             "job" => Some(RootSpanType::Job),
@@ -586,7 +586,7 @@ pub fn insert_otlp_batch(
                 let events_json = otlp_span
                     .events
                     .as_ref()
-                    .map(|e| serde_json::to_string(e))
+                    .map(serde_json::to_string)
                     .transpose()?;
 
                 conn.execute(
@@ -668,6 +668,7 @@ pub fn list_traces(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn list_traces_filtered(
     pool: &DbPool,
     project_id: Option<i64>,
@@ -691,6 +692,7 @@ pub fn list_traces_filtered(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn list_traces_paginated(
     pool: &DbPool,
     project_id: Option<i64>,
@@ -756,7 +758,7 @@ pub fn list_traces_paginated(
                     root_span_name: row.get(1)?,
                     root_span_type: row
                         .get::<_, Option<String>>(2)?
-                        .and_then(|s| RootSpanType::from_str(&s)),
+                        .and_then(|s| RootSpanType::parse(&s)),
                     duration_ms: row.get(3)?,
                     span_count: row.get(4)?,
                     status_code: row.get(5)?,
@@ -816,6 +818,7 @@ pub fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<TraceDe
         "#,
     )?;
 
+    #[allow(clippy::type_complexity)]
     let spans: Vec<(
         i64,
         String,
@@ -907,7 +910,7 @@ pub fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<TraceDe
                 span_id: s.1.clone(),
                 parent_span_id: s.2.clone(),
                 name: s.3.clone(),
-                category: SpanCategory::from_str(&s.4),
+                category: SpanCategory::parse(&s.4),
                 duration_ms: s.5,
                 offset_ms,
                 offset_percent,
@@ -1030,7 +1033,7 @@ pub fn slow_traces(
                 root_span_name: row.get(1)?,
                 root_span_type: row
                     .get::<_, Option<String>>(2)?
-                    .and_then(|s| RootSpanType::from_str(&s)),
+                    .and_then(|s| RootSpanType::parse(&s)),
                 duration_ms: row.get(3)?,
                 span_count: row.get(4)?,
                 status_code: row.get(5)?,
@@ -1328,7 +1331,7 @@ fn normalize_sql(sql: &str) -> String {
         if in_string {
             // Skip until end of string
             if c == string_char && chars.peek() != Some(&string_char) {
-                result.push_str("?");
+                result.push('?');
                 in_string = false;
             } else if c == string_char && chars.peek() == Some(&string_char) {
                 // Escaped quote
@@ -1566,7 +1569,7 @@ mod tests {
             SpanCategory::Command,
             SpanCategory::Internal,
         ] {
-            assert_eq!(SpanCategory::from_str(category.as_str()), category);
+            assert_eq!(SpanCategory::parse(category.as_str()), category);
         }
     }
 
@@ -1592,9 +1595,9 @@ mod tests {
     #[test]
     fn test_root_span_type_roundtrip() {
         for root_type in [RootSpanType::Web, RootSpanType::Job, RootSpanType::Command] {
-            assert_eq!(RootSpanType::from_str(root_type.as_str()), Some(root_type));
+            assert_eq!(RootSpanType::parse(root_type.as_str()), Some(root_type));
         }
-        assert_eq!(RootSpanType::from_str("invalid"), None);
+        assert_eq!(RootSpanType::parse("invalid"), None);
     }
 
     // TraceSummary display tests

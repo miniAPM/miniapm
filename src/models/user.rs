@@ -108,7 +108,7 @@ pub fn authenticate(pool: &DbPool, username: &str, password: &str) -> anyhow::Re
         Some(ref u)
             if u.password_hash
                 .as_ref()
-                .map_or(false, |h| verify_password(password, h)) =>
+                .is_some_and(|h| verify_password(password, h)) =>
         {
             // Update last login time
             let now = Utc::now().to_rfc3339();

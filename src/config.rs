@@ -77,6 +77,6 @@ impl Config {
     }
 
     pub fn api_key_configured(&self) -> bool {
-        self.api_key.as_ref().map_or(false, |k| !k.is_empty())
+        self.api_key.as_ref().is_some_and(|k| !k.is_empty())
     }
 }

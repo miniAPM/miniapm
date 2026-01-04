@@ -47,7 +47,7 @@ pub async fn index(
     let root_type_filter = query
         .root_type
         .as_deref()
-        .and_then(models::RootSpanType::from_str);
+        .and_then(models::RootSpanType::parse);
 
     let period = query.period.unwrap_or_else(|| "all".to_string());
     let sort = query.sort.unwrap_or_else(|| "recent".to_string());

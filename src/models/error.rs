@@ -146,20 +146,16 @@ pub fn insert(
     };
 
     // Convert IncomingSourceContext to SourceContext for storage
-    let source_context_json = error
-        .source_context
-        .as_ref()
-        .map(|sc| {
-            let ctx = SourceContext {
-                file: sc.file.clone(),
-                lineno: sc.lineno,
-                pre_context: sc.pre_context.clone().unwrap_or_default(),
-                context_line: sc.context_line.clone(),
-                post_context: sc.post_context.clone().unwrap_or_default(),
-            };
-            serde_json::to_string(&ctx).ok()
-        })
-        .flatten();
+    let source_context_json = error.source_context.as_ref().and_then(|sc| {
+        let ctx = SourceContext {
+            file: sc.file.clone(),
+            lineno: sc.lineno,
+            pre_context: sc.pre_context.clone().unwrap_or_default(),
+            context_line: sc.context_line.clone(),
+            post_context: sc.post_context.clone().unwrap_or_default(),
+        };
+        serde_json::to_string(&ctx).ok()
+    });
 
     // Insert occurrence
     conn.execute(
@@ -172,7 +168,7 @@ pub fn insert(
             &error.request_id,
             &error.user_id,
             serde_json::to_string(&error.backtrace)?,
-            error.params.as_ref().map(|p| serde_json::to_string(p).ok()).flatten(),
+            error.params.as_ref().and_then(|p| serde_json::to_string(p).ok()),
             timestamp,
             source_context_json,
         ),
@@ -236,6 +232,7 @@ pub fn list_filtered(
     list_paginated(pool, project_id, status, search, since, sort_by, limit, 0)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn list_paginated(
     pool: &DbPool,
     project_id: Option<i64>,
