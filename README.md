@@ -2,7 +2,7 @@
 
 The smallest useful APM. A single-binary, self-hosted application performance monitor and error tracker built on OpenTelemetry.
 
-![MiniAPM Dashboard](https://github.com/miniapm/miniapm/raw/main/docs/screenshot.png)
+![MiniAPM Dashboard](screenshot.png)
 
 ## Features
 
