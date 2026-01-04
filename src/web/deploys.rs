@@ -3,7 +3,10 @@ use axum::extract::State;
 use tower_cookies::Cookies;
 
 use crate::{
-    models::deploy::{self, Deploy},
+    models::{
+        deploy::{self, Deploy},
+        project,
+    },
     DbPool,
 };
 
@@ -13,6 +16,7 @@ use super::project_context::{get_project_context, WebProjectContext};
 #[template(path = "deploys/index.html")]
 pub struct DeploysTemplate {
     pub deploys: Vec<Deploy>,
+    pub api_key: String,
     pub ctx: WebProjectContext,
 }
 
@@ -21,5 +25,13 @@ pub async fn index(State(pool): State<DbPool>, cookies: Cookies) -> DeploysTempl
     let project_id = ctx.project_id();
     let deploys = deploy::list(&pool, project_id, 50).unwrap_or_default();
 
-    DeploysTemplate { deploys, ctx }
+    let api_key = project::ensure_default_project(&pool)
+        .map(|p| p.api_key)
+        .unwrap_or_else(|_| "YOUR_API_KEY".to_string());
+
+    DeploysTemplate {
+        deploys,
+        api_key,
+        ctx,
+    }
 }
