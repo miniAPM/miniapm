@@ -73,7 +73,7 @@
     <div class="routes-row">
         <div class="col-route">
             <span class="method method-{{ route.method }}">{{ route.method }}</span>
-            <span class="path">{{ route.path }}</span>
+            <a href="/traces?search={{ route.path }}" class="path">{{ route.path }}</a>
         </div>
         <div class="col-requests">
             <div class="bar-container">
