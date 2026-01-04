@@ -25,7 +25,7 @@
     <p class="empty">No deploys recorded yet</p>
     <div class="help-text">
         <p>Record deploys via the API:</p>
-        <pre><code>curl -X POST http://localhost:3000/ingest/deploys \
+        <pre><code>curl -X POST {{ base_url }}/ingest/deploys \
   -H "Authorization: Bearer {{ api_key }}" \
   -H "Content-Type: application/json" \
   -d '{"git_sha": "abc123", "version": "v1.2.3"}'</code></pre>
