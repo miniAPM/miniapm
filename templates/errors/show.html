@@ -2,6 +2,47 @@
 
 {% block title %}Error Details - MiniAPM{% endblock %}
 
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+    [data-theme="light"] .source-code pre code { background: #f6f8fa; }
+    .source-code {
+        display: flex;
+        font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas, monospace;
+        font-size: 13px;
+        line-height: 1.5;
+        overflow-x: auto;
+        border-radius: 6px;
+        background: var(--code-bg, #161b22);
+    }
+    .source-code pre { margin: 0; flex: 1; overflow-x: auto; }
+    .source-code code {
+        display: block;
+        padding: 0.75rem 1rem;
+        background: transparent !important;
+        white-space: pre;
+    }
+    .source-code .hljs { background: transparent !important; padding: 0; }
+    .source-code .line-numbers {
+        display: flex;
+        flex-direction: column;
+        padding: 0.75rem 0.75rem 0.75rem 1rem;
+        text-align: right;
+        color: var(--text-muted);
+        border-right: 1px solid var(--border);
+        user-select: none;
+        background: rgba(0,0,0,0.1);
+    }
+    .source-code .line-numbers span {
+        line-height: 1.5;
+    }
+    .source-code .line-numbers .error-line {
+        color: var(--danger);
+        font-weight: bold;
+    }
+</style>
+{% endblock %}
+
 {% block project_selector %}
 {% if ctx.show_selector() %}
 <form method="POST" action="/projects/switch" class="project-selector">
@@ -127,28 +168,21 @@
             {% endif %}
         </div>
         {% if let Some(sctx) = occ.source_context.as_ref() %}
-        <div class="source-context">
+        <div class="source-context" data-file="{{ sctx.file }}" data-error-line="{{ sctx.lineno }}">
             <div class="source-header">
                 <span class="source-file">{{ sctx.file }}</span>
                 <span class="source-lineno">line {{ sctx.lineno }}</span>
             </div>
             <div class="source-code">
-                {% for line in sctx.pre_context_with_lines() %}
-                <div class="source-line">
-                    <span class="line-number">{{ line.0 }}</span>
-                    <span class="line-content">{{ line.1 }}</span>
-                </div>
-                {% endfor %}
-                <div class="source-line source-line-error">
-                    <span class="line-number">{{ sctx.lineno }}</span>
-                    <span class="line-content">{{ sctx.context_line }}</span>
-                </div>
-                {% for line in sctx.post_context_with_lines() %}
-                <div class="source-line">
-                    <span class="line-number">{{ line.0 }}</span>
-                    <span class="line-content">{{ line.1 }}</span>
-                </div>
-                {% endfor %}
+                <div class="line-numbers">
+{% for line in sctx.pre_context_with_lines() %}<span>{{ line.0 }}</span>
+{% endfor %}<span class="error-line">{{ sctx.lineno }}</span>
+{% for line in sctx.post_context_with_lines() %}<span>{{ line.0 }}</span>
+{% endfor %}</div>
+                <pre><code>{% for line in sctx.pre_context_with_lines() %}{{ line.1 }}
+{% endfor %}{{ sctx.context_line }}
+{% for line in sctx.post_context_with_lines() %}{{ line.1 }}
+{% endfor %}</code></pre>
             </div>
         </div>
         {% endif %}
@@ -163,4 +197,39 @@
 <h1>Error not found</h1>
 <p><a href="/errors">Back to errors</a></p>
 {% endmatch %}
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ruby.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/typescript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/go.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script>
+<script>
+(function() {
+    const extToLang = {
+        'rb': 'ruby', 'erb': 'ruby',
+        'py': 'python',
+        'js': 'javascript', 'jsx': 'javascript', 'mjs': 'javascript',
+        'ts': 'typescript', 'tsx': 'typescript',
+        'go': 'go',
+        'rs': 'rust'
+    };
+
+    document.querySelectorAll('.source-context').forEach(ctx => {
+        const file = ctx.dataset.file || '';
+        const ext = file.split('.').pop().toLowerCase();
+        const lang = extToLang[ext] || '';
+        const code = ctx.querySelector('code');
+        if (code && lang) {
+            code.classList.add('language-' + lang);
+        }
+        if (code) {
+            hljs.highlightElement(code);
+        }
+    });
+})();
+</script>
 {% endblock %}

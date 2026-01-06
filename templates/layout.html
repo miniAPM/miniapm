@@ -7,6 +7,7 @@
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon.png">
     <link rel="stylesheet" href="/static/style.css">
+    {% block extra_head %}{% endblock %}
     <script>
         (function() {
             const theme = localStorage.getItem('theme') || 'dark';
@@ -89,5 +90,6 @@
             }
         });
     </script>
+    {% block extra_scripts %}{% endblock %}
 </body>
 </html>
