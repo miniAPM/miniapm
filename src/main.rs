@@ -40,10 +40,6 @@ enum Commands {
         #[arg(long)]
         once: bool,
     },
-    /// Start the MCP server (stdio)
-    Mcp,
-    /// Print MCP configuration for Claude Desktop
-    McpConfig,
 }
 
 #[tokio::main]
@@ -115,46 +111,6 @@ async fn main() -> anyhow::Result<()> {
             } else {
                 simulator::run(&config, requests_per_minute, error_rate, !once).await?;
             }
-        }
-        Some(Commands::Mcp) => {
-            let pool = db::init(&config)?;
-            miniapm::mcp::run(pool).await?;
-        }
-        Some(Commands::McpConfig) => {
-            let exe_path = std::env::current_exe()?;
-            let pool = db::init(&config)?;
-            let default_project = miniapm::models::project::ensure_default_project(&pool)?;
-
-            println!("# MCP Configuration for MiniAPM\n");
-            println!("## Option 1: Stdio (for Claude Desktop)\n");
-            println!("Add to ~/.config/claude/claude_desktop_config.json:\n");
-
-            let stdio_config = serde_json::json!({
-                "mcpServers": {
-                    "miniapm": {
-                        "command": exe_path.to_string_lossy(),
-                        "args": ["mcp"],
-                        "env": {
-                            "SQLITE_PATH": config.sqlite_path
-                        }
-                    }
-                }
-            });
-            println!("{}\n", serde_json::to_string_pretty(&stdio_config)?);
-
-            println!("## Option 2: HTTP (for remote access)\n");
-            println!("Endpoint: POST {}/mcp", config.mini_apm_url);
-            println!("Authorization: Bearer {}\n", default_project.api_key);
-            println!("Example request:");
-            println!("```bash");
-            println!("curl -X POST {}/mcp \\", config.mini_apm_url);
-            println!(
-                "  -H 'Authorization: Bearer {}' \\",
-                default_project.api_key
-            );
-            println!("  -H 'Content-Type: application/json' \\");
-            println!("  -d '{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}}'");
-            println!("```");
         }
         None => {
             // Default to server

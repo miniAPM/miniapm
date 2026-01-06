@@ -54,14 +54,6 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
                     api::auth_middleware,
                 )),
         )
-        // MCP API (with API key auth)
-        .route(
-            "/mcp",
-            post(api::mcp_handler).layer(middleware::from_fn_with_state(
-                pool.clone(),
-                api::auth_middleware,
-            )),
-        )
         // Auth routes (always available)
         .merge(web::auth_routes())
         // Web UI (protected when user accounts enabled)
