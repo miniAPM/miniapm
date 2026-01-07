@@ -1,22 +1,17 @@
 use clap::{Parser, Subcommand};
-use miniapm::{config::Config, db, server};
+use miniapm::{config::Config, db};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
 #[command(name = "miniapm")]
-#[command(about = "Minimal APM for Rails", version)]
+#[command(about = "MiniAPM CLI", version)]
 struct Cli {
     #[command(subcommand)]
-    command: Option<Commands>,
+    command: Commands,
 }
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Start the MiniAPM server
-    Server {
-        #[arg(short, long, default_value = "3000")]
-        port: u16,
-    },
     /// Create a new API key
     CreateKey {
         /// Name for the API key
@@ -28,12 +23,11 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "miniapm=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "miniapm=info".into()),
         )
         .init();
 
@@ -41,11 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env()?;
 
     match cli.command {
-        Some(Commands::Server { port }) => {
-            let pool = db::init(&config)?;
-            server::run(pool, config, port).await?;
-        }
-        Some(Commands::CreateKey { name }) => {
+        Commands::CreateKey { name } => {
             let pool = db::init(&config)?;
             let key = miniapm::models::api_key::create(&pool, &name)?;
             println!("API Key created successfully!\n");
@@ -53,7 +43,7 @@ async fn main() -> anyhow::Result<()> {
             println!("Key:  {}", key);
             println!("\nStore this key securely - it cannot be retrieved later.");
         }
-        Some(Commands::ListKeys) => {
+        Commands::ListKeys => {
             let pool = db::init(&config)?;
             let keys = miniapm::models::api_key::list(&pool)?;
             if keys.is_empty() {
@@ -69,11 +59,6 @@ async fn main() -> anyhow::Result<()> {
                     );
                 }
             }
-        }
-        None => {
-            // Default to server
-            let pool = db::init(&config)?;
-            server::run(pool, config, 3000).await?;
         }
     }
 

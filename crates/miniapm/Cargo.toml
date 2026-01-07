@@ -7,6 +7,10 @@ publish = false
 [lib]
 path = "src/lib.rs"
 
+[[bin]]
+name = "miniapm-server"
+path = "src/bin/server/main.rs"
+
 [dependencies]
 tokio = { version = "1", features = ["full"] }
 axum = "0.7"
