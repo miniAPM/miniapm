@@ -11,7 +11,6 @@ The smallest useful APM. A single-binary, self-hosted application performance mo
 - **Route Performance** - P50, P95, P99 latencies with request counts and error rates
 - **N+1 Query Detection** - Automatically identifies repeated query patterns
 - **Deploy Tracking** - Correlate releases with performance changes
-- **MCP Integration** - Built-in Model Context Protocol server for AI assistants
 
 ## Quick Start
 
@@ -31,8 +30,13 @@ INFO miniapm::server: Single-project mode - API key: proj_abc123...
 ```bash
 git clone https://github.com/miniapm/miniapm
 cd miniapm
-cargo build --release
-./target/release/miniapm server
+
+# Run the server
+cargo run -p miniapm
+
+# Or build and run
+cargo build --release -p miniapm
+./target/release/miniapm
 ```
 
 ## Sending Data
@@ -121,36 +125,16 @@ Default admin credentials on first run:
 - Username: `admin`
 - Password: `admin` (you'll be prompted to change it)
 
-## MCP Integration
-
-MiniAPM includes a Model Context Protocol server for AI assistants like Claude.
-
-### Stdio Mode (Claude Desktop)
-
-Run `miniapm mcp-config` to get the configuration for Claude Desktop.
-
-### HTTP Mode
-
-```bash
-curl -X POST http://localhost:3000/mcp \
-  -H "Authorization: Bearer proj_abc123..." \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-```
-
-Available tools:
-- `list_errors` - List recent errors with filtering
-- `error_details` - Get full error details with stack trace
-- `slow_routes` - Find slowest routes by P95 latency
-- `system_status` - Get system health overview
-
 ## CLI Commands
 
 ```bash
-miniapm server              # Start the server (default port 3000)
-miniapm server -p 8080      # Start on custom port
-miniapm create-key <name>   # Create a new API key
-miniapm list-keys           # List all API keys
+# Server (main binary)
+miniapm                      # Start server (default port 3000)
+miniapm -p 8080              # Start on custom port
+
+# CLI tools
+miniapm-cli create-key <name>   # Create a new API key
+miniapm-cli list-keys           # List all API keys
 ```
 
 ## Docker Compose
@@ -173,7 +157,8 @@ volumes:
 
 ## Architecture
 
-- **Single binary** (~4MB) - No external dependencies
+- **miniapm** - Server binary with ingestion API and web dashboard
+- **miniapm-cli** - CLI tools for key management
 - **SQLite storage** - Zero-config, automatic migrations
 - **Rust/Axum** - Fast, memory-efficient
 - **OTLP/HTTP** - Standard OpenTelemetry protocol
@@ -181,14 +166,15 @@ volumes:
 ## Development
 
 ```bash
-# Run with hot reload
-cargo watch -x run
+# Run the server
+cargo run -p miniapm
+
+# Run CLI commands
+cargo run -p miniapm-cli -- create-key mykey
+cargo run -p miniapm-cli -- list-keys
 
 # Run tests
 cargo test
-
-# Run with simulator
-cargo run -- simulate --continuous --requests-per-minute 60
 ```
 
 ## License
