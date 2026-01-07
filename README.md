@@ -149,12 +149,8 @@ Available tools:
 ```bash
 miniapm server              # Start the server (default port 3000)
 miniapm server -p 8080      # Start on custom port
-miniapm migrate             # Run database migrations
 miniapm create-key <name>   # Create a new API key
 miniapm list-keys           # List all API keys
-miniapm mcp                 # Start MCP server (stdio)
-miniapm mcp-config          # Print MCP configuration
-miniapm simulate            # Run data simulator for testing
 ```
 
 ## Docker Compose

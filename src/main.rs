@@ -17,8 +17,6 @@ enum Commands {
         #[arg(short, long, default_value = "3000")]
         port: u16,
     },
-    /// Run database migrations
-    Migrate,
     /// Create a new API key
     CreateKey {
         /// Name for the API key
@@ -46,10 +44,6 @@ async fn main() -> anyhow::Result<()> {
         Some(Commands::Server { port }) => {
             let pool = db::init(&config)?;
             server::run(pool, config, port).await?;
-        }
-        Some(Commands::Migrate) => {
-            let _pool = db::init(&config)?;
-            tracing::info!("Database migrated successfully");
         }
         Some(Commands::CreateKey { name }) => {
             let pool = db::init(&config)?;
