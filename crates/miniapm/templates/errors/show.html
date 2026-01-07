@@ -1,0 +1,166 @@
+{% extends "layout.html" %}
+
+{% block title %}Error Details - MiniAPM{% endblock %}
+
+{% block project_selector %}
+{% if ctx.show_selector() %}
+<form method="POST" action="/projects/switch" class="project-selector">
+    <select name="slug" onchange="this.form.submit()">
+        {% for project in ctx.projects %}
+        <option value="{{ project.slug }}" {% if ctx.is_current_project(project.id) %}selected{% endif %}>
+            {{ project.name }}
+        </option>
+        {% endfor %}
+    </select>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% match error %}
+{% when Some with (e) %}
+<h1>{{ e.exception_class }}</h1>
+
+<div class="error-header">
+    <div class="error-meta">
+        <span class="badge badge-{{ e.status }}">{{ e.status }}</span>
+        <span>{{ e.occurrence_count }} occurrences</span>
+        <span>First: {{ e.first_seen_at }}</span>
+        <span>Last: {{ e.last_seen_at }}</span>
+        {% if !trend_24h.is_empty() %}
+        <span class="error-sparkline-container">
+            <span class="sparkline-label">24h:</span>
+            <canvas id="errorSparkline" width="100" height="24"></canvas>
+        </span>
+        {% endif %}
+    </div>
+    <div class="error-actions">
+        {% if e.status != "resolved" %}
+        <form method="POST" action="/errors/{{ e.id }}/status" class="inline-status-form">
+            <input type="hidden" name="status" value="resolved">
+            <button type="submit" class="btn btn-success btn-sm">Mark Resolved</button>
+        </form>
+        {% endif %}
+        {% if e.status != "ignored" %}
+        <form method="POST" action="/errors/{{ e.id }}/status" class="inline-status-form">
+            <input type="hidden" name="status" value="ignored">
+            <button type="submit" class="btn btn-muted btn-sm">Ignore</button>
+        </form>
+        {% endif %}
+        {% if e.status != "open" %}
+        <form method="POST" action="/errors/{{ e.id }}/status" class="inline-status-form">
+            <input type="hidden" name="status" value="open">
+            <button type="submit" class="btn btn-outline btn-sm">Reopen</button>
+        </form>
+        {% endif %}
+    </div>
+</div>
+
+{% if !trend_24h.is_empty() %}
+<script>
+(function() {
+    const data = [{% for val in trend_24h %}{{ val }},{% endfor %}];
+    const canvas = document.getElementById('errorSparkline');
+    if (!canvas || data.length === 0) return;
+
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const width = 100;
+    const height = 24;
+
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = width + 'px';
+    canvas.style.height = height + 'px';
+    ctx.scale(dpr, dpr);
+
+    const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim() || '#e74c3c';
+    const maxVal = Math.max(...data, 1);
+    const stepX = width / (data.length - 1 || 1);
+    const padding = 2;
+    const chartHeight = height - padding * 2;
+
+    // Draw area fill
+    ctx.fillStyle = dangerColor + '30';
+    ctx.beginPath();
+    ctx.moveTo(0, height - padding);
+    data.forEach((val, i) => {
+        const x = i * stepX;
+        const y = padding + chartHeight - (val / maxVal) * chartHeight;
+        ctx.lineTo(x, y);
+    });
+    ctx.lineTo(width, height - padding);
+    ctx.closePath();
+    ctx.fill();
+
+    // Draw line
+    ctx.strokeStyle = dangerColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    data.forEach((val, i) => {
+        const x = i * stepX;
+        const y = padding + chartHeight - (val / maxVal) * chartHeight;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+})();
+</script>
+{% endif %}
+
+<div class="card">
+    <h2>Message</h2>
+    <pre class="error-message">{{ e.message }}</pre>
+</div>
+
+<div class="card">
+    <h2>Recent Occurrences</h2>
+    {% if occurrences.is_empty() %}
+    <p class="empty">No occurrences found</p>
+    {% else %}
+    {% for occ in occurrences %}
+    <div class="occurrence">
+        <div class="occurrence-header">
+            <span>{{ occ.happened_at }}</span>
+            {% if let Some(user_id) = occ.user_id.as_ref() %}
+            <span>User: {{ user_id }}</span>
+            {% endif %}
+        </div>
+        {% if let Some(sctx) = occ.source_context.as_ref() %}
+        <div class="source-context">
+            <div class="source-header">
+                <span class="source-file">{{ sctx.file }}</span>
+                <span class="source-lineno">line {{ sctx.lineno }}</span>
+            </div>
+            <div class="source-code">
+                {% for line in sctx.pre_context_with_lines() %}
+                <div class="source-line">
+                    <span class="line-number">{{ line.0 }}</span>
+                    <span class="line-content">{{ line.1 }}</span>
+                </div>
+                {% endfor %}
+                <div class="source-line source-line-error">
+                    <span class="line-number">{{ sctx.lineno }}</span>
+                    <span class="line-content">{{ sctx.context_line }}</span>
+                </div>
+                {% for line in sctx.post_context_with_lines() %}
+                <div class="source-line">
+                    <span class="line-number">{{ line.0 }}</span>
+                    <span class="line-content">{{ line.1 }}</span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        <pre class="backtrace">{% for line in occ.backtrace %}{{ line }}
+{% endfor %}</pre>
+    </div>
+    {% endfor %}
+    {% endif %}
+</div>
+
+{% when None %}
+<h1>Error not found</h1>
+<p><a href="/errors">Back to errors</a></p>
+{% endmatch %}
+{% endblock %}

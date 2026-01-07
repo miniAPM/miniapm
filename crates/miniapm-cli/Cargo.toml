@@ -1,0 +1,12 @@
+[package]
+name = "miniapm-cli"
+edition = "2024"
+version.workspace = true
+publish = false
+
+[dependencies]
+miniapm = { path = "../miniapm" }
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"

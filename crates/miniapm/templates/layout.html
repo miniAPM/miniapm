@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}MiniAPM{% endblock %}</title>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/images/favicon.png">
+    <link rel="stylesheet" href="/static/style.css">
+    <script>
+        (function() {
+            const theme = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', theme);
+        })();
+    </script>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-left">
+            <a href="/" class="nav-brand">
+                <svg class="nav-logo-icon" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <rect x="2" y="22" width="7" height="16" rx="2" fill="currentColor"/>
+                    <rect x="12" y="14" width="7" height="24" rx="2" fill="currentColor"/>
+                    <rect x="22" y="6" width="7" height="32" rx="2" fill="currentColor"/>
+                    <rect x="32" y="18" width="7" height="20" rx="2" fill="var(--accent)"/>
+                    <circle cx="35.5" cy="8" r="3" fill="var(--accent)"/>
+                </svg>
+                <span class="nav-logo-text">mini<span>APM</span></span>
+            </a>
+            {% block project_selector %}{% endblock %}
+        </div>
+        <ul class="nav-links">
+            <li><a href="/">Dashboard</a></li>
+            <li><a href="/errors">Errors</a></li>
+            <li><a href="/traces">Traces</a></li>
+            <li><a href="/performance">Routes</a></li>
+            <li><a href="/deploys">Deploys</a></li>
+        </ul>
+        <div class="nav-right">
+            <div class="nav-menu">
+                <button class="nav-menu-trigger" onclick="toggleNavMenu()" title="Settings">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"></path>
+                    </svg>
+                </button>
+                <div class="nav-menu-dropdown" id="navMenuDropdown">
+                    <a href="/auth/users">Users</a>
+                    {% if ctx.projects_enabled %}
+                    <a href="/projects">Projects</a>
+                    {% else %}
+                    <a href="/api-key">API Key</a>
+                    {% endif %}
+                    <div class="nav-menu-divider"></div>
+                    <button onclick="toggleTheme(); toggleNavMenu();" class="nav-menu-item">
+                        <span>Theme</span>
+                        <span class="theme-icon"></span>
+                    </button>
+                    <div class="nav-menu-divider"></div>
+                    <form method="POST" action="/auth/logout" class="nav-menu-form">
+                        <button type="submit">Logout</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </nav>
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+    <script>
+        function toggleTheme() {
+            const html = document.documentElement;
+            const current = html.getAttribute('data-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            html.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+        }
+
+        function toggleNavMenu() {
+            const dropdown = document.getElementById('navMenuDropdown');
+            dropdown.classList.toggle('open');
+        }
+
+        document.addEventListener('click', function(e) {
+            const menu = document.querySelector('.nav-menu');
+            const dropdown = document.getElementById('navMenuDropdown');
+            if (menu && !menu.contains(e.target)) {
+                dropdown.classList.remove('open');
+            }
+        });
+    </script>
+</body>
+</html>

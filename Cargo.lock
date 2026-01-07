@@ -1054,6 +1054,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "miniapm-cli"
+version = "1.2.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "miniapm",
+ "tokio",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

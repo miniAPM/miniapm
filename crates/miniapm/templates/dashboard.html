@@ -1,0 +1,284 @@
+{% extends "layout.html" %}
+
+{% block title %}Dashboard - MiniAPM{% endblock %}
+
+{% block project_selector %}
+{% if ctx.show_selector() %}
+<form method="POST" action="/projects/switch" class="project-selector">
+    <select name="slug" onchange="this.form.submit()">
+        {% for project in ctx.projects %}
+        <option value="{{ project.slug }}" {% if ctx.is_current_project(project.id) %}selected{% endif %}>
+            {{ project.name }}
+        </option>
+        {% endfor %}
+    </select>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="stats-grid stats-grid-5">
+    <div class="stat-card">
+        <div class="stat-value">{{ requests_24h }}</div>
+        <div class="stat-label">Requests (24h)</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ errors_24h }}</div>
+        <div class="stat-label">Errors (24h)</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ avg_ms }} ms</div>
+        <div class="stat-label">Avg Response</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ p95_ms }} ms</div>
+        <div class="stat-label">p95 Latency</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ p99_ms }} ms</div>
+        <div class="stat-label">p99 Latency</div>
+    </div>
+</div>
+
+<div class="grid-2">
+    <section class="card chart-card">
+        <h2>Traffic (24h)</h2>
+        <div class="chart-container" id="traffic-chart">
+            {% if requests_24h == 0 %}
+            <div class="chart-empty">No data yet</div>
+            {% else %}
+            <canvas id="trafficCanvas"></canvas>
+            {% endif %}
+        </div>
+    </section>
+    <section class="card chart-card">
+        <h2>Avg Latency (24h)</h2>
+        <div class="chart-container" id="latency-chart">
+            {% if requests_24h == 0 %}
+            <div class="chart-empty">No data yet</div>
+            {% else %}
+            <canvas id="latencyCanvas"></canvas>
+            {% endif %}
+        </div>
+    </section>
+</div>
+
+<div class="grid-2">
+    <section class="card">
+        <h2>Recent Errors</h2>
+        {% if recent_errors.is_empty() %}
+        <p class="empty">No errors in the last 24 hours</p>
+        {% else %}
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Exception</th>
+                        <th class="num">Count</th>
+                        <th>Last Seen</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for error in recent_errors %}
+                    <tr>
+                        <td><a href="/errors/{{ error.id }}">{{ error.exception_class }}</a></td>
+                        <td class="num">{{ error.occurrence_count }}</td>
+                        <td>{{ error.last_seen_at }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <h2>Slow Requests</h2>
+        {% if slow_requests.is_empty() %}
+        <p class="empty">No slow requests (>500ms)</p>
+        {% else %}
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Route</th>
+                        <th class="num">Time</th>
+                        <th>When</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for req in slow_requests %}
+                    <tr>
+                        <td class="route-cell"><a href="/traces/{{ req.trace_id }}">{{ req.display_name() }}</a></td>
+                        <td class="num">{{ req.duration_ms_rounded() }}ms</td>
+                        <td>{{ req.happened_at }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <a href="/traces?min_duration=500&sort=duration" class="card-link">View all slow requests</a>
+        {% endif %}
+    </section>
+</div>
+
+{% if requests_24h > 0 %}
+<script>
+(function() {
+    const data = [
+        {% for point in hourly_stats %}
+        { label: "{{ point.hour }}", requests: {{ point.count }}, avg_ms: {{ point.avg_ms }} },
+        {% endfor %}
+    ];
+
+    const deploys = [
+        {% for deploy in deploys %}
+        { time: "{{ deploy.deployed_at }}", sha: "{{ deploy.git_sha }}", version: "{{ deploy.version.as_deref().unwrap_or("") }}" },
+        {% endfor %}
+    ];
+
+    const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#6b9fdb';
+    const warningColor = getComputedStyle(document.documentElement).getPropertyValue('--warning').trim() || '#e5b857';
+    const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b95a8';
+    const bgColor = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1f2e';
+    const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#e67e22';
+
+    function drawChart(canvasId, values, color, unit, showDeploys = false) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || values.length === 0) return;
+
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.parentElement.getBoundingClientRect();
+
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = rect.height + 'px';
+        ctx.scale(dpr, dpr);
+
+        const width = rect.width;
+        const height = rect.height;
+        const padding = { top: 10, right: 10, bottom: 25, left: 45 };
+        const chartWidth = width - padding.left - padding.right;
+        const chartHeight = height - padding.top - padding.bottom;
+
+        const maxVal = Math.max(...values, 1);
+        const stepX = chartWidth / (values.length - 1 || 1);
+
+        // Draw grid lines
+        ctx.strokeStyle = bgColor;
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const y = padding.top + (chartHeight / 4) * i;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(width - padding.right, y);
+            ctx.stroke();
+        }
+
+        // Draw line
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        values.forEach((val, i) => {
+            const x = padding.left + i * stepX;
+            const y = padding.top + chartHeight - (val / maxVal) * chartHeight;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // Draw area fill
+        ctx.fillStyle = color + '20';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, padding.top + chartHeight);
+        values.forEach((val, i) => {
+            const x = padding.left + i * stepX;
+            const y = padding.top + chartHeight - (val / maxVal) * chartHeight;
+            ctx.lineTo(x, y);
+        });
+        ctx.lineTo(padding.left + (values.length - 1) * stepX, padding.top + chartHeight);
+        ctx.closePath();
+        ctx.fill();
+
+        // Draw Y axis labels
+        ctx.fillStyle = textMuted;
+        ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const val = Math.round(maxVal * (4 - i) / 4);
+            const y = padding.top + (chartHeight / 4) * i + 3;
+            ctx.fillText(val + unit, padding.left - 5, y);
+        }
+
+        // Draw X axis labels (show every few, just the hour)
+        ctx.textAlign = 'center';
+        const labelStep = Math.ceil(data.length / 6);
+        data.forEach((d, i) => {
+            if (i % labelStep === 0 || i === data.length - 1) {
+                const x = padding.left + i * stepX;
+                // Extract just the hour from "2026-01-04 01:00" format
+                const hour = d.label.split(' ')[1] || d.label;
+                ctx.fillText(hour, x, height - 5);
+            }
+        });
+
+        // Draw deploy markers
+        if (showDeploys && deploys.length > 0) {
+            ctx.strokeStyle = accentColor;
+            ctx.setLineDash([4, 4]);
+            ctx.lineWidth = 1.5;
+
+            deploys.forEach(deploy => {
+                // Find the closest data point by matching hour
+                const deployHour = deploy.time.substring(11, 13);
+                let closestIdx = -1;
+                for (let i = 0; i < data.length; i++) {
+                    if (data[i].label === deployHour + ':00') {
+                        closestIdx = i;
+                        break;
+                    }
+                }
+                if (closestIdx >= 0) {
+                    const x = padding.left + closestIdx * stepX;
+                    ctx.beginPath();
+                    ctx.moveTo(x, padding.top);
+                    ctx.lineTo(x, padding.top + chartHeight);
+                    ctx.stroke();
+
+                    // Draw deploy marker icon
+                    ctx.setLineDash([]);
+                    ctx.fillStyle = accentColor;
+                    ctx.beginPath();
+                    ctx.moveTo(x, padding.top);
+                    ctx.lineTo(x - 5, padding.top - 8);
+                    ctx.lineTo(x + 5, padding.top - 8);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.setLineDash([4, 4]);
+                }
+            });
+            ctx.setLineDash([]);
+        }
+    }
+
+    drawChart('trafficCanvas', data.map(d => d.requests), primaryColor, '', true);
+    drawChart('latencyCanvas', data.map(d => d.avg_ms), warningColor, 'ms', true);
+
+    // Redraw on theme change
+    const observer = new MutationObserver(() => {
+        setTimeout(() => {
+            drawChart('trafficCanvas', data.map(d => d.requests),
+                getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#6b9fdb', '', true);
+            drawChart('latencyCanvas', data.map(d => d.avg_ms),
+                getComputedStyle(document.documentElement).getPropertyValue('--warning').trim() || '#e5b857', 'ms', true);
+        }, 50);
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>
+{% endif %}
+{% endblock %}

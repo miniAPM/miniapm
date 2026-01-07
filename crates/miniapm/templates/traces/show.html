@@ -1,0 +1,204 @@
+{% extends "layout.html" %}
+
+{% block title %}Trace Details - MiniAPM{% endblock %}
+
+{% block project_selector %}
+{% if ctx.show_selector() %}
+<form method="POST" action="/projects/switch" class="project-selector">
+    <select name="slug" onchange="this.form.submit()">
+        {% for project in ctx.projects %}
+        <option value="{{ project.slug }}" {% if ctx.is_current_project(project.id) %}selected{% endif %}>
+            {{ project.name }}
+        </option>
+        {% endfor %}
+    </select>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% match trace %}
+{% when Some with (t) %}
+<h1>Trace Details</h1>
+
+<div class="trace-meta">
+    <p><strong>Trace ID:</strong> <code>{{ t.trace_id }}</code></p>
+    <p><strong>Total Duration:</strong> {{ "{:.2}"|format(t.total_duration_ms) }}ms</p>
+    <p><strong>Span Count:</strong> {{ t.spans.len() }}</p>
+    {% if let Some(root) = t.root_span.as_ref() %}
+    <p><strong>Root Span:</strong> {{ root.name }}</p>
+    {% endif %}
+</div>
+
+{% if !n_plus_1_issues.is_empty() %}
+<div class="alert alert-warning">
+    <h3>N+1 Query Detected</h3>
+    <p>This trace contains repeated database queries that may indicate an N+1 problem.</p>
+    <div class="n-plus-1-list">
+        {% for issue in n_plus_1_issues %}
+        <div class="n-plus-1-item">
+            <div class="n-plus-1-header">
+                <span class="n-plus-1-count">{{ issue.count }} queries</span>
+                <span class="n-plus-1-duration">{{ "{:.2}"|format(issue.total_duration_ms) }}ms total</span>
+            </div>
+            <pre class="n-plus-1-pattern">{{ issue.pattern }}</pre>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="card">
+    <h2>Waterfall</h2>
+    <div class="waterfall">
+        {% for span in t.spans %}
+        <div class="waterfall-row" style="--depth: {{ span.depth }};">
+            <div class="waterfall-label">
+                <span class="span-indent" style="width: {{ span.depth * 16 }}px;"></span>
+                <span class="span-category span-{{ span.category.as_str() }}">{{ span.category.as_str() }}</span>
+                <span class="span-name" title="{{ span.name }}">
+                    {% if let Some(method) = span.http_method.as_ref() %}
+                    <strong>{{ method }}</strong>
+                    {% endif %}
+                    {% if let Some(op) = span.db_operation.as_ref() %}
+                    <strong>{{ op }}</strong>
+                    {% endif %}
+                    {{ span.name }}
+                </span>
+            </div>
+            <div class="waterfall-bar-container">
+                <div class="waterfall-bar span-{{ span.category.as_str() }}"
+                     style="left: {{ "{:.2}"|format(span.offset_percent) }}%; width: {{ "{:.2}"|format(span.width_percent.max(0.5)) }}%;"
+                     title="{{ "{:.2}"|format(span.duration_ms) }}ms">
+                </div>
+                <span class="waterfall-duration">{{ "{:.2}"|format(span.duration_ms) }}ms</span>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<div class="card">
+    <h2>Span Details</h2>
+    <div class="span-list">
+        {% for span in t.spans %}
+        {% let has_details = span.db_statement.is_some() || span.http_status_code.is_some() %}
+        <div class="span-item{% if has_details %} span-expandable{% endif %}" data-span-id="{{ span.span_id }}">
+            <div class="span-row{% if has_details %} span-clickable{% endif %}">
+                <div class="span-name-col">
+                    <span style="display: inline-block; width: {{ span.depth * 12 }}px;"></span>
+                    {% if has_details %}<span class="span-toggle">+</span>{% endif %}
+                    {{ span.name }}
+                </div>
+                <div class="span-category-col">
+                    <span class="badge badge-{{ span.category.as_str() }}">{{ span.category.as_str() }}</span>
+                </div>
+                <div class="span-duration-col num">{{ "{:.2}"|format(span.duration_ms) }}ms</div>
+                <div class="span-offset-col num">+{{ "{:.2}"|format(span.offset_ms) }}ms</div>
+                <div class="span-preview-col">
+                    {% if let Some(code) = span.http_status_code %}
+                    <span class="status-code" data-code="{{ code }}">{{ code }}</span>
+                    {% endif %}
+                    {% if let Some(system) = span.db_system.as_ref() %}
+                    <span class="db-system">{{ system }}</span>
+                    {% endif %}
+                    {% if let Some(stmt) = span.db_statement.as_ref() %}
+                    <span class="span-preview-text">{{ stmt }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% if has_details %}
+            <div class="span-details" style="display: none;">
+                {% if let Some(stmt) = span.db_statement.as_ref() %}
+                <div class="span-detail-section">
+                    <div class="span-detail-header">
+                        <span class="span-detail-label">SQL Statement</span>
+                        <button class="copy-btn-small" onclick="copyToClipboard(this, `{{ stmt|e }}`)" title="Copy">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                        </button>
+                    </div>
+                    <div class="span-detail-content">
+                        <pre class="span-detail-code">{{ stmt }}</pre>
+                    </div>
+                </div>
+                {% endif %}
+                {% if span.http_method.is_some() || span.http_status_code.is_some() %}
+                <div class="span-detail-section">
+                    <div class="span-detail-header">
+                        <span class="span-detail-label">HTTP Details</span>
+                    </div>
+                    <div class="span-detail-info">
+                        {% if let Some(method) = span.http_method.as_ref() %}
+                        <span><strong>Method:</strong> {{ method }}</span>
+                        {% endif %}
+                        {% if let Some(code) = span.http_status_code %}
+                        <span><strong>Status:</strong> {{ code }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+                {% if let Some(system) = span.db_system.as_ref() %}
+                <div class="span-detail-section">
+                    <div class="span-detail-info">
+                        <span><strong>Database:</strong> {{ system }}</span>
+                        {% if let Some(op) = span.db_operation.as_ref() %}
+                        <span><strong>Operation:</strong> {{ op }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+function copyToClipboard(btn, text) {
+    navigator.clipboard.writeText(text).then(() => {
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.innerHTML = originalHtml;
+            btn.classList.remove('copied');
+        }, 1500);
+    });
+}
+
+document.querySelectorAll('.span-clickable').forEach(row => {
+    row.addEventListener('click', (e) => {
+        if (e.target.closest('.copy-btn-small')) return;
+        const item = row.closest('.span-item');
+        const details = item.querySelector('.span-details');
+        const toggle = row.querySelector('.span-toggle');
+        if (details) {
+            const isHidden = details.style.display === 'none';
+            details.style.display = isHidden ? 'block' : 'none';
+            if (toggle) toggle.textContent = isHidden ? '−' : '+';
+            item.classList.toggle('span-expanded', isHidden);
+        }
+    });
+});
+
+// Apply status code colors based on data attribute
+document.querySelectorAll('.status-code[data-code]').forEach(el => {
+    const code = parseInt(el.dataset.code, 10);
+    if (code >= 500) el.classList.add('status-error');
+    else if (code >= 400) el.classList.add('status-error');
+    else if (code >= 300) el.classList.add('status-redirect');
+    else el.classList.add('status-ok');
+});
+</script>
+
+<p><a href="/traces">Back to traces</a></p>
+
+{% when None %}
+<h1>Trace not found</h1>
+<p><a href="/traces">Back to traces</a></p>
+{% endmatch %}
+{% endblock %}
