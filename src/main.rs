@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use miniapm::{config::Config, db, server, simulator};
+use miniapm::{config::Config, db, server};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
@@ -26,20 +26,6 @@ enum Commands {
     },
     /// List all API keys
     ListKeys,
-    /// Run the data simulator
-    Simulate {
-        #[arg(short, long, default_value = "60")]
-        requests_per_minute: u32,
-        #[arg(short, long, default_value = "0.02")]
-        error_rate: f64,
-        #[arg(long)]
-        backfill: bool,
-        #[arg(long, default_value = "7")]
-        days: u32,
-        /// Run only once instead of continuously
-        #[arg(long)]
-        once: bool,
-    },
 }
 
 #[tokio::main]
@@ -88,28 +74,6 @@ async fn main() -> anyhow::Result<()> {
                         k.last_used_at.as_deref().unwrap_or("never")
                     );
                 }
-            }
-        }
-        Some(Commands::Simulate {
-            requests_per_minute,
-            error_rate,
-            backfill,
-            days,
-            once,
-        }) => {
-            // Get API key from database if not set via env var
-            let mut config = config;
-            if config.api_key.is_none() {
-                let pool = db::init(&config)?;
-                let default_project = miniapm::models::project::ensure_default_project(&pool)?;
-                config.api_key = Some(default_project.api_key);
-                tracing::info!("Using API key from default project");
-            }
-
-            if backfill {
-                simulator::backfill(&config, days, requests_per_minute * 60 * 24).await?;
-            } else {
-                simulator::run(&config, requests_per_minute, error_rate, !once).await?;
             }
         }
         None => {
