@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/miniapm", "crates/miniapm-cli"]
+members = ["crates/miniapm", "crates/miniapm-cli", "crates/miniapm-admin"]
 
 [workspace.package]
 version = "1.2.0"

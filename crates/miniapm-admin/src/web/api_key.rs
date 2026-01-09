@@ -5,7 +5,7 @@ use axum::{
 };
 use tower_cookies::Cookies;
 
-use crate::{DbPool, models::project};
+use miniapm::{DbPool, models::project};
 
 use super::project_context::{WebProjectContext, get_project_context};
 

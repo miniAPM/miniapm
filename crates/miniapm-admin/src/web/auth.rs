@@ -8,7 +8,7 @@ use axum_extra::extract::cookie::{Cookie, CookieJar};
 use serde::Deserialize;
 use time::Duration;
 
-use crate::{DbPool, config::Config, models};
+use miniapm::{DbPool, config::Config, models};
 
 use super::project_context::{WebProjectContext, get_project_context};
 

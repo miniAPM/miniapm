@@ -1,0 +1,39 @@
+[package]
+name = "miniapm-admin"
+edition = "2024"
+version.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "miniapm-admin"
+path = "src/main.rs"
+
+[dependencies]
+miniapm = { path = "../miniapm" }
+axum = "0.7"
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
+askama = "0.12"
+askama_axum = "0.4"
+tower-cookies = "0.10"
+axum-extra = { version = "0.9", features = ["cookie"] }
+chrono = { version = "0.4" }
+serde = { version = "1", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"
+time = "0.3"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

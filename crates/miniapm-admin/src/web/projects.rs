@@ -7,7 +7,7 @@ use axum::{
 use serde::Deserialize;
 use tower_cookies::{Cookie, Cookies};
 
-use crate::{DbPool, models::project};
+use miniapm::{DbPool, models::project};
 
 use super::project_context::{PROJECT_COOKIE, WebProjectContext, get_project_context};
 

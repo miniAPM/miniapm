@@ -1,6 +1,6 @@
 use tower_cookies::Cookies;
 
-use crate::{DbPool, models::project::Project};
+use miniapm::{DbPool, models::project::Project};
 
 pub const PROJECT_COOKIE: &str = "miniapm_project";
 
@@ -41,7 +41,7 @@ pub fn get_project_context(pool: &DbPool, cookies: &Cookies) -> WebProjectContex
         };
     }
 
-    let projects = crate::models::project::list_all(pool).unwrap_or_default();
+    let projects = miniapm::models::project::list_all(pool).unwrap_or_default();
 
     // Get project slug from cookie
     let project_slug = cookies.get(PROJECT_COOKIE).map(|c| c.value().to_string());

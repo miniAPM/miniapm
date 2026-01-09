@@ -17,12 +17,16 @@ The smallest useful APM. A single-binary, self-hosted application performance mo
 ### Docker (recommended)
 
 ```bash
+# Run ingestion server
 docker run -d -p 3000:3000 -v miniapm_data:/data ghcr.io/miniapm/miniapm
+
+# Optional: Run admin dashboard
+docker run -d -p 3001:3001 -v miniapm_data:/data ghcr.io/miniapm/miniapm-admin
 ```
 
 On first run, you'll see your API key in the logs:
 ```
-INFO miniapm::server: Single-project mode - API key: proj_abc123...
+INFO miniapm: Single-project mode - API key: proj_abc123...
 ```
 
 ### From Source
@@ -31,12 +35,15 @@ INFO miniapm::server: Single-project mode - API key: proj_abc123...
 git clone https://github.com/miniapm/miniapm
 cd miniapm
 
-# Run the server
+# Run ingestion server (port 3000)
 cargo run -p miniapm
 
-# Or build and run
-cargo build --release -p miniapm
-./target/release/miniapm
+# Run admin dashboard (port 3001)
+cargo run -p miniapm-admin
+
+# Run CLI tools
+cargo run -p miniapm-cli -- create-key myapp
+cargo run -p miniapm-cli -- list-keys
 ```
 
 ## Sending Data
@@ -99,6 +106,8 @@ All configuration is via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SQLITE_PATH` | `./data/miniapm.db` | Database file location |
+| `APM_PORT` | `3000` | Port for ingestion server |
+| `ADMIN_PORT` | `3001` | Port for admin dashboard |
 | `RUST_LOG` | `miniapm=info` | Log level |
 | `RETENTION_DAYS_REQUESTS` | `7` | Days to keep request data |
 | `RETENTION_DAYS_ERRORS` | `30` | Days to keep error data |
@@ -128,9 +137,13 @@ Default admin credentials on first run:
 ## CLI Commands
 
 ```bash
-# Server (main binary)
+# Ingestion server
 miniapm                      # Start server (default port 3000)
 miniapm -p 8080              # Start on custom port
+
+# Admin dashboard
+miniapm-admin                # Start dashboard (default port 3001)
+miniapm-admin -p 8081        # Start on custom port
 
 # CLI tools
 miniapm-cli create-key <name>   # Create a new API key
@@ -151,25 +164,39 @@ services:
       - RUST_LOG=miniapm=info
     restart: unless-stopped
 
+  miniapm-admin:
+    image: ghcr.io/miniapm/miniapm-admin
+    ports:
+      - "3001:3001"
+    volumes:
+      - miniapm_data:/data
+    environment:
+      - RUST_LOG=miniapm-admin=info
+    restart: unless-stopped
+
 volumes:
   miniapm_data:
 ```
 
 ## Architecture
 
-- **miniapm** - Server binary with ingestion API and web dashboard
+- **miniapm** - Ingestion server (port 3000), receives traces, errors, and deploys
+- **miniapm-admin** - Web dashboard (port 3001), UI for viewing data
 - **miniapm-cli** - CLI tools for key management
-- **SQLite storage** - Zero-config, automatic migrations
+- **SQLite storage** - Zero-config, automatic migrations, shared between services
 - **Rust/Axum** - Fast, memory-efficient
 - **OTLP/HTTP** - Standard OpenTelemetry protocol
 
 ## Development
 
 ```bash
-# Run the server
+# Run ingestion server
 cargo run -p miniapm
 
-# Run CLI commands
+# Run admin dashboard
+cargo run -p miniapm-admin
+
+# Run CLI tools
 cargo run -p miniapm-cli -- create-key mykey
 cargo run -p miniapm-cli -- list-keys
 

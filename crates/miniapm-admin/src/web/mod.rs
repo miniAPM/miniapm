@@ -14,7 +14,7 @@ use axum::{
     routing::{get, post},
 };
 
-use crate::DbPool;
+use miniapm::DbPool;
 
 pub fn routes(pool: DbPool) -> Router<DbPool> {
     Router::new()
