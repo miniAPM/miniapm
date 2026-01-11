@@ -1,9 +1,15 @@
 [package]
-name = "miniapm"
-version = "1.2.0"
+name = "mini-apm"
+version = "0.0.0"
 edition = "2024"
 description = "Minimal APM for Rails"
 license = "MIT"
+authors = ["Chris Hasinski <krzysztof.hasinski@gmail.com>"]
+repository = "https://github.com/miniapm/miniapm"
+homepage = "https://github.com/miniapm/miniapm"
+readme = "README.md"
+keywords = ["apm", "monitoring", "tracing", "performance", "rails"]
+categories = ["development-tools", "web-programming"]
 
 [dependencies]
 # Async runtime

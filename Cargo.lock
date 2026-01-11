@@ -1021,8 +1021,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "miniapm"
-version = "1.2.0"
+name = "mini-apm"
+version = "0.0.0"
 dependencies = [
  "anyhow",
  "argon2",
