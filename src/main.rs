@@ -1,9 +1,9 @@
 use clap::{Parser, Subcommand};
-use miniapm::{config::Config, db, server};
+use mini_apm::{config::Config, db, server};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
-#[command(name = "miniapm")]
+#[command(name = "mini-apm")]
 #[command(about = "Minimal APM for Rails", version)]
 struct Cli {
     #[command(subcommand)]
@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "miniapm=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "mini_apm=info,tower_http=info".into()),
         )
         .init();
 
@@ -47,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::CreateKey { name }) => {
             let pool = db::init(&config)?;
-            let key = miniapm::models::api_key::create(&pool, &name)?;
+            let key = mini_apm::models::api_key::create(&pool, &name)?;
             println!("API Key created successfully!\n");
             println!("Name: {}", name);
             println!("Key:  {}", key);
@@ -55,7 +55,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Some(Commands::ListKeys) => {
             let pool = db::init(&config)?;
-            let keys = miniapm::models::api_key::list(&pool)?;
+            let keys = mini_apm::models::api_key::list(&pool)?;
             if keys.is_empty() {
                 println!("No API keys found.");
             } else {
