@@ -1,0 +1,29 @@
+[package]
+name = "mini-apm-admin"
+description = "Minimal APM for Rails - Admin web interface"
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+mini-apm = { workspace = true }
+tokio = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+askama = { workspace = true }
+askama_axum = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+tower-cookies = { workspace = true }
+axum-extra = { workspace = true }
+time = { workspace = true }

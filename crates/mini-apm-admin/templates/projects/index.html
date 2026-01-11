@@ -1,0 +1,84 @@
+{% extends "layout.html" %}
+
+{% block title %}Projects - MiniAPM{% endblock %}
+
+{% block project_selector %}
+{% if ctx.projects_enabled %}
+<form method="POST" action="/projects/switch" class="project-selector">
+    <select name="slug" onchange="this.form.submit()">
+        {% for project in ctx.projects %}
+        <option value="{{ project.slug }}" {% if ctx.is_current_project(project.id) %}selected{% endif %}>
+            {{ project.name }}
+        </option>
+        {% endfor %}
+    </select>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<h1>Projects</h1>
+
+{% if let Some(msg) = message %}
+<div class="notice notice-info">{{ msg }}</div>
+{% endif %}
+
+<div class="card">
+    <h2>Create Project</h2>
+    <form method="POST" action="/projects/create" class="inline-form">
+        <input type="text" name="name" placeholder="Project name" required>
+        <button type="submit" class="btn btn-primary">Create</button>
+    </form>
+</div>
+
+{% if projects.is_empty() %}
+<p class="empty">No projects yet</p>
+{% else %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Slug</th>
+                <th>API Key</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for project in projects %}
+            <tr>
+                <td>{{ project.name }}</td>
+                <td><code>{{ project.slug }}</code></td>
+                <td>
+                    <code class="api-key">{{ project.api_key }}</code>
+                    <button type="button" class="btn-small" onclick="navigator.clipboard.writeText('{{ project.api_key }}')">Copy</button>
+                </td>
+                <td>{{ project.created_at }}</td>
+                <td class="actions">
+                    <form method="POST" action="/projects/regenerate-key" class="inline">
+                        <input type="hidden" name="id" value="{{ project.id }}">
+                        <button type="submit" class="btn-small" onclick="return confirm('Regenerate API key? Existing integrations will stop working.')">Regenerate Key</button>
+                    </form>
+                    <form method="POST" action="/projects/delete" class="inline">
+                        <input type="hidden" name="id" value="{{ project.id }}">
+                        <button type="submit" class="btn-small btn-danger" onclick="return confirm('Delete this project? All data will be lost.')">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<div class="card" style="margin-top: 2rem;">
+    <h2>Integration</h2>
+    <p>Use the project API key in your Rails app:</p>
+    <pre><code># config/initializers/miniapm.rb
+MiniApm.configure do |config|
+  config.api_key = "YOUR_PROJECT_API_KEY"
+  config.endpoint = "http://localhost:3000"
+end</code></pre>
+</div>
+{% endblock %}
