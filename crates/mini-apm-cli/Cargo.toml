@@ -4,6 +4,10 @@ edition.workspace = true
 version.workspace = true
 publish = false
 
+[[bin]]
+name = "miniapm-cli"
+path = "src/main.rs"
+
 [dependencies]
 mini-apm = { workspace = true }
 clap = { workspace = true }

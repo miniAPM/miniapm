@@ -8,7 +8,7 @@ publish = false
 path = "src/lib.rs"
 
 [[bin]]
-name = "mini-apm-admin"
+name = "miniapm-admin"
 path = "src/main.rs"
 
 [dependencies]
