@@ -1,7 +1,12 @@
-use axum::{Extension, Json, extract::State, http::StatusCode};
+//! API ingestion handlers
+//!
+//! Handles incoming telemetry data: spans, deploys, errors.
+
+use rama::http::StatusCode;
+use rama::http::service::web::extract::{Extension, Json, State};
 use serde::Deserialize;
 
-use mini_apm::{
+use mini-apm::{
     DbPool,
     models::{deploy, error as app_error, span},
 };

@@ -1,0 +1,224 @@
+{% extends "layout.html" %}
+
+{% block title %}Errors - MiniAPM{% endblock %}
+
+{% block project_selector %}
+{% if ctx.show_selector() %}
+<form method="POST" action="/projects/switch" class="project-selector">
+    <select name="slug" onchange="this.form.submit()">
+        {% for project in ctx.projects %}
+        <option value="{{ project.slug }}" {% if ctx.is_current_project(project.id) %}selected{% endif %}>
+            {{ project.name }}
+        </option>
+        {% endfor %}
+    </select>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<h1>Errors</h1>
+<p class="subtitle">{{ total_count }} error{% if total_count != 1 %}s{% endif %} found</p>
+
+{% if !hourly_errors.is_empty() %}
+<div class="card chart-card" style="margin-bottom: 1.5rem;">
+    <h3>Error Occurrences (24h)</h3>
+    <div class="chart-container" id="error-trend-chart">
+        <canvas id="errorTrendCanvas"></canvas>
+    </div>
+</div>
+<script>
+(function() {
+    const data = [
+        {% for point in hourly_errors %}
+        { label: "{{ point.hour }}", count: {{ point.count }} },
+        {% endfor %}
+    ];
+
+    const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim() || '#e74c3c';
+    const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b95a8';
+    const bgColor = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1f2e';
+
+    function drawChart() {
+        const canvas = document.getElementById('errorTrendCanvas');
+        if (!canvas || data.length === 0) return;
+
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.parentElement.getBoundingClientRect();
+
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = rect.height + 'px';
+        ctx.scale(dpr, dpr);
+
+        const width = rect.width;
+        const height = rect.height;
+        const padding = { top: 10, right: 10, bottom: 25, left: 35 };
+        const chartWidth = width - padding.left - padding.right;
+        const chartHeight = height - padding.top - padding.bottom;
+
+        const values = data.map(d => d.count);
+        const maxVal = Math.max(...values, 1);
+        const stepX = chartWidth / (values.length - 1 || 1);
+
+        // Clear and draw
+        ctx.clearRect(0, 0, width, height);
+
+        // Draw grid lines
+        ctx.strokeStyle = bgColor;
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 4; i++) {
+            const y = padding.top + (chartHeight / 4) * i;
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(width - padding.right, y);
+            ctx.stroke();
+        }
+
+        // Draw line
+        ctx.strokeStyle = dangerColor;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        values.forEach((val, i) => {
+            const x = padding.left + i * stepX;
+            const y = padding.top + chartHeight - (val / maxVal) * chartHeight;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // Draw area fill
+        ctx.fillStyle = dangerColor + '20';
+        ctx.beginPath();
+        ctx.moveTo(padding.left, padding.top + chartHeight);
+        values.forEach((val, i) => {
+            const x = padding.left + i * stepX;
+            const y = padding.top + chartHeight - (val / maxVal) * chartHeight;
+            ctx.lineTo(x, y);
+        });
+        ctx.lineTo(padding.left + (values.length - 1) * stepX, padding.top + chartHeight);
+        ctx.closePath();
+        ctx.fill();
+
+        // Draw Y axis labels
+        ctx.fillStyle = textMuted;
+        ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const val = Math.round(maxVal * (4 - i) / 4);
+            const y = padding.top + (chartHeight / 4) * i + 3;
+            ctx.fillText(val.toString(), padding.left - 5, y);
+        }
+
+        // Draw X axis labels
+        ctx.textAlign = 'center';
+        const labelStep = Math.ceil(data.length / 6);
+        data.forEach((d, i) => {
+            if (i % labelStep === 0 || i === data.length - 1) {
+                const x = padding.left + i * stepX;
+                // Extract just the hour from "2026-01-04 01:00" format
+                const hour = d.label.split(' ')[1] || d.label;
+                ctx.fillText(hour, x, height - 5);
+            }
+        });
+    }
+
+    drawChart();
+    window.addEventListener('resize', drawChart);
+
+    const observer = new MutationObserver(() => setTimeout(drawChart, 50));
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+})();
+</script>
+{% endif %}
+
+<div class="filter-bar">
+    <div class="filter-group">
+        <label>Status</label>
+        <div class="filters">
+            <a href="?period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if status.is_none() %}active{% endif %}">All</a>
+            <a href="?status=open&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if status.as_deref() == Some("open") %}active{% endif %}">Open</a>
+            <a href="?status=resolved&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if status.as_deref() == Some("resolved") %}active{% endif %}">Resolved</a>
+            <a href="?status=ignored&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if status.as_deref() == Some("ignored") %}active{% endif %}">Ignored</a>
+        </div>
+    </div>
+
+    <div class="filter-group">
+        <label>Period</label>
+        <div class="filters">
+            <a href="?period=all&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "all" %}active{% endif %}">All</a>
+            <a href="?period=1h&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "1h" %}active{% endif %}">1h</a>
+            <a href="?period=24h&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "24h" %}active{% endif %}">24h</a>
+            <a href="?period=7d&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "7d" %}active{% endif %}">7d</a>
+            <a href="?period=30d&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "30d" %}active{% endif %}">30d</a>
+        </div>
+    </div>
+
+    <div class="filter-group">
+        <label>Sort by</label>
+        <div class="filters">
+            <a href="?period={{ period }}&sort=last_seen{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "last_seen" %}active{% endif %}">Last Seen</a>
+            <a href="?period={{ period }}&sort=first_seen{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "first_seen" %}active{% endif %}">First Seen</a>
+            <a href="?period={{ period }}&sort=count{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "count" %}active{% endif %}">Count</a>
+        </div>
+    </div>
+
+    <div class="filter-group filter-search">
+        <label>Search</label>
+        <form method="GET" action="/errors" class="search-form">
+            <input type="hidden" name="period" value="{{ period }}">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            {% if let Some(st) = status %}<input type="hidden" name="status" value="{{ st }}">{% endif %}
+            <input type="text" name="search" placeholder="Exception or message..." value="{% if let Some(s) = search %}{{ s }}{% endif %}">
+            <button type="submit">Search</button>
+        </form>
+    </div>
+</div>
+
+{% if errors.is_empty() %}
+<p class="empty">No errors found</p>
+{% else %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Status</th>
+                <th>Exception</th>
+                <th>Message</th>
+                <th class="num">Count</th>
+                <th>First Seen</th>
+                <th>Last Seen</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for error in errors %}
+            <tr>
+                <td><span class="badge badge-{{ error.status }}">{{ error.status }}</span></td>
+                <td><a href="/errors/{{ error.id }}">{{ error.exception_class }}</a></td>
+                <td class="truncate">{{ error.message }}</td>
+                <td class="num">{{ error.occurrence_count }}</td>
+                <td>{{ error.first_seen_at }}</td>
+                <td>{{ error.last_seen_at }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}&period={{ period }}&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="pagination-link">Previous</a>
+    {% endif %}
+
+    <span class="pagination-info">Page {{ page }} of {{ total_pages }}</span>
+
+    {% if page < total_pages %}
+    <a href="?page={{ page + 1 }}&period={{ period }}&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="pagination-link">Next</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

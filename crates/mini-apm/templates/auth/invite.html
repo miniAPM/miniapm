@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Set Password - MiniAPM</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <h1>MiniAPM</h1>
+            <p class="auth-subtitle">Welcome, {{ username }}! Set your password to continue.</p>
+
+            {% if let Some(err) = error %}
+            <div class="alert alert-error">{{ err }}</div>
+            {% endif %}
+
+            <form method="POST">
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" name="password" required autofocus minlength="4">
+                </div>
+                <div class="form-group">
+                    <label for="confirm_password">Confirm Password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required minlength="4">
+                </div>
+                <button type="submit" class="btn btn-primary btn-block">Set Password</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

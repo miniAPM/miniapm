@@ -1,12 +1,15 @@
-use axum::{
-    body::Body,
-    extract::State,
-    http::{Request, StatusCode, header},
-    middleware::Next,
-    response::Response,
-};
+//! Authentication middleware for API routes
+//!
+//! Validates Bearer token authentication and injects ProjectContext
+//! into request extensions for downstream handlers.
 
-use mini_apm::DbPool;
+use rama::http::header::AUTHORIZATION;
+use rama::http::{Body, Request, Response, StatusCode};
+use rama::extensions::ExtensionsMut;
+use rama::Layer;
+use rama::service::Service;
+
+use mini_apm::{DbPool, models};
 
 /// Holds project information extracted from API key authentication
 #[derive(Clone, Debug)]
@@ -14,49 +17,97 @@ pub struct ProjectContext {
     pub project_id: Option<i64>,
 }
 
-pub async fn auth_middleware(
-    State(pool): State<DbPool>,
-    mut request: Request<Body>,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    // Extract Authorization header
-    let auth_header = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok());
+/// Layer that applies API key authentication
+#[derive(Clone)]
+pub struct ApiKeyAuthMiddleware {
+    pool: DbPool,
+}
 
-    let api_key = match auth_header {
-        Some(h) if h.starts_with("Bearer ") => &h[7..],
-        _ => return Err(StatusCode::UNAUTHORIZED),
-    };
+impl ApiKeyAuthMiddleware {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
 
-    // Always authenticate against project API keys
-    // A default project is always created on startup
-    match mini_apm::models::project::find_by_api_key(&pool, api_key) {
-        Ok(Some(project)) => {
-            request.extensions_mut().insert(ProjectContext {
-                project_id: Some(project.id),
-            });
-            Ok(next.run(request).await)
+impl<S> Layer<S> for ApiKeyAuthMiddleware {
+    type Service = ApiKeyAuthService<S>;
+
+    fn layer(&self, inner: S) -> Self::Service {
+        ApiKeyAuthService {
+            inner,
+            pool: self.pool.clone(),
         }
-        Ok(None) => Err(StatusCode::UNAUTHORIZED),
-        Err(_) => Err(StatusCode::INTERNAL_SERVER_ERROR),
+    }
+}
+
+/// Service that validates API key and injects ProjectContext
+#[derive(Clone)]
+pub struct ApiKeyAuthService<S> {
+    inner: S,
+    pool: DbPool,
+}
+
+impl<S> Service<Request> for ApiKeyAuthService<S>
+where
+    S: Service<Request, Output = Response, Error = std::convert::Infallible> + Clone + Send + Sync + 'static,
+{
+    type Output = Response;
+    type Error = std::convert::Infallible;
+
+    fn serve(&self, mut req: Request) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
+        let inner = self.inner.clone();
+        let pool = self.pool.clone();
+
+        async move {
+            // Extract Authorization header
+            let auth_header = req.headers()
+                .get(AUTHORIZATION)
+                .and_then(|h| h.to_str().ok());
+
+            let api_key = match auth_header {
+                Some(h) if h.starts_with("Bearer ") => &h[7..],
+                _ => {
+                    return Ok(Response::builder()
+                        .status(StatusCode::UNAUTHORIZED)
+                        .body(Body::empty())
+                        .unwrap());
+                }
+            };
+
+            // Always authenticate against project API keys
+            // A default project is always created on startup
+            match models::project::find_by_api_key(&pool, api_key) {
+                Ok(Some(project)) => {
+                    req.extensions_mut().insert(ProjectContext {
+                        project_id: Some(project.id),
+                    });
+                    inner.serve(req).await
+                }
+                Ok(None) => {
+                    Ok(Response::builder()
+                        .status(StatusCode::UNAUTHORIZED)
+                        .body(Body::empty())
+                        .unwrap())
+                }
+                Err(e) => {
+                    tracing::error!("Database error validating API key: {}", e);
+                    Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::empty())
+                        .unwrap())
+                }
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::{
-        Router,
-        body::Body,
-        http::{Request, StatusCode},
-        middleware,
-        routing::get,
-    };
     use r2d2::Pool;
     use r2d2_sqlite::SqliteConnectionManager;
-    use tower::util::ServiceExt;
+    use rama::service::Service;
+    use crate::DbPool;
 
     fn create_test_pool() -> DbPool {
         let manager = SqliteConnectionManager::memory();
@@ -79,18 +130,42 @@ mod tests {
         pool
     }
 
-    async fn handler() -> &'static str {
-        "ok"
+    fn create_test_config() -> crate::config::Config {
+        crate::config::Config {
+            sqlite_path: ":memory:".to_string(),
+            api_key: None,
+            retention_days_errors: 30,
+            retention_days_hourly_rollups: 90,
+            retention_days_spans: 7,
+            slow_request_threshold_ms: 500.0,
+            mini_apm_url: "http://localhost:3000".to_string(),
+            enable_user_accounts: false,
+            enable_projects: false,
+            session_secret: "test_secret".to_string(),
+        }
     }
 
-    fn create_app(pool: DbPool) -> Router {
-        Router::new()
-            .route("/test", get(handler))
-            .layer(middleware::from_fn_with_state(
-                pool.clone(),
-                auth_middleware,
-            ))
-            .with_state(pool)
+    fn create_app(pool: DbPool) -> impl Service<Request, Output = Response, Error = std::convert::Infallible> {
+        let config = create_test_config();
+        let state = crate::server::AppState { pool, config };
+
+        // Create a simple service that handles the test route
+        let test_service = rama::service::BoxService::new(rama::service::service_fn(|req: Request| async move {
+            let uri = req.uri();
+            if uri.path() == "/test" {
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .body(Body::from("ok"))
+                    .unwrap())
+            } else {
+                Ok(Response::builder()
+                    .status(StatusCode::NOT_FOUND)
+                    .body(Body::empty())
+                    .unwrap())
+            }
+        }));
+        
+        ApiKeyAuthMiddleware::new(state.pool).layer(test_service)
     }
 
     #[tokio::test]
@@ -98,9 +173,12 @@ mod tests {
         let pool = create_test_pool();
         let app = create_app(pool);
 
-        let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
+        let req = Request::builder()
+            .uri("/test")
+            .body(Body::empty())
+            .unwrap();
 
-        let response = app.oneshot(req).await.unwrap();
+        let response = app.serve(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -115,7 +193,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let response = app.oneshot(req).await.unwrap();
+        let response = app.serve(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
@@ -123,7 +201,7 @@ mod tests {
     async fn test_auth_rejects_invalid_key() {
         let pool = create_test_pool();
         // Create a valid project API key first
-        mini_apm::models::project::ensure_default_project(&pool).unwrap();
+        models::project::ensure_default_project(&pool).unwrap();
 
         let app = create_app(pool);
 
@@ -133,14 +211,14 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let response = app.oneshot(req).await.unwrap();
+        let response = app.serve(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]
     async fn test_auth_accepts_valid_project_key() {
         let pool = create_test_pool();
-        let project = mini_apm::models::project::ensure_default_project(&pool).unwrap();
+        let project = models::project::ensure_default_project(&pool).unwrap();
 
         let app = create_app(pool);
 
@@ -150,7 +228,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        let response = app.oneshot(req).await.unwrap();
+        let response = app.serve(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
     }
 }

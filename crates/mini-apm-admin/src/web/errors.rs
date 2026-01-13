@@ -1,14 +1,13 @@
 use askama::Template;
-use axum::Form;
-use axum::extract::{Path, Query, State};
-use axum::response::Redirect;
 use chrono::{Duration, Utc};
+use rama::http::service::web::extract::{Form, Path, Query, State};
+use rama::http::service::web::response::Redirect;
 use serde::Deserialize;
-use tower_cookies::Cookies;
 
+use crate::template::HtmlTemplate;
 use mini_apm::{DbPool, models};
 
-use super::project_context::{WebProjectContext, get_project_context};
+use super::project_context::WebProjectContext;
 
 const PAGE_SIZE: i64 = 50;
 
@@ -38,10 +37,13 @@ pub struct ErrorsQuery {
 
 pub async fn index(
     State(pool): State<DbPool>,
-    cookies: Cookies,
     Query(query): Query<ErrorsQuery>,
-) -> ErrorsIndexTemplate {
-    let ctx = get_project_context(&pool, &cookies);
+) -> HtmlTemplate<ErrorsIndexTemplate> {
+    let ctx = WebProjectContext {
+        current_project: None,
+        projects: vec![],
+        projects_enabled: false,
+    };
     let project_id = ctx.project_id();
 
     let period = query.period.unwrap_or_else(|| "all".to_string());
@@ -86,7 +88,7 @@ pub async fn index(
     let hourly_errors =
         models::error::hourly_error_stats(&pool, project_id, 24).unwrap_or_default();
 
-    ErrorsIndexTemplate {
+    HtmlTemplate(ErrorsIndexTemplate {
         errors,
         total_count,
         status: query.status,
@@ -97,7 +99,7 @@ pub async fn index(
         total_pages,
         hourly_errors,
         ctx,
-    }
+    })
 }
 
 #[derive(Template)]
@@ -111,10 +113,13 @@ pub struct ErrorShowTemplate {
 
 pub async fn show(
     State(pool): State<DbPool>,
-    cookies: Cookies,
     Path(id): Path<i64>,
-) -> ErrorShowTemplate {
-    let ctx = get_project_context(&pool, &cookies);
+) -> HtmlTemplate<ErrorShowTemplate> {
+    let ctx = WebProjectContext {
+        current_project: None,
+        projects: vec![],
+        projects_enabled: false,
+    };
     let error = models::error::find(&pool, id).unwrap_or(None);
     let occurrences = if error.is_some() {
         models::error::occurrences(&pool, id, 10).unwrap_or_default()
@@ -123,12 +128,12 @@ pub async fn show(
     };
     let trend_24h = models::error::error_trend_24h(&pool, id).unwrap_or_default();
 
-    ErrorShowTemplate {
+    HtmlTemplate(ErrorShowTemplate {
         error,
         occurrences,
         trend_24h,
         ctx,
-    }
+    })
 }
 
 #[derive(Deserialize)]
@@ -146,5 +151,5 @@ pub async fn update_status(
     if valid_statuses.contains(&form.status.as_str()) {
         let _ = models::error::update_status(&pool, id, &form.status);
     }
-    Redirect::to(&format!("/errors/{}", id))
+    Redirect::temporary("/errors")
 }

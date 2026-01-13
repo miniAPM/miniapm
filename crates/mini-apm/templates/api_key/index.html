@@ -1,0 +1,77 @@
+{% extends "layout.html" %}
+
+{% block title %}API Key - MiniAPM{% endblock %}
+
+{% block content %}
+<h1>API Key</h1>
+
+<div class="card">
+    <h2>Your API Key</h2>
+    <p>Use this API key to authenticate requests from your application.</p>
+
+    <div class="api-key-display">
+        <code class="api-key api-key-large">{{ api_key }}</code>
+        <button type="button" class="btn btn-secondary" onclick="navigator.clipboard.writeText('{{ api_key }}')">Copy</button>
+    </div>
+
+    <form method="POST" action="/api-key/regenerate" class="regenerate-form">
+        <button type="submit" class="btn btn-danger" onclick="return confirm('Regenerate API key? All existing integrations will stop working until updated.')">
+            Regenerate Key
+        </button>
+    </form>
+</div>
+
+<div class="card" style="margin-top: 2rem;">
+    <h2>Integration</h2>
+    <p>Add the MiniAPM gem to your Rails application and configure it with your API key:</p>
+
+    <h3>1. Add to your Gemfile</h3>
+    <pre><code>gem 'miniapm'</code></pre>
+
+    <h3>2. Configure in an initializer</h3>
+    <pre><code># config/initializers/miniapm.rb
+MiniAPM.configure do |config|
+  config.api_key = "{{ api_key }}"
+  config.endpoint = "http://localhost:3000"
+  config.service_name = "my-app"
+  config.environment = Rails.env
+end</code></pre>
+
+    <h3>3. Environment Variables (Recommended)</h3>
+    <p>For better security, use environment variables:</p>
+    <pre><code># .env or your environment
+MINI_APM_API_KEY={{ api_key }}
+MINI_APM_ENDPOINT=http://localhost:3000
+
+# config/initializers/miniapm.rb
+MiniAPM.configure do |config|
+  config.api_key = ENV["MINI_APM_API_KEY"]
+  config.endpoint = ENV["MINI_APM_ENDPOINT"]
+end</code></pre>
+</div>
+
+<style>
+.api-key-display {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 1rem 0;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+}
+
+.api-key-large {
+    font-size: 1.1rem;
+    padding: 0.5rem 1rem;
+    flex: 1;
+    word-break: break-all;
+}
+
+.regenerate-form {
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+}
+</style>
+{% endblock %}

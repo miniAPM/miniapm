@@ -1,12 +1,12 @@
 use askama::Template;
-use axum::extract::{Query, State};
 use chrono::{Duration, Utc};
+use rama::http::service::web::extract::{Query, State};
 use serde::Deserialize;
-use tower_cookies::Cookies;
 
+use crate::template::HtmlTemplate;
 use mini_apm::{DbPool, models::span};
 
-use super::project_context::{WebProjectContext, get_project_context};
+use super::project_context::WebProjectContext;
 
 #[derive(Template)]
 #[template(path = "performance/index.html")]
@@ -29,10 +29,13 @@ pub struct RoutesQuery {
 
 pub async fn index(
     State(pool): State<DbPool>,
-    cookies: Cookies,
     Query(query): Query<RoutesQuery>,
-) -> RoutesTemplate {
-    let ctx = get_project_context(&pool, &cookies);
+) -> HtmlTemplate<RoutesTemplate> {
+    let ctx = WebProjectContext {
+        current_project: None,
+        projects: vec![],
+        projects_enabled: false,
+    };
     let project_id = ctx.project_id();
 
     let period = query.period.unwrap_or_else(|| "24h".to_string());
@@ -56,7 +59,7 @@ pub async fn index(
 
     let max_requests = routes.iter().map(|r| r.request_count).max().unwrap_or(1);
 
-    RoutesTemplate {
+    HtmlTemplate(RoutesTemplate {
         routes,
         total_count,
         max_requests,
@@ -64,5 +67,5 @@ pub async fn index(
         search,
         sort,
         ctx,
-    }
+    })
 }

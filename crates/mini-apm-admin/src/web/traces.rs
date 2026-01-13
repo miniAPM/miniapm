@@ -1,12 +1,12 @@
 use askama::Template;
-use axum::extract::{Path, Query, State};
 use chrono::{Duration, Utc};
+use rama::http::service::web::extract::{Path, Query, State};
 use serde::Deserialize;
-use tower_cookies::Cookies;
 
+use crate::template::HtmlTemplate;
 use mini_apm::{DbPool, models};
 
-use super::project_context::{WebProjectContext, get_project_context};
+use super::project_context::WebProjectContext;
 
 const PAGE_SIZE: i64 = 50;
 
@@ -38,10 +38,13 @@ pub struct TracesQuery {
 
 pub async fn index(
     State(pool): State<DbPool>,
-    cookies: Cookies,
     Query(query): Query<TracesQuery>,
-) -> TracesIndexTemplate {
-    let ctx = get_project_context(&pool, &cookies);
+) -> HtmlTemplate<TracesIndexTemplate> {
+    let ctx = WebProjectContext {
+        current_project: None,
+        projects: vec![],
+        projects_enabled: false,
+    };
     let project_id = ctx.project_id();
 
     let root_type_filter = query
@@ -92,7 +95,7 @@ pub async fn index(
     )
     .unwrap_or_default();
 
-    TracesIndexTemplate {
+    HtmlTemplate(TracesIndexTemplate {
         traces,
         total_count,
         type_filter: query.root_type,
@@ -103,7 +106,7 @@ pub async fn index(
         page,
         total_pages,
         ctx,
-    }
+    })
 }
 
 #[derive(Template)]
@@ -116,10 +119,13 @@ pub struct TraceShowTemplate {
 
 pub async fn show(
     State(pool): State<DbPool>,
-    cookies: Cookies,
     Path(trace_id): Path<String>,
-) -> TraceShowTemplate {
-    let ctx = get_project_context(&pool, &cookies);
+) -> HtmlTemplate<TraceShowTemplate> {
+    let ctx = WebProjectContext {
+        current_project: None,
+        projects: vec![],
+        projects_enabled: false,
+    };
     let trace = models::span::get_trace(&pool, &trace_id).unwrap_or(None);
 
     // Detect N+1 issues
@@ -129,9 +135,9 @@ pub async fn show(
         vec![]
     };
 
-    TraceShowTemplate {
+    HtmlTemplate(TraceShowTemplate {
         trace,
         n_plus_1_issues,
         ctx,
-    }
+    })
 }

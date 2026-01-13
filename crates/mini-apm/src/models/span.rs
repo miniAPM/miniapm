@@ -1398,16 +1398,16 @@ pub fn detect_n_plus_1(spans: &[SpanDisplay]) -> Vec<NPlus1Issue> {
     let mut pattern_counts: HashMap<String, (usize, f64, Vec<String>)> = HashMap::new();
 
     for span in spans {
-        if span.category == SpanCategory::Db {
-            if let Some(ref statement) = span.db_statement {
-                let pattern = normalize_sql(statement);
-                let entry = pattern_counts
-                    .entry(pattern)
-                    .or_insert((0, 0.0, Vec::new()));
-                entry.0 += 1;
-                entry.1 += span.duration_ms;
-                entry.2.push(span.span_id.clone());
-            }
+        if span.category == SpanCategory::Db
+            && let Some(ref statement) = span.db_statement
+        {
+            let pattern = normalize_sql(statement);
+            let entry = pattern_counts
+                .entry(pattern)
+                .or_insert((0, 0.0, Vec::new()));
+            entry.0 += 1;
+            entry.1 += span.duration_ms;
+            entry.2.push(span.span_id.clone());
         }
     }
 

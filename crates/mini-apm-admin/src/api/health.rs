@@ -1,8 +1,12 @@
-use axum::{Json, extract::State, http::StatusCode};
+//! Health check endpoint
+
+use rama::http::StatusCode;
+use rama::http::service::web::extract::State;
+use rama::http::service::web::response::Json;
 use serde::Serialize;
 use std::time::Instant;
 
-use mini_apm::{DbPool, db};
+use mini-apm::{DbPool, db};
 
 static START_TIME: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
 

@@ -1,15 +1,15 @@
 use askama::Template;
-use axum::{
-    Form,
-    extract::{Query, State},
-    response::{IntoResponse, Redirect},
-};
+use rama::http::service::web::extract::{Form, Query, State};
+use rama::http::service::web::response::{IntoResponse, Redirect};
 use serde::Deserialize;
-use tower_cookies::{Cookie, Cookies};
 
+use crate::cookies::set_cookie_header;
+use crate::template::HtmlTemplate;
 use mini_apm::{DbPool, models::project};
 
-use super::project_context::{PROJECT_COOKIE, WebProjectContext, get_project_context};
+use super::project_context::WebProjectContext;
+
+const PROJECT_COOKIE: &str = "miniapm_project";
 
 #[derive(Template)]
 #[template(path = "projects/index.html")]
@@ -26,17 +26,20 @@ pub struct ProjectsQuery {
 
 pub async fn index(
     State(pool): State<DbPool>,
-    cookies: Cookies,
     Query(query): Query<ProjectsQuery>,
-) -> ProjectsTemplate {
-    let ctx = get_project_context(&pool, &cookies);
+) -> HtmlTemplate<ProjectsTemplate> {
+    let ctx = WebProjectContext {
+        current_project: None,
+        projects: vec![],
+        projects_enabled: false,
+    };
     let projects = project::list_all(&pool).unwrap_or_default();
 
-    ProjectsTemplate {
+    HtmlTemplate(ProjectsTemplate {
         projects,
         message: query.message,
         ctx,
-    }
+    })
 }
 
 #[derive(Deserialize)]
@@ -44,13 +47,14 @@ pub struct SwitchForm {
     pub slug: String,
 }
 
-pub async fn switch_project(cookies: Cookies, Form(form): Form<SwitchForm>) -> impl IntoResponse {
-    let cookie = Cookie::build((PROJECT_COOKIE, form.slug))
-        .path("/")
-        .http_only(true)
-        .build();
-    cookies.add(cookie);
-    Redirect::to("/")
+pub async fn switch_project(Form(form): Form<SwitchForm>) -> impl IntoResponse {
+    let cookie_header = set_cookie_header(PROJECT_COOKIE, &form.slug, 365 * 86400);
+    rama::http::Response::builder()
+        .status(rama::http::StatusCode::TEMPORARY_REDIRECT)
+        .header("set-cookie", cookie_header)
+        .header("location", "/")
+        .body(rama::http::Body::empty())
+        .unwrap()
 }
 
 #[derive(Deserialize)]
