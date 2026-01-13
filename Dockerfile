@@ -9,7 +9,6 @@ COPY Cargo.toml ./
 
 # Copy source
 COPY src ./src
-COPY templates ./templates
 
 # Build
 RUN cargo build --release
@@ -22,7 +21,6 @@ RUN apk add --no-cache ca-certificates curl
 WORKDIR /app
 
 COPY --from=builder /app/target/release/miniapm /usr/local/bin/
-COPY static ./static
 
 ENV SQLITE_PATH=/data/miniapm.db
 VOLUME /data

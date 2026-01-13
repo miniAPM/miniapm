@@ -37,9 +37,8 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
     // Initialize start time for uptime tracking
     api::health::init_start_time();
 
-    // Always ensure default project and admin exist
+    // Always ensure default project exists (collector only)
     let default_project = models::project::ensure_default_project(&pool)?;
-    models::user::ensure_default_admin(&pool)?;
 
     if !config.enable_projects {
         tracing::info!("Single-project mode - API key: {}", default_project.api_key);
