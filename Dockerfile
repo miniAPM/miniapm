@@ -14,7 +14,7 @@ COPY crates ./crates
 RUN cargo build --release --workspace
 
 # Runtime image
-FROM alpine:3.19
+FROM alpine:3.23
 
 RUN apk add --no-cache ca-certificates curl
 
