@@ -3,7 +3,7 @@ members = ["crates/mini-apm", "crates/mini-apm-cli", "crates/mini-apm-admin"]
 resolver = "3"
 
 [workspace.package]
-version = "1.2.0"
+version = "0.0.0"
 edition = "2024"
 license = "MIT"
 authors = ["Chris Hasinski <krzysztof.hasinski@gmail.com>"]
@@ -14,8 +14,8 @@ categories = ["development-tools", "web-programming"]
 
 [workspace.dependencies]
 # Internal crates
-mini-apm = { path = "crates/mini-apm", version = "1.2.0" }
-mini-apm-admin = { path = "crates/mini-apm-admin", version = "1.2.0" }
+mini-apm = { path = "crates/mini-apm" }
+mini-apm-admin = { path = "crates/mini-apm-admin" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
