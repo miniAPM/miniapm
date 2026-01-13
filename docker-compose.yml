@@ -1,5 +1,6 @@
 services:
   miniapm:
+    image: ghcr.io/miniapm/miniapm
     build: .
     command: miniapm
     ports:
@@ -12,6 +13,7 @@ services:
     restart: unless-stopped
 
   miniapm-admin:
+    image: ghcr.io/miniapm/miniapm
     build: .
     command: miniapm-admin
     ports:
