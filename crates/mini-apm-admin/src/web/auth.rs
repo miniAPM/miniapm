@@ -57,6 +57,7 @@ pub struct LoginForm {
 
 #[derive(Deserialize)]
 pub struct ChangePasswordForm {
+    #[serde(default)]
     pub current_password: String,
     pub new_password: String,
     pub confirm_password: String,

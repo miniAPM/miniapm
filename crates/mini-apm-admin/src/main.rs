@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use mini_apm::{DbPool, config::Config, db};
+use mini_apm::{DbPool, config::Config, db, models};
 use mini_apm_admin::make_app;
 use rama::graceful::Shutdown;
 use rama::http::server::HttpServer;
@@ -24,6 +24,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::from_env()?;
     let pool = db::init(&config)?;
+    models::user::ensure_default_admin(&pool)?;
 
     run(pool, port).await
 }

@@ -1,28 +1,34 @@
 services:
   miniapm:
+    image: ghcr.io/miniapm/miniapm
     build: .
+    command: miniapm
     ports:
-      - "3001:3000"
+      - "3000:3000"
     volumes:
       - miniapm_data:/data
     environment:
-      - MINI_APM_API_KEY=dev-secret-key
+      - SQLITE_PATH=/data/miniapm.db
       - RUST_LOG=miniapm=info
-      - ENABLE_USER_ACCOUNTS=true
     restart: unless-stopped
 
-  simulator:
+  miniapm-admin:
+    image: ghcr.io/miniapm/miniapm
     build: .
-    command: miniapm simulate --continuous --requests-per-minute 30
+    command: miniapm-admin
+    ports:
+      - "3001:3001"
+    volumes:
+      - miniapm_data:/data
     environment:
-      - MINI_APM_URL=http://miniapm:3000
-      - MINI_APM_API_KEY=dev-secret-key
-      - RUST_LOG=miniapm=debug
+      - SQLITE_PATH=/data/miniapm.db
+      - RUST_LOG=miniapm-admin=info
+      - ENABLE_USER_ACCOUNTS=true
+      - SESSION_SECRET=change-me
+      - MINI_APM_URL=http://localhost:3001
     depends_on:
       - miniapm
     restart: unless-stopped
-    healthcheck:
-      disable: true
 
 volumes:
   miniapm_data:
