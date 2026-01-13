@@ -1,12 +1,12 @@
 use askama::Template;
-use rama::http::service::web::extract::State;
 use chrono::{Duration, Utc};
+use rama::http::service::web::extract::State;
 
+use crate::template::HtmlTemplate;
 use mini_apm::{
     DbPool,
     models::{self, deploy::Deploy, span},
 };
-use crate::template::HtmlTemplate;
 
 use super::project_context::WebProjectContext;
 

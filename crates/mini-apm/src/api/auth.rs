@@ -5,10 +5,10 @@
 
 use std::future::Future;
 
+use rama::Layer;
+use rama::extensions::ExtensionsMut;
 use rama::http::header::AUTHORIZATION;
 use rama::http::{Body, Request, Response, StatusCode};
-use rama::extensions::ExtensionsMut;
-use rama::Layer;
 use rama::service::Service;
 
 use crate::server::AppState;
@@ -51,18 +51,26 @@ pub struct ApiKeyAuthService<S> {
 
 impl<S> Service<Request> for ApiKeyAuthService<S>
 where
-    S: Service<Request, Output = Response, Error = std::convert::Infallible> + Clone + Send + Sync + 'static,
+    S: Service<Request, Output = Response, Error = std::convert::Infallible>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
 {
     type Output = Response;
     type Error = std::convert::Infallible;
 
-    fn serve(&self, mut req: Request) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
+    fn serve(
+        &self,
+        mut req: Request,
+    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
         let inner = self.inner.clone();
         let pool = self.state.pool.clone();
 
         async move {
             // Extract Authorization header
-            let auth_header = req.headers()
+            let auth_header = req
+                .headers()
                 .get(AUTHORIZATION)
                 .and_then(|h| h.to_str().ok());
 
@@ -84,12 +92,10 @@ where
                     });
                     inner.serve(req).await
                 }
-                Ok(None) => {
-                    Ok(Response::builder()
-                        .status(StatusCode::UNAUTHORIZED)
-                        .body(Body::empty())
-                        .unwrap())
-                }
+                Ok(None) => Ok(Response::builder()
+                    .status(StatusCode::UNAUTHORIZED)
+                    .body(Body::empty())
+                    .unwrap()),
                 Err(e) => {
                     tracing::error!("Database error validating API key: {}", e);
                     Ok(Response::builder()
@@ -105,10 +111,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::DbPool;
     use r2d2::Pool;
     use r2d2_sqlite::SqliteConnectionManager;
     use rama::service::Service;
-    use crate::DbPool;
 
     fn create_test_pool() -> DbPool {
         let manager = SqliteConnectionManager::memory();
@@ -146,28 +152,29 @@ mod tests {
         }
     }
 
-
-
-    fn create_app(pool: DbPool) -> impl Service<Request, Output = Response, Error = std::convert::Infallible> {
+    fn create_app(
+        pool: DbPool,
+    ) -> impl Service<Request, Output = Response, Error = std::convert::Infallible> {
         let config = create_test_config();
         let state = AppState { pool, config };
 
         // Create a simple service that handles the test route
-        let test_service = rama::service::BoxService::new(rama::service::service_fn(|req: Request| async move {
-            let uri = req.uri();
-            if uri.path() == "/test" {
-                Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Body::from("ok"))
-                    .unwrap())
-            } else {
-                Ok(Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Body::empty())
-                    .unwrap())
-            }
-        }));
-        
+        let test_service =
+            rama::service::BoxService::new(rama::service::service_fn(|req: Request| async move {
+                let uri = req.uri();
+                if uri.path() == "/test" {
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(Body::from("ok"))
+                        .unwrap())
+                } else {
+                    Ok(Response::builder()
+                        .status(StatusCode::NOT_FOUND)
+                        .body(Body::empty())
+                        .unwrap())
+                }
+            }));
+
         ApiKeyAuthMiddleware::new(state).layer(test_service)
     }
 
@@ -176,10 +183,7 @@ mod tests {
         let pool = create_test_pool();
         let app = create_app(pool);
 
-        let req = Request::builder()
-            .uri("/test")
-            .body(Body::empty())
-            .unwrap();
+        let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
         let response = app.serve(req).await.unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);

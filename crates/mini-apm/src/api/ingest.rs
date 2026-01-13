@@ -6,11 +6,11 @@ use rama::http::StatusCode;
 use rama::http::service::web::extract::{Extension, Json, State};
 use serde::Deserialize;
 
+use crate::api::auth::ProjectContext;
 use crate::{
     DbPool,
     models::{deploy, error as app_error, span},
 };
-use crate::api::auth::ProjectContext;
 
 #[derive(Debug, Deserialize)]
 pub struct IncomingErrorBatch {

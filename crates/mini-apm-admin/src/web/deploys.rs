@@ -1,8 +1,9 @@
 use askama::Template;
-use rama::http::service::web::extract::State;
 use rama::http::Request;
 use rama::http::header::HOST;
+use rama::http::service::web::extract::State;
 
+use crate::template::HtmlTemplate;
 use mini_apm::{
     DbPool,
     models::{
@@ -10,7 +11,6 @@ use mini_apm::{
         project,
     },
 };
-use crate::template::HtmlTemplate;
 
 use super::project_context::WebProjectContext;
 
@@ -23,10 +23,7 @@ pub struct DeploysTemplate {
     pub ctx: WebProjectContext,
 }
 
-pub async fn index(
-    State(pool): State<DbPool>,
-    request: Request,
-) -> HtmlTemplate<DeploysTemplate> {
+pub async fn index(State(pool): State<DbPool>, request: Request) -> HtmlTemplate<DeploysTemplate> {
     let ctx = WebProjectContext {
         current_project: None,
         projects: vec![],

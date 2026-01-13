@@ -1,15 +1,15 @@
 use std::future::Future;
 
-use rama::http::{Request, Response};
-use rama::http::service::web::response::Redirect;
-use rama::http::service::web::response::IntoResponse;
-use rama::extensions::ExtensionsMut;
 use rama::Layer;
+use rama::extensions::ExtensionsMut;
+use rama::http::service::web::response::IntoResponse;
+use rama::http::service::web::response::Redirect;
+use rama::http::{Request, Response};
 use rama::service::Service;
 
-use mini_apm::models;
-use crate::cookies::get_cookie;
 use crate::AppState;
+use crate::cookies::get_cookie;
+use mini_apm::models;
 
 const SESSION_COOKIE: &str = "miniapm_session";
 
@@ -53,12 +53,18 @@ pub struct WebAuthService<S> {
 
 impl<S> Service<Request> for WebAuthService<S>
 where
-    S: Service<Request, Output = Response, Error = std::convert::Infallible> + Send + Sync + 'static,
+    S: Service<Request, Output = Response, Error = std::convert::Infallible>
+        + Send
+        + Sync
+        + 'static,
 {
     type Output = Response;
     type Error = std::convert::Infallible;
 
-    fn serve(&self, mut req: Request) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send + '_ {
+    fn serve(
+        &self,
+        mut req: Request,
+    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send + '_ {
         let pool = self.state.pool.clone();
         let enable_user_accounts = std::env::var("ENABLE_USER_ACCOUNTS")
             .map(|v| v == "1" || v.to_lowercase() == "true")

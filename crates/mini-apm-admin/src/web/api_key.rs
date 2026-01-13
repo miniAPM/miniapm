@@ -2,8 +2,8 @@ use askama::Template;
 use rama::http::service::web::extract::State;
 use rama::http::service::web::response::{IntoResponse, Redirect};
 
-use mini_apm::{DbPool, models::project};
 use crate::template::HtmlTemplate;
+use mini_apm::{DbPool, models::project};
 
 use super::project_context::WebProjectContext;
 

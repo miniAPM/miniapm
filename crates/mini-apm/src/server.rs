@@ -57,7 +57,6 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
     let app = Router::new_with_state(state.clone())
         // Health check (no auth)
         .with_get("/health", api::health_handler)
-
         // Ingestion API (API key auth required)
         .with_sub_router_make_fn("/ingest", |router| {
             router
@@ -66,7 +65,6 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
                 .with_post("/errors", api::ingest_errors)
                 .with_post("/errors/batch", api::ingest_errors_batch)
         })
-
         // 404 handler
         .with_not_found(Html("<h1>404 - Collector API Only</h1>".to_owned()));
 
@@ -79,10 +77,7 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
     graceful.spawn_task_fn(move |guard| async move {
         let exec = Executor::graceful(guard);
 
-        if let Err(e) = HttpServer::auto(exec)
-            .listen(&addr, app)
-            .await
-        {
+        if let Err(e) = HttpServer::auto(exec).listen(&addr, app).await {
             tracing::error!("Server error: {}", e);
         }
     });

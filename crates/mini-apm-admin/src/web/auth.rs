@@ -1,14 +1,14 @@
 use askama::Template;
-use rama::http::service::web::extract::{Form, State, Path, Extension};
-use rama::http::StatusCode;
-use rama::http::service::web::response::{IntoResponse, Redirect};
 use rama::http::Response;
+use rama::http::StatusCode;
+use rama::http::service::web::extract::{Extension, Form, Path, State};
+use rama::http::service::web::response::{IntoResponse, Redirect};
 use serde::Deserialize;
 
-use mini_apm::{DbPool, models};
+use crate::cookies::{delete_cookie_header, get_cookie, set_cookie_header};
 use crate::template::HtmlTemplate;
-use crate::cookies::{set_cookie_header, delete_cookie_header, get_cookie};
 use crate::web::auth_middleware::CurrentUser;
+use mini_apm::{DbPool, models};
 
 use super::project_context::WebProjectContext;
 
@@ -82,10 +82,7 @@ pub async fn login_page() -> Response {
     HtmlTemplate(LoginTemplate { error: None }).into_response()
 }
 
-pub async fn login_submit(
-    State(pool): State<DbPool>,
-    Form(form): Form<LoginForm>,
-) -> Response {
+pub async fn login_submit(State(pool): State<DbPool>, Form(form): Form<LoginForm>) -> Response {
     match models::user::authenticate(&pool, &form.username, &form.password) {
         Ok(Some(user)) => {
             // Create session
@@ -101,31 +98,24 @@ pub async fn login_submit(
                     };
 
                     let mut response = Redirect::temporary(redirect_url).into_response();
-                    response.headers_mut().insert(
-                        "set-cookie",
-                        cookie_header.parse().unwrap(),
-                    );
+                    response
+                        .headers_mut()
+                        .insert("set-cookie", cookie_header.parse().unwrap());
                     response
                 }
-                Err(_) => HtmlTemplate(
-                    LoginTemplate {
-                        error: Some("Failed to create session".to_string()),
-                    }
-                )
+                Err(_) => HtmlTemplate(LoginTemplate {
+                    error: Some("Failed to create session".to_string()),
+                })
                 .into_response(),
             }
         }
-        Ok(None) => HtmlTemplate(
-            LoginTemplate {
-                error: Some("Invalid username or password".to_string()),
-            }
-        )
+        Ok(None) => HtmlTemplate(LoginTemplate {
+            error: Some("Invalid username or password".to_string()),
+        })
         .into_response(),
-        Err(_) => HtmlTemplate(
-            LoginTemplate {
-                error: Some("Authentication error".to_string()),
-            }
-        )
+        Err(_) => HtmlTemplate(LoginTemplate {
+            error: Some("Authentication error".to_string()),
+        })
         .into_response(),
     }
 }
@@ -133,14 +123,16 @@ pub async fn login_submit(
 pub async fn logout() -> Response {
     let delete_header = delete_cookie_header(SESSION_COOKIE);
     let mut response = Redirect::temporary("/auth/login").into_response();
-    response.headers_mut().insert(
-        "set-cookie",
-        delete_header.parse().unwrap(),
-    );
+    response
+        .headers_mut()
+        .insert("set-cookie", delete_header.parse().unwrap());
     response
 }
 
-pub async fn change_password_page(State(pool): State<DbPool>, req: rama::http::Request) -> Response {
+pub async fn change_password_page(
+    State(pool): State<DbPool>,
+    req: rama::http::Request,
+) -> Response {
     let Some(user) = get_current_user(&pool, &req) else {
         return Redirect::temporary("/auth/login").into_response();
     };
@@ -355,10 +347,7 @@ pub struct InviteForm {
     pub confirm_password: String,
 }
 
-pub async fn invite_page(
-    State(pool): State<DbPool>,
-    Path(token): Path<String>,
-) -> Response {
+pub async fn invite_page(State(pool): State<DbPool>, Path(token): Path<String>) -> Response {
     match models::user::find_by_invite_token(&pool, &token) {
         Ok(Some(user)) => HtmlTemplate(
             InviteTemplate {
@@ -394,33 +383,27 @@ pub async fn invite_submit(
     };
 
     if form.password != form.confirm_password {
-        return HtmlTemplate(
-            InviteTemplate {
-                username: user.username,
-                error: Some("Passwords do not match".to_string()),
-            }
-        )
+        return HtmlTemplate(InviteTemplate {
+            username: user.username,
+            error: Some("Passwords do not match".to_string()),
+        })
         .into_response();
     }
 
     if form.password.len() < 8 {
-        return HtmlTemplate(
-            InviteTemplate {
-                username: user.username,
-                error: Some("Password must be at least 8 characters".to_string()),
-            }
-        )
+        return HtmlTemplate(InviteTemplate {
+            username: user.username,
+            error: Some("Password must be at least 8 characters".to_string()),
+        })
         .into_response();
     }
 
     // Accept the invite and set password
     if models::user::accept_invite(&pool, user.id, &form.password).is_err() {
-        return HtmlTemplate(
-            InviteTemplate {
-                username: user.username,
-                error: Some("Failed to set password".to_string()),
-            }
-        )
+        return HtmlTemplate(InviteTemplate {
+            username: user.username,
+            error: Some("Failed to set password".to_string()),
+        })
         .into_response();
     }
 

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use mini_apm::{config::Config, db, DbPool};
+use mini_apm::{DbPool, config::Config, db};
 use mini_apm_admin::make_app;
 use rama::graceful::Shutdown;
 use rama::http::server::HttpServer;
@@ -40,10 +40,7 @@ async fn run(pool: DbPool, port: u16) -> anyhow::Result<()> {
     graceful.spawn_task_fn(move |guard| async move {
         let exec = Executor::graceful(guard);
 
-        if let Err(e) = HttpServer::auto(exec)
-            .listen(&addr, app)
-            .await
-        {
+        if let Err(e) = HttpServer::auto(exec).listen(&addr, app).await {
             tracing::error!("Server error: {}", e);
         }
     });

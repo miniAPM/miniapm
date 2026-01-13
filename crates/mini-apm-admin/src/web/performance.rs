@@ -1,10 +1,10 @@
 use askama::Template;
-use rama::http::service::web::extract::{Query, State};
 use chrono::{Duration, Utc};
+use rama::http::service::web::extract::{Query, State};
 use serde::Deserialize;
 
-use mini_apm::{DbPool, models::span};
 use crate::template::HtmlTemplate;
+use mini_apm::{DbPool, models::span};
 
 use super::project_context::WebProjectContext;
 

@@ -1,11 +1,11 @@
 use askama::Template;
-use rama::http::service::web::extract::{Path, Query, State, Form};
-use rama::http::service::web::response::Redirect;
 use chrono::{Duration, Utc};
+use rama::http::service::web::extract::{Form, Path, Query, State};
+use rama::http::service::web::response::Redirect;
 use serde::Deserialize;
 
-use mini_apm::{DbPool, models};
 use crate::template::HtmlTemplate;
+use mini_apm::{DbPool, models};
 
 use super::project_context::WebProjectContext;
 

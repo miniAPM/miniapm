@@ -3,9 +3,9 @@ pub mod web;
 mod cookies;
 mod template;
 
-use rama::conversion::FromRef;
-use rama::http::service::web::{response::Html, Router};
 use rama::Layer;
+use rama::conversion::FromRef;
+use rama::http::service::web::{Router, response::Html};
 
 use mini_apm::DbPool;
 
@@ -37,7 +37,6 @@ pub fn make_app(pool: DbPool) -> web::auth_middleware::WebAuthService<Router<App
         .with_get("/auth/users", web::auth::users_page)
         .with_post("/auth/users/create", web::auth::create_user)
         .with_post("/auth/users/delete", web::auth::delete_user)
-
         // Protected Web UI routes
         .with_get("/", web::dashboard::index)
         .with_get("/errors", web::errors::index)
@@ -54,10 +53,8 @@ pub fn make_app(pool: DbPool) -> web::auth_middleware::WebAuthService<Router<App
         .with_post("/projects/regenerate-key", web::projects::regenerate_key)
         .with_get("/api-key", web::api_key::index)
         .with_post("/api-key/regenerate", web::api_key::regenerate)
-
         // Static files
         .with_dir("/static", "./static")
-
         // 404 handler
         .with_not_found(Html("<h1>404 Not Found</h1>".to_owned()));
 

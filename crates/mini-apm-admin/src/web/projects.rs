@@ -1,11 +1,11 @@
 use askama::Template;
-use rama::http::service::web::extract::{Query, State, Form};
+use rama::http::service::web::extract::{Form, Query, State};
 use rama::http::service::web::response::{IntoResponse, Redirect};
 use serde::Deserialize;
 
-use mini_apm::{DbPool, models::project};
-use crate::template::HtmlTemplate;
 use crate::cookies::set_cookie_header;
+use crate::template::HtmlTemplate;
+use mini_apm::{DbPool, models::project};
 
 use super::project_context::WebProjectContext;
 
