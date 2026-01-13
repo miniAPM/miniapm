@@ -1,25 +1,12 @@
 [package]
 name = "mini-apm-cli"
-description = "Minimal APM for Rails - CLI"
-readme = "../../README.md"
-version.workspace = true
 edition.workspace = true
-license.workspace = true
-authors.workspace = true
-repository.workspace = true
-homepage.workspace = true
-keywords.workspace = true
-categories.workspace = true
-
-[[bin]]
-name = "mini-apm"
-path = "src/main.rs"
+version.workspace = true
+publish = false
 
 [dependencies]
 mini-apm = { workspace = true }
-mini-apm-admin = { workspace = true }
-tokio = { workspace = true }
 clap = { workspace = true }
-tracing = { workspace = true }
+tokio = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }

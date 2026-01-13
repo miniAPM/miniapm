@@ -1,0 +1,134 @@
+{% extends "layout.html" %}
+
+{% block title %}Traces - MiniAPM{% endblock %}
+
+{% block project_selector %}
+{% if ctx.show_selector() %}
+<form method="POST" action="/projects/switch" class="project-selector">
+    <select name="slug" onchange="this.form.submit()">
+        {% for project in ctx.projects %}
+        <option value="{{ project.slug }}" {% if ctx.is_current_project(project.id) %}selected{% endif %}>
+            {{ project.name }}
+        </option>
+        {% endfor %}
+    </select>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+<h1>Traces</h1>
+<p class="subtitle">{{ total_count }} trace{% if total_count != 1 %}s{% endif %} found</p>
+
+<div class="filter-bar">
+    <div class="filter-group">
+        <label>Type</label>
+        <div class="filters">
+            <a href="?period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if type_filter.is_none() %}active{% endif %}">All</a>
+            <a href="?type=web&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if type_filter.as_deref() == Some("web") %}active{% endif %}">Web</a>
+            <a href="?type=job&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if type_filter.as_deref() == Some("job") %}active{% endif %}">Jobs</a>
+            <a href="?type=command&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if type_filter.as_deref() == Some("command") %}active{% endif %}">Commands</a>
+        </div>
+    </div>
+
+    <div class="filter-group">
+        <label>Period</label>
+        <div class="filters">
+            <a href="?period=all&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if period == "all" %}active{% endif %}">All</a>
+            <a href="?period=1h&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if period == "1h" %}active{% endif %}">1h</a>
+            <a href="?period=24h&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if period == "24h" %}active{% endif %}">24h</a>
+            <a href="?period=7d&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if period == "7d" %}active{% endif %}">7d</a>
+            <a href="?period=30d&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if period == "30d" %}active{% endif %}">30d</a>
+        </div>
+    </div>
+
+    <div class="filter-group">
+        <label>Sort by</label>
+        <div class="filters">
+            <a href="?period={{ period }}&sort=recent{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if sort == "recent" %}active{% endif %}">Recent</a>
+            <a href="?period={{ period }}&sort=duration{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if sort == "duration" %}active{% endif %}">Duration</a>
+            <a href="?period={{ period }}&sort=spans{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if sort == "spans" %}active{% endif %}">Spans</a>
+        </div>
+    </div>
+
+    <div class="filter-group filter-search">
+        <label>Search</label>
+        <form method="GET" action="/traces" class="search-form">
+            <input type="hidden" name="period" value="{{ period }}">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            {% if let Some(t) = type_filter %}<input type="hidden" name="type" value="{{ t }}">{% endif %}
+            {% if let Some(d) = min_duration %}<input type="hidden" name="min_duration" value="{{ d }}">{% endif %}
+            <input type="text" name="search" placeholder="Name or URL..." value="{% if let Some(s) = search %}{{ s }}{% endif %}">
+            <button type="submit">Search</button>
+        </form>
+    </div>
+
+    <div class="filter-group">
+        <label>Min Duration</label>
+        <form method="GET" action="/traces" class="search-form">
+            <input type="hidden" name="period" value="{{ period }}">
+            <input type="hidden" name="sort" value="{{ sort }}">
+            {% if let Some(t) = type_filter %}<input type="hidden" name="type" value="{{ t }}">{% endif %}
+            {% if let Some(s) = search %}<input type="hidden" name="search" value="{{ s }}">{% endif %}
+            <input type="text" name="min_duration" placeholder="ms" value="{% if let Some(d) = min_duration %}{{ d }}{% endif %}" style="width: 80px;">
+            <button type="submit">Filter</button>
+        </form>
+    </div>
+</div>
+
+{% if traces.is_empty() %}
+<p class="empty">No traces found</p>
+{% else %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Name</th>
+                <th class="num">Duration</th>
+                <th class="num">Spans</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for trace in traces %}
+            <tr>
+                <td>{{ trace.happened_at }}</td>
+                <td>
+                    {% match trace.root_span_type %}
+                    {% when Some with (t) %}
+                    <span class="badge badge-{{ t.as_str() }}">{{ t.as_str() }}</span>
+                    {% when None %}
+                    <span class="badge badge-internal">internal</span>
+                    {% endmatch %}
+                </td>
+                <td>
+                    <a href="/traces/{{ trace.trace_id }}">{{ trace.display_name() }}</a>
+                </td>
+                <td class="num">{{ "{:.1}"|format(trace.duration_ms) }}ms</td>
+                <td class="num">{{ trace.span_count }}</td>
+                <td>
+                    <span class="status-code {{ trace.status_class() }}">{{ trace.status_label() }}</span>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% if total_pages > 1 %}
+<div class="pagination">
+    {% if page > 1 %}
+    <a href="?page={{ page - 1 }}&period={{ period }}&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="pagination-link">Previous</a>
+    {% endif %}
+
+    <span class="pagination-info">Page {{ page }} of {{ total_pages }}</span>
+
+    {% if page < total_pages %}
+    <a href="?page={{ page + 1 }}&period={{ period }}&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="pagination-link">Next</a>
+    {% endif %}
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

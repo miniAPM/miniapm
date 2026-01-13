@@ -1,14 +1,14 @@
 use askama::Template;
-use axum::extract::State;
+use rama::http::service::web::extract::State;
 use chrono::{Duration, Utc};
-use tower_cookies::Cookies;
 
 use mini_apm::{
     DbPool,
     models::{self, deploy::Deploy, span},
 };
+use crate::template::HtmlTemplate;
 
-use super::project_context::{WebProjectContext, get_project_context};
+use super::project_context::WebProjectContext;
 
 #[derive(Template)]
 #[template(path = "dashboard.html")]
@@ -25,8 +25,12 @@ pub struct DashboardTemplate {
     pub ctx: WebProjectContext,
 }
 
-pub async fn index(State(pool): State<DbPool>, cookies: Cookies) -> DashboardTemplate {
-    let ctx = get_project_context(&pool, &cookies);
+pub async fn index(State(pool): State<DbPool>) -> HtmlTemplate<DashboardTemplate> {
+    let ctx = WebProjectContext {
+        current_project: None,
+        projects: vec![],
+        projects_enabled: false,
+    };
     let project_id = ctx.project_id();
     let since = (Utc::now() - Duration::hours(24)).to_rfc3339();
 
@@ -43,7 +47,7 @@ pub async fn index(State(pool): State<DbPool>, cookies: Cookies) -> DashboardTem
     let hourly_stats = span::hourly_stats(&pool, project_id, 24).unwrap_or_default();
     let deploys = models::deploy::list_since(&pool, project_id, &since).unwrap_or_default();
 
-    DashboardTemplate {
+    HtmlTemplate(DashboardTemplate {
         requests_24h,
         errors_24h,
         avg_ms: latency_stats.avg_ms,
@@ -54,5 +58,5 @@ pub async fn index(State(pool): State<DbPool>, cookies: Cookies) -> DashboardTem
         hourly_stats,
         deploys,
         ctx,
-    }
+    })
 }

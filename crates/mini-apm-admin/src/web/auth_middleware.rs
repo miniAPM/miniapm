@@ -1,55 +1,121 @@
-use axum::{
-    body::Body,
-    extract::State,
-    http::Request,
-    middleware::Next,
-    response::{IntoResponse, Redirect, Response},
-};
-use axum_extra::extract::cookie::CookieJar;
-use std::env;
+use std::future::Future;
 
-use mini_apm::{DbPool, models};
+use rama::http::{Request, Response};
+use rama::http::service::web::response::Redirect;
+use rama::http::service::web::response::IntoResponse;
+use rama::extensions::ExtensionsMut;
+use rama::Layer;
+use rama::service::Service;
+
+use mini_apm::models;
+use crate::cookies::get_cookie;
+use crate::AppState;
 
 const SESSION_COOKIE: &str = "miniapm_session";
 
-/// Middleware that checks authentication when ENABLE_USER_ACCOUNTS is set
-pub async fn web_auth_middleware(
-    State(pool): State<DbPool>,
-    jar: CookieJar,
-    request: Request<Body>,
-    next: Next,
-) -> Response {
-    // Check if user accounts are enabled
-    let enabled = env::var("ENABLE_USER_ACCOUNTS")
-        .map(|v| v == "1" || v.to_lowercase() == "true")
-        .unwrap_or(false);
+/// User information extracted from session
+#[derive(Clone, Debug)]
+pub struct CurrentUser {
+    pub id: i64,
+    pub username: String,
+    pub is_admin: bool,
+    pub must_change_password: bool,
+}
 
-    if !enabled {
-        // User accounts disabled, allow access
-        return next.run(request).await;
+/// Layer that applies web session authentication
+#[derive(Clone)]
+pub struct WebAuthMiddleware {
+    state: AppState,
+}
+
+impl WebAuthMiddleware {
+    pub fn new(state: AppState) -> Self {
+        Self { state }
     }
+}
 
-    // Get session token from cookie
-    let token = match jar.get(SESSION_COOKIE) {
-        Some(cookie) => cookie.value().to_string(),
-        None => return Redirect::to("/auth/login").into_response(),
-    };
+impl<S> Layer<S> for WebAuthMiddleware {
+    type Service = WebAuthService<S>;
 
-    // Validate session
-    match models::user::get_user_from_session(&pool, &token) {
-        Ok(Some(user)) => {
-            // Check if password change is required
-            if user.must_change_password {
-                // Allow access to change-password page
-                let path = request.uri().path();
-                if path == "/auth/change-password" || path.starts_with("/static") {
-                    return next.run(request).await;
-                }
-                return Redirect::to("/auth/change-password").into_response();
-            }
-            // User authenticated, proceed
-            next.run(request).await
+    fn layer(&self, inner: S) -> Self::Service {
+        WebAuthService {
+            inner,
+            state: self.state.clone(),
         }
-        _ => Redirect::to("/auth/login").into_response(),
+    }
+}
+
+/// Service that validates web sessions
+pub struct WebAuthService<S> {
+    inner: S,
+    state: AppState,
+}
+
+impl<S> Service<Request> for WebAuthService<S>
+where
+    S: Service<Request, Output = Response, Error = std::convert::Infallible> + Send + Sync + 'static,
+{
+    type Output = Response;
+    type Error = std::convert::Infallible;
+
+    fn serve(&self, mut req: Request) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send + '_ {
+        let pool = self.state.pool.clone();
+        let enable_user_accounts = std::env::var("ENABLE_USER_ACCOUNTS")
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false);
+
+        async move {
+            let path = req.uri().path();
+
+            // Skip protection for unprotected routes
+            let is_unprotected = path == "/health"
+                || path.starts_with("/auth/login")
+                || path.starts_with("/auth/logout")
+                || path.starts_with("/auth/invite/")
+                || path.starts_with("/ingest/")
+                || path.starts_with("/static/");
+            let is_protected = !is_unprotected;
+
+            // If not a protected route or user accounts disabled, allow access
+            if !is_protected || !enable_user_accounts {
+                return self.inner.serve(req).await;
+            }
+
+            // Get session token from cookie
+            let token = match get_cookie(&req, SESSION_COOKIE) {
+                Some(token) => token,
+                None => return Ok(Redirect::temporary("/auth/login").into_response()),
+            };
+
+            // Validate session
+            match models::user::get_user_from_session(&pool, &token) {
+                Ok(Some(user)) => {
+                    // Check if password change is required
+                    if user.must_change_password {
+                        // Allow access to change-password page and static files
+                        if path == "/auth/change-password" || path.starts_with("/static") {
+                            req.extensions_mut().insert(CurrentUser {
+                                id: user.id,
+                                username: user.username.clone(),
+                                is_admin: user.is_admin,
+                                must_change_password: user.must_change_password,
+                            });
+                            return self.inner.serve(req).await;
+                        }
+                        return Ok(Redirect::temporary("/auth/change-password").into_response());
+                    }
+
+                    // User authenticated, inject CurrentUser and proceed
+                    req.extensions_mut().insert(CurrentUser {
+                        id: user.id,
+                        username: user.username.clone(),
+                        is_admin: user.is_admin,
+                        must_change_password: user.must_change_password,
+                    });
+                    self.inner.serve(req).await
+                }
+                _ => Ok(Redirect::temporary("/auth/login").into_response()),
+            }
+        }
     }
 }

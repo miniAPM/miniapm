@@ -1,0 +1,105 @@
+{% extends "layout.html" %}
+
+{% block title %}Users - MiniAPM{% endblock %}
+
+{% block content %}
+<h1>User Management</h1>
+
+{% if let Some(err) = error %}
+<div class="alert alert-error">{{ err }}</div>
+{% endif %}
+
+{% if let Some(msg) = success %}
+<div class="alert alert-success">{{ msg }}</div>
+{% endif %}
+
+<div class="grid-2">
+    <section class="card">
+        <h2>Add User</h2>
+        {% if let Some(url) = invite_url %}
+        <div class="alert alert-success">
+            <strong>Invite link created:</strong>
+            <div class="input-with-copy">
+                <input type="text" id="invite-url" value="{{ url }}" readonly onclick="this.select()">
+                <button type="button" class="copy-btn" onclick="copyInviteUrl()" title="Copy to clipboard">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/>
+                        <path d="M2 6a2 2 0 0 1 2-2v10a1 1 0 0 0 1 1h8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z"/>
+                    </svg>
+                </button>
+            </div>
+            <small>Share this link with the user. It expires in 7 days.</small>
+        </div>
+        <script>
+        function copyInviteUrl() {
+            const input = document.getElementById('invite-url');
+            navigator.clipboard.writeText(input.value).then(() => {
+                const btn = document.querySelector('.copy-btn');
+                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/></svg>';
+                setTimeout(() => {
+                    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v8a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H6z"/><path d="M2 6a2 2 0 0 1 2-2v10a1 1 0 0 0 1 1h8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6z"/></svg>';
+                }, 2000);
+            });
+        }
+        </script>
+        {% endif %}
+        <form method="POST" action="/auth/users/create">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required>
+            </div>
+            <div class="form-group checkbox-group">
+                <label>
+                    <input type="checkbox" name="is_admin">
+                    Admin privileges
+                </label>
+            </div>
+            <button type="submit" class="btn btn-primary">Create User</button>
+        </form>
+    </section>
+
+    <section class="card">
+        <h2>Users</h2>
+        <div class="table-wrapper">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Username</th>
+                        <th>Role</th>
+                        <th>Last Login</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td>
+                            {{ u.username }}
+                            {% if u.id == current_user_id %}
+                            <span class="badge badge-you">you</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if u.is_admin %}
+                            <span class="badge badge-admin">admin</span>
+                            {% else %}
+                            <span class="badge badge-user">user</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ u.last_login_at.as_deref().unwrap_or("-") }}</td>
+                        <td>
+                            {% if u.id != current_user_id %}
+                            <form method="POST" action="/auth/users/delete" class="inline-form" onsubmit="return confirm('Delete user {{ u.username }}?')">
+                                <input type="hidden" name="user_id" value="{{ u.id }}">
+                                <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+{% endblock %}

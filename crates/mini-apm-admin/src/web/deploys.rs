@@ -1,8 +1,7 @@
 use askama::Template;
-use axum::extract::State;
-use axum::http::Request;
-use axum::http::header::HOST;
-use tower_cookies::Cookies;
+use rama::http::service::web::extract::State;
+use rama::http::Request;
+use rama::http::header::HOST;
 
 use mini_apm::{
     DbPool,
@@ -11,8 +10,9 @@ use mini_apm::{
         project,
     },
 };
+use crate::template::HtmlTemplate;
 
-use super::project_context::{WebProjectContext, get_project_context};
+use super::project_context::WebProjectContext;
 
 #[derive(Template)]
 #[template(path = "deploys/index.html")]
@@ -23,12 +23,15 @@ pub struct DeploysTemplate {
     pub ctx: WebProjectContext,
 }
 
-pub async fn index<B>(
+pub async fn index(
     State(pool): State<DbPool>,
-    cookies: Cookies,
-    request: Request<B>,
-) -> DeploysTemplate {
-    let ctx = get_project_context(&pool, &cookies);
+    request: Request,
+) -> HtmlTemplate<DeploysTemplate> {
+    let ctx = WebProjectContext {
+        current_project: None,
+        projects: vec![],
+        projects_enabled: false,
+    };
     let project_id = ctx.project_id();
     let deploys = deploy::list(&pool, project_id, 50).unwrap_or_default();
 
@@ -51,10 +54,10 @@ pub async fn index<B>(
 
     let base_url = format!("{}://{}", scheme, host);
 
-    DeploysTemplate {
+    HtmlTemplate(DeploysTemplate {
         deploys,
         api_key,
         base_url,
         ctx,
-    }
+    })
 }

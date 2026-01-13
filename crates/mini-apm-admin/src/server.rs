@@ -9,7 +9,7 @@ use tokio::signal;
 use tower_cookies::CookieManagerLayer;
 use tower_http::trace::TraceLayer;
 
-use mini_apm::{DbPool, config::Config, jobs, models};
+use mini-apm::{DbPool, config::Config, jobs, models};
 use crate::{api, web};
 
 /// Combined state for routes that need both pool and config
