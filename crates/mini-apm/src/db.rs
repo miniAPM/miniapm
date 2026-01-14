@@ -265,3 +265,106 @@ pub fn get_db_size(pool: &DbPool) -> anyhow::Result<f64> {
     )?;
     Ok(size as f64 / 1_048_576.0) // Convert to MB
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> Config {
+        Config {
+            sqlite_path: ":memory:".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_init_creates_pool() {
+        let config = test_config();
+        let pool = init(&config);
+
+        assert!(pool.is_ok());
+        let pool = pool.unwrap();
+        assert!(pool.get().is_ok());
+    }
+
+    #[test]
+    fn test_init_creates_tables() {
+        let config = test_config();
+        let pool = init(&config).unwrap();
+        let conn = pool.get().unwrap();
+
+        // Check that all expected tables exist
+        let tables = vec![
+            "projects",
+            "users",
+            "sessions",
+            "errors",
+            "error_occurrences",
+            "deploys",
+            "spans",
+            "requests",
+            "rollups_hourly",
+            "rollups_daily",
+            "api_keys",
+            "settings",
+        ];
+
+        for table in tables {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            assert!(exists, "Table {} should exist", table);
+        }
+    }
+
+    #[test]
+    fn test_init_creates_indexes() {
+        let config = test_config();
+        let pool = init(&config).unwrap();
+        let conn = pool.get().unwrap();
+
+        // Check some key indexes exist
+        let indexes = vec![
+            "idx_spans_trace_id",
+            "idx_errors_project_id",
+            "idx_projects_api_key",
+        ];
+
+        for index in indexes {
+            let exists: bool = conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1",
+                    [index],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            assert!(exists, "Index {} should exist", index);
+        }
+    }
+
+    #[test]
+    fn test_get_db_size() {
+        let config = test_config();
+        let pool = init(&config).unwrap();
+
+        let size = get_db_size(&pool).unwrap();
+
+        // In-memory DB should have some size
+        assert!(size >= 0.0);
+    }
+
+    #[test]
+    fn test_multiple_init_is_idempotent() {
+        let config = test_config();
+        let pool = init(&config).unwrap();
+
+        // Run migrate again (simulates restart)
+        let result = migrate(&pool);
+
+        assert!(result.is_ok());
+    }
+}

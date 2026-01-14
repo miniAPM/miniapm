@@ -168,3 +168,191 @@ pub fn delete_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
     let deleted = conn.execute("DELETE FROM deploys WHERE deployed_at < ?1", [before])?;
     Ok(deleted)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::db;
+
+    fn test_pool() -> DbPool {
+        let config = Config::default();
+        db::init(&config).expect("Failed to create test database")
+    }
+
+    #[test]
+    fn test_short_sha_full() {
+        let deploy = Deploy {
+            id: 1,
+            project_id: None,
+            git_sha: "abc123def456".to_string(),
+            version: None,
+            env: None,
+            deployed_at: "2024-01-01".to_string(),
+            description: None,
+            deployer: None,
+        };
+        assert_eq!(deploy.short_sha(), "abc123d");
+    }
+
+    #[test]
+    fn test_short_sha_short() {
+        let deploy = Deploy {
+            id: 1,
+            project_id: None,
+            git_sha: "abc".to_string(),
+            version: None,
+            env: None,
+            deployed_at: "2024-01-01".to_string(),
+            description: None,
+            deployer: None,
+        };
+        assert_eq!(deploy.short_sha(), "abc");
+    }
+
+    #[test]
+    fn test_insert_deploy() {
+        let pool = test_pool();
+        let incoming = IncomingDeploy {
+            git_sha: "abc123".to_string(),
+            version: Some("v1.0.0".to_string()),
+            env: Some("production".to_string()),
+            description: Some("Initial release".to_string()),
+            deployer: Some("ci".to_string()),
+            timestamp: None,
+        };
+
+        let id = insert(&pool, &incoming, None).unwrap();
+
+        assert!(id > 0);
+    }
+
+    #[test]
+    fn test_insert_deploy_with_project() {
+        let pool = test_pool();
+        let project = crate::models::project::create(&pool, "Test").unwrap();
+
+        let incoming = IncomingDeploy {
+            git_sha: "def456".to_string(),
+            version: None,
+            env: None,
+            description: None,
+            deployer: None,
+            timestamp: None,
+        };
+
+        let id = insert(&pool, &incoming, Some(project.id)).unwrap();
+        let deploys = list(&pool, Some(project.id), 10).unwrap();
+
+        assert_eq!(deploys.len(), 1);
+        assert_eq!(deploys[0].id, id);
+        assert_eq!(deploys[0].project_id, Some(project.id));
+    }
+
+    #[test]
+    fn test_list_deploys() {
+        let pool = test_pool();
+
+        for i in 0..5 {
+            let incoming = IncomingDeploy {
+                git_sha: format!("sha{}", i),
+                version: None,
+                env: None,
+                description: None,
+                deployer: None,
+                timestamp: None,
+            };
+            insert(&pool, &incoming, None).unwrap();
+        }
+
+        let deploys = list(&pool, None, 10).unwrap();
+        assert_eq!(deploys.len(), 5);
+    }
+
+    #[test]
+    fn test_list_deploys_limit() {
+        let pool = test_pool();
+
+        for i in 0..5 {
+            let incoming = IncomingDeploy {
+                git_sha: format!("sha{}", i),
+                version: None,
+                env: None,
+                description: None,
+                deployer: None,
+                timestamp: None,
+            };
+            insert(&pool, &incoming, None).unwrap();
+        }
+
+        let deploys = list(&pool, None, 3).unwrap();
+        assert_eq!(deploys.len(), 3);
+    }
+
+    #[test]
+    fn test_latest_deploy() {
+        let pool = test_pool();
+
+        let incoming1 = IncomingDeploy {
+            git_sha: "first".to_string(),
+            version: None,
+            env: None,
+            description: None,
+            deployer: None,
+            timestamp: Some("2024-01-01T00:00:00Z".to_string()),
+        };
+        insert(&pool, &incoming1, None).unwrap();
+
+        let incoming2 = IncomingDeploy {
+            git_sha: "second".to_string(),
+            version: None,
+            env: None,
+            description: None,
+            deployer: None,
+            timestamp: Some("2024-01-02T00:00:00Z".to_string()),
+        };
+        insert(&pool, &incoming2, None).unwrap();
+
+        let deploy = latest(&pool, None).unwrap().unwrap();
+        assert_eq!(deploy.git_sha, "second");
+    }
+
+    #[test]
+    fn test_latest_deploy_empty() {
+        let pool = test_pool();
+        let deploy = latest(&pool, None).unwrap();
+        assert!(deploy.is_none());
+    }
+
+    #[test]
+    fn test_delete_before() {
+        let pool = test_pool();
+
+        let old = IncomingDeploy {
+            git_sha: "old".to_string(),
+            version: None,
+            env: None,
+            description: None,
+            deployer: None,
+            timestamp: Some("2020-01-01T00:00:00Z".to_string()),
+        };
+        insert(&pool, &old, None).unwrap();
+
+        let recent = IncomingDeploy {
+            git_sha: "recent".to_string(),
+            version: None,
+            env: None,
+            description: None,
+            deployer: None,
+            timestamp: Some("2024-01-01T00:00:00Z".to_string()),
+        };
+        insert(&pool, &recent, None).unwrap();
+
+        let deleted = delete_before(&pool, "2023-01-01").unwrap();
+        assert_eq!(deleted, 1);
+
+        let remaining = list(&pool, None, 10).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].git_sha, "recent");
+    }
+}

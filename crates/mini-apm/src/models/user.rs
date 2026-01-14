@@ -342,3 +342,209 @@ pub fn accept_invite(pool: &DbPool, user_id: i64, password: &str) -> anyhow::Res
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::db;
+
+    fn test_pool() -> DbPool {
+        let config = Config::default();
+        db::init(&config).expect("Failed to create test database")
+    }
+
+    #[test]
+    fn test_hash_and_verify_password() {
+        let password = "secret123";
+        let hash = hash_password(password).unwrap();
+
+        assert!(verify_password(password, &hash));
+        assert!(!verify_password("wrong", &hash));
+    }
+
+    #[test]
+    fn test_hash_password_unique() {
+        let hash1 = hash_password("same").unwrap();
+        let hash2 = hash_password("same").unwrap();
+
+        // Hashes should be different due to random salt
+        assert_ne!(hash1, hash2);
+        // But both should verify
+        assert!(verify_password("same", &hash1));
+        assert!(verify_password("same", &hash2));
+    }
+
+    #[test]
+    fn test_verify_invalid_hash() {
+        assert!(!verify_password("password", "not-a-valid-hash"));
+    }
+
+    #[test]
+    fn test_generate_invite_token_format() {
+        let token = generate_invite_token();
+        assert_eq!(token.len(), 24); // 12 bytes = 24 hex chars
+    }
+
+    #[test]
+    fn test_ensure_default_admin() {
+        let pool = test_pool();
+
+        ensure_default_admin(&pool).unwrap();
+
+        let users = list_all(&pool).unwrap();
+        assert_eq!(users.len(), 1);
+        assert_eq!(users[0].username, "admin");
+        assert!(users[0].is_admin);
+        assert!(users[0].must_change_password);
+    }
+
+    #[test]
+    fn test_ensure_default_admin_idempotent() {
+        let pool = test_pool();
+
+        ensure_default_admin(&pool).unwrap();
+        ensure_default_admin(&pool).unwrap();
+
+        let users = list_all(&pool).unwrap();
+        assert_eq!(users.len(), 1);
+    }
+
+    #[test]
+    fn test_create_user() {
+        let pool = test_pool();
+
+        let id = create(&pool, "testuser", "password123", false).unwrap();
+
+        let user = find(&pool, id).unwrap().unwrap();
+        assert_eq!(user.username, "testuser");
+        assert!(!user.is_admin);
+        assert!(!user.must_change_password);
+    }
+
+    #[test]
+    fn test_create_admin_user() {
+        let pool = test_pool();
+
+        let id = create(&pool, "admin2", "password", true).unwrap();
+
+        let user = find(&pool, id).unwrap().unwrap();
+        assert!(user.is_admin);
+    }
+
+    #[test]
+    fn test_authenticate_success() {
+        let pool = test_pool();
+        create(&pool, "authuser", "secret", false).unwrap();
+
+        let user = authenticate(&pool, "authuser", "secret").unwrap();
+
+        assert!(user.is_some());
+        assert_eq!(user.unwrap().username, "authuser");
+    }
+
+    #[test]
+    fn test_authenticate_wrong_password() {
+        let pool = test_pool();
+        create(&pool, "authuser2", "secret", false).unwrap();
+
+        let user = authenticate(&pool, "authuser2", "wrong").unwrap();
+
+        assert!(user.is_none());
+    }
+
+    #[test]
+    fn test_authenticate_nonexistent_user() {
+        let pool = test_pool();
+
+        let user = authenticate(&pool, "nobody", "password").unwrap();
+
+        assert!(user.is_none());
+    }
+
+    #[test]
+    fn test_session_lifecycle() {
+        let pool = test_pool();
+        let user_id = create(&pool, "sessionuser", "pass", false).unwrap();
+
+        // Create session
+        let token = create_session(&pool, user_id).unwrap();
+        assert_eq!(token.len(), 64); // 32 bytes = 64 hex chars
+
+        // Get user from session
+        let user = get_user_from_session(&pool, &token).unwrap();
+        assert!(user.is_some());
+        assert_eq!(user.unwrap().id, user_id);
+
+        // Delete session
+        delete_session(&pool, &token).unwrap();
+
+        // Session should be gone
+        let user = get_user_from_session(&pool, &token).unwrap();
+        assert!(user.is_none());
+    }
+
+    #[test]
+    fn test_change_password() {
+        let pool = test_pool();
+        let user_id = create(&pool, "changepass", "old", false).unwrap();
+
+        change_password(&pool, user_id, "new").unwrap();
+
+        // Old password should fail
+        let result = authenticate(&pool, "changepass", "old").unwrap();
+        assert!(result.is_none());
+
+        // New password should work
+        let result = authenticate(&pool, "changepass", "new").unwrap();
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn test_delete_user() {
+        let pool = test_pool();
+        let user_id = create(&pool, "deleteme", "pass", false).unwrap();
+
+        delete(&pool, user_id).unwrap();
+
+        let user = find(&pool, user_id).unwrap();
+        assert!(user.is_none());
+    }
+
+    #[test]
+    fn test_list_all_users() {
+        let pool = test_pool();
+        create(&pool, "user1", "pass", false).unwrap();
+        create(&pool, "user2", "pass", true).unwrap();
+
+        let users = list_all(&pool).unwrap();
+
+        assert_eq!(users.len(), 2);
+    }
+
+    #[test]
+    fn test_invite_flow() {
+        let pool = test_pool();
+
+        // Create user with invite
+        let invite_token = create_with_invite(&pool, "invited", false).unwrap();
+
+        // Find by invite token
+        let user = find_by_invite_token(&pool, &invite_token).unwrap();
+        assert!(user.is_some());
+        let user = user.unwrap();
+        assert_eq!(user.username, "invited");
+        assert!(user.password_hash.is_none());
+
+        // Accept invite
+        accept_invite(&pool, user.id, "newpassword").unwrap();
+
+        // Invite token should no longer work
+        let user = find_by_invite_token(&pool, &invite_token).unwrap();
+        assert!(user.is_none());
+
+        // But user can now authenticate
+        let user = authenticate(&pool, "invited", "newpassword").unwrap();
+        assert!(user.is_some());
+    }
+}

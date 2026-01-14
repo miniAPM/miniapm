@@ -80,3 +80,20 @@ impl Config {
         self.api_key.as_ref().is_some_and(|k| !k.is_empty())
     }
 }
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            sqlite_path: ":memory:".to_string(),
+            api_key: None,
+            retention_days_errors: 30,
+            retention_days_hourly_rollups: 90,
+            retention_days_spans: 7,
+            slow_request_threshold_ms: 500.0,
+            mini_apm_url: "http://localhost:3000".to_string(),
+            enable_user_accounts: false,
+            enable_projects: false,
+            session_secret: "test-secret".to_string(),
+        }
+    }
+}
