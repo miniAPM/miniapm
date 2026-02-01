@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use mini_apm::{config::Config, db};
+use mini_apm::{config::Config, db, models};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[derive(Parser)]
@@ -19,6 +19,15 @@ enum Commands {
     },
     /// List all API keys
     ListKeys,
+    /// Reset a user's password
+    ResetPassword {
+        /// Username to reset password for
+        username: String,
+        /// New password
+        password: String,
+    },
+    /// List all users
+    ListUsers,
 }
 
 #[tokio::main]
@@ -56,6 +65,33 @@ async fn main() -> anyhow::Result<()> {
                         k.name,
                         k.created_at,
                         k.last_used_at.as_deref().unwrap_or("never")
+                    );
+                }
+            }
+        }
+        Commands::ResetPassword { username, password } => {
+            let pool = db::init(&config)?;
+            match models::user::reset_password(&pool, &username, &password) {
+                Ok(()) => {
+                    println!("Password reset successfully for user: {}", username);
+                }
+                Err(e) => {
+                    eprintln!("Failed to reset password: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::ListUsers => {
+            let pool = db::init(&config)?;
+            let users = models::user::list_all(&pool)?;
+            if users.is_empty() {
+                println!("No users found.");
+            } else {
+                println!("Users:");
+                for u in users {
+                    println!(
+                        "  - {} (admin: {}, must_change_password: {})",
+                        u.username, u.is_admin, u.must_change_password
                     );
                 }
             }

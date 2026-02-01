@@ -30,9 +30,10 @@ COPY --from=builder /app/crates/mini-apm-admin/static ./static
 ENV SQLITE_PATH=/data/miniapm.db
 # Note: Don't use VOLUME here - let Docker Swarm/CapRover manage volume mounts
 
-EXPOSE 3000
+EXPOSE 3001
 
+# Check root path since /health doesn't exist
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
-  CMD curl -sf http://localhost:3000/health || exit 1
+  CMD curl -sf http://localhost:3001/ || exit 1
 
-CMD ["miniapm"]
+CMD ["miniapm-admin"]

@@ -80,3 +80,148 @@ fn hash_key(raw_key: &str) -> String {
     hasher.update(raw_key.as_bytes());
     hex::encode(hasher.finalize())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::db;
+
+    fn test_pool() -> DbPool {
+        let config = Config::default();
+        db::init(&config).expect("Failed to create test database")
+    }
+
+    #[test]
+    fn test_create_api_key_format() {
+        let pool = test_pool();
+
+        let key = create(&pool, "test-key").unwrap();
+
+        // Should start with prefix
+        assert!(key.starts_with(PREFIX));
+        // Should be prefix (11 chars) + 48 hex chars = 59 total
+        assert_eq!(key.len(), 11 + 48);
+    }
+
+    #[test]
+    fn test_create_api_key_unique() {
+        let pool = test_pool();
+
+        let key1 = create(&pool, "key1").unwrap();
+        let key2 = create(&pool, "key2").unwrap();
+
+        assert_ne!(key1, key2);
+    }
+
+    #[test]
+    fn test_verify_valid_key() {
+        let pool = test_pool();
+
+        let key = create(&pool, "test-key").unwrap();
+        let is_valid = verify(&pool, &key).unwrap();
+
+        assert!(is_valid);
+    }
+
+    #[test]
+    fn test_verify_invalid_key() {
+        let pool = test_pool();
+
+        let is_valid = verify(&pool, "mini_apm_k_invalid_key_12345").unwrap();
+
+        assert!(!is_valid);
+    }
+
+    #[test]
+    fn test_verify_empty_key() {
+        let pool = test_pool();
+
+        let is_valid = verify(&pool, "").unwrap();
+
+        assert!(!is_valid);
+    }
+
+    #[test]
+    fn test_verify_updates_last_used_at() {
+        let pool = test_pool();
+
+        let key = create(&pool, "test-key").unwrap();
+
+        // Initially last_used_at should be None
+        let keys = list(&pool).unwrap();
+        assert!(keys[0].last_used_at.is_none());
+
+        // Verify the key (which updates last_used_at)
+        verify(&pool, &key).unwrap();
+
+        // Now last_used_at should be set
+        let keys = list(&pool).unwrap();
+        assert!(keys[0].last_used_at.is_some());
+    }
+
+    #[test]
+    fn test_list_api_keys() {
+        let pool = test_pool();
+
+        create(&pool, "key-alpha").unwrap();
+        create(&pool, "key-beta").unwrap();
+
+        let keys = list(&pool).unwrap();
+
+        assert_eq!(keys.len(), 2);
+        // Should be ordered by created_at
+        assert_eq!(keys[0].name, "key-alpha");
+        assert_eq!(keys[1].name, "key-beta");
+    }
+
+    #[test]
+    fn test_list_empty() {
+        let pool = test_pool();
+
+        let keys = list(&pool).unwrap();
+
+        assert!(keys.is_empty());
+    }
+
+    #[test]
+    fn test_hash_key_deterministic() {
+        let key = "mini_apm_k_test123";
+
+        let hash1 = hash_key(key);
+        let hash2 = hash_key(key);
+
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_key_different_inputs() {
+        let hash1 = hash_key("key1");
+        let hash2 = hash_key("key2");
+
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_key_length() {
+        let hash = hash_key("test");
+
+        // SHA256 produces 32 bytes = 64 hex chars
+        assert_eq!(hash.len(), 64);
+    }
+
+    #[test]
+    fn test_api_key_struct_fields() {
+        let pool = test_pool();
+
+        create(&pool, "my-api-key").unwrap();
+
+        let keys = list(&pool).unwrap();
+        let key = &keys[0];
+
+        assert!(key.id > 0);
+        assert_eq!(key.name, "my-api-key");
+        assert!(!key.created_at.is_empty());
+        assert!(key.last_used_at.is_none());
+    }
+}

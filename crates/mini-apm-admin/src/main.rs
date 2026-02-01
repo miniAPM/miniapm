@@ -18,11 +18,16 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "miniapm-admin=info".into()),
+                .unwrap_or_else(|_| "mini_apm_admin=info".into()),
         )
         .init();
 
     let config = Config::from_env()?;
+
+    // Validate configuration before starting
+    config.validate()?;
+    config.log_summary();
+
     let pool = db::init(&config)?;
     models::user::ensure_default_admin(&pool)?;
 

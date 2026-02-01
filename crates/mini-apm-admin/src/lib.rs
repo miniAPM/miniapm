@@ -22,7 +22,13 @@ impl FromRef<AppState> for DbPool {
     }
 }
 
-pub fn make_app(pool: DbPool) -> web::auth_middleware::WebAuthService<Router<AppState>> {
+pub fn make_app(
+    pool: DbPool,
+) -> mini_apm::api::rate_limit::RateLimitService<
+    web::security_headers::SecurityHeadersService<
+        web::auth_middleware::WebAuthService<Router<AppState>>,
+    >,
+> {
     let state = AppState { pool };
 
     let app = Router::new_with_state(state.clone())
@@ -58,7 +64,16 @@ pub fn make_app(pool: DbPool) -> web::auth_middleware::WebAuthService<Router<App
         // 404 handler
         .with_not_found(Html("<h1>404 Not Found</h1>".to_owned()));
 
-    // Apply middleware layer
+    // Apply middleware layers (outermost first)
+    // Auth middleware checks authentication
     let auth_layer = web::auth_middleware::WebAuthMiddleware::new(state.clone());
-    auth_layer.layer(app)
+    let with_auth = auth_layer.layer(app);
+
+    // Security headers middleware adds security headers to all responses
+    let security_layer = web::security_headers::SecurityHeadersMiddleware::new();
+    let with_security = security_layer.layer(with_auth);
+
+    // Rate limiting middleware (100 requests per minute per IP)
+    let rate_limit = mini_apm::api::RateLimitMiddleware::with_defaults();
+    rate_limit.layer(with_security)
 }

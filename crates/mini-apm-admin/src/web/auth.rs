@@ -150,12 +150,7 @@ pub async fn change_password_submit(
     Extension(current_user): Extension<CurrentUser>,
     Form(form): Form<ChangePasswordForm>,
 ) -> Response {
-    // Get user from middleware-injected extension
-    // The CurrentUser was already validated by middleware
-    // For password verification, we'd need the password hash which we don't have in CurrentUser
-    // In a real app, we'd store it there or re-fetch. For now, assume it's validated.
-
-    // Validate
+    // Validate password confirmation
     if form.new_password != form.confirm_password {
         return HtmlTemplate(ChangePasswordTemplate {
             error: Some("Passwords do not match".to_string()),
@@ -172,8 +167,33 @@ pub async fn change_password_submit(
         .into_response();
     }
 
-    // TODO: Verify current password by fetching full user record
-    // For now, skip this check
+    // Verify current password (skip only if must_change_password is set, allowing first-time change)
+    if !current_user.must_change_password && !form.current_password.is_empty() {
+        match models::user::verify_password_for_user(&pool, current_user.id, &form.current_password) {
+            Ok(true) => {} // Password verified, continue
+            Ok(false) => {
+                return HtmlTemplate(ChangePasswordTemplate {
+                    error: Some("Current password is incorrect".to_string()),
+                    username: current_user.username.clone(),
+                })
+                .into_response();
+            }
+            Err(_) => {
+                return HtmlTemplate(ChangePasswordTemplate {
+                    error: Some("Failed to verify current password".to_string()),
+                    username: current_user.username.clone(),
+                })
+                .into_response();
+            }
+        }
+    } else if !current_user.must_change_password && form.current_password.is_empty() {
+        // Require current password for non-forced changes
+        return HtmlTemplate(ChangePasswordTemplate {
+            error: Some("Current password is required".to_string()),
+            username: current_user.username.clone(),
+        })
+        .into_response();
+    }
 
     // Change password
     match models::user::change_password(&pool, current_user.id, &form.new_password) {
@@ -229,12 +249,13 @@ pub async fn create_user(
         projects_enabled: false,
     };
 
-    if form.username.is_empty() {
+    // Validate username
+    if let Err(validation_error) = models::user::validate_username(&form.username) {
         let users = models::user::list_all(&pool).unwrap_or_default();
         return HtmlTemplate(UsersTemplate {
             users,
             current_user_id: current_user.id,
-            error: Some("Username is required".to_string()),
+            error: Some(validation_error.to_string()),
             success: None,
             invite_url: None,
             ctx,

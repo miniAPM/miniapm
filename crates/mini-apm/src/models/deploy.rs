@@ -34,6 +34,20 @@ pub struct IncomingDeploy {
     pub timestamp: Option<String>,
 }
 
+/// Helper function to map a database row to a Deploy struct
+fn map_row_to_deploy(row: &rusqlite::Row) -> rusqlite::Result<Deploy> {
+    Ok(Deploy {
+        id: row.get(0)?,
+        project_id: row.get(1)?,
+        git_sha: row.get(2)?,
+        version: row.get(3)?,
+        env: row.get(4)?,
+        deployed_at: row.get(5)?,
+        description: row.get(6)?,
+        deployer: row.get(7)?,
+    })
+}
+
 pub fn insert(
     pool: &DbPool,
     deploy: &IncomingDeploy,
@@ -77,18 +91,7 @@ pub fn list(pool: &DbPool, project_id: Option<i64>, limit: i64) -> anyhow::Resul
     )?;
 
     let deploys = stmt
-        .query_map(rusqlite::params![project_id, limit], |row| {
-            Ok(Deploy {
-                id: row.get(0)?,
-                project_id: row.get(1)?,
-                git_sha: row.get(2)?,
-                version: row.get(3)?,
-                env: row.get(4)?,
-                deployed_at: row.get(5)?,
-                description: row.get(6)?,
-                deployer: row.get(7)?,
-            })
-        })?
+        .query_map(rusqlite::params![project_id, limit], map_row_to_deploy)?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(deploys)
@@ -113,18 +116,7 @@ pub fn list_since(
     )?;
 
     let deploys = stmt
-        .query_map(rusqlite::params![since, project_id], |row| {
-            Ok(Deploy {
-                id: row.get(0)?,
-                project_id: row.get(1)?,
-                git_sha: row.get(2)?,
-                version: row.get(3)?,
-                env: row.get(4)?,
-                deployed_at: row.get(5)?,
-                description: row.get(6)?,
-                deployer: row.get(7)?,
-            })
-        })?
+        .query_map(rusqlite::params![since, project_id], map_row_to_deploy)?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(deploys)
@@ -145,18 +137,7 @@ pub fn latest(pool: &DbPool, project_id: Option<i64>) -> anyhow::Result<Option<D
             LIMIT 1
             "#,
             rusqlite::params![project_id],
-            |row| {
-                Ok(Deploy {
-                    id: row.get(0)?,
-                    project_id: row.get(1)?,
-                    git_sha: row.get(2)?,
-                    version: row.get(3)?,
-                    env: row.get(4)?,
-                    deployed_at: row.get(5)?,
-                    description: row.get(6)?,
-                    deployer: row.get(7)?,
-                })
-            },
+            map_row_to_deploy,
         )
         .ok();
 

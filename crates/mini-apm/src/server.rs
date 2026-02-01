@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use rama::Layer;
 use rama::conversion::FromRef;
 use rama::graceful::Shutdown;
 use rama::http::server::HttpServer;

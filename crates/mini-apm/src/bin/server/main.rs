@@ -16,12 +16,17 @@ async fn main() -> anyhow::Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "miniapm=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "mini_apm=info,tower_http=info".into()),
         )
         .init();
 
     let cli = Cli::parse();
     let config = Config::from_env()?;
+
+    // Validate configuration before starting
+    config.validate()?;
+    config.log_summary();
+
     let pool = db::init(&config)?;
 
     server::run(pool, config, cli.port).await?;

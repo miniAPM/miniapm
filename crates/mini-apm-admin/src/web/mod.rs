@@ -7,7 +7,9 @@ pub mod errors;
 pub mod performance;
 pub mod project_context;
 pub mod projects;
+pub mod security_headers;
 pub mod traces;
 
 pub use auth_middleware::WebAuthMiddleware;
 pub use project_context::WebProjectContext;
+pub use security_headers::SecurityHeadersMiddleware;

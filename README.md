@@ -1,6 +1,6 @@
 # MiniAPM
 
-The smallest useful APM. A single-binary, self-hosted application performance monitor and error tracker built on OpenTelemetry.
+The smallest useful APM. A self-hosted application performance monitor and error tracker built on OpenTelemetry.
 
 ![MiniAPM Dashboard](screenshot.png)
 
@@ -12,17 +12,61 @@ The smallest useful APM. A single-binary, self-hosted application performance mo
 - **N+1 Query Detection** - Automatically identifies repeated query patterns
 - **Deploy Tracking** - Correlate releases with performance changes
 
+## Architecture
+
+MiniAPM consists of two services:
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `miniapm` | 3000 | **Collector** - Ingestion API for traces, errors, deploys |
+| `miniapm-admin` | 3001 | **Dashboard** - Web UI for viewing and managing data |
+
+Both services share the same SQLite database.
+
 ## Quick Start
 
-### Docker (recommended)
+### Docker Compose (recommended)
+
+```yaml
+services:
+  miniapm:
+    image: ghcr.io/miniapm/miniapm
+    command: miniapm
+    ports:
+      - "3000:3000"
+    volumes:
+      - miniapm_data:/data
+    environment:
+      - RUST_LOG=mini_apm=info
+
+  miniapm-admin:
+    image: ghcr.io/miniapm/miniapm
+    command: miniapm-admin
+    ports:
+      - "3001:3001"
+    volumes:
+      - miniapm_data:/data
+    environment:
+      - RUST_LOG=mini_apm_admin=info
+      - ENABLE_USER_ACCOUNTS=true
+      - SESSION_SECRET=change-me-to-random-string
+    depends_on:
+      - miniapm
+
+volumes:
+  miniapm_data:
+```
 
 ```bash
-docker run -d -p 3000:3000 -v miniapm_data:/data ghcr.io/miniapm/miniapm
+docker compose up -d
 ```
 
-On first run, you'll see your API key in the logs:
+- Collector API: http://localhost:3000
+- Dashboard: http://localhost:3001
+
+On first run, check collector logs for API key:
 ```
-INFO miniapm::server: Single-project mode - API key: proj_abc123...
+INFO mini_apm::server: Single-project mode - API key: proj_abc123...
 ```
 
 ### From Source
@@ -31,12 +75,11 @@ INFO miniapm::server: Single-project mode - API key: proj_abc123...
 git clone https://github.com/miniapm/miniapm
 cd miniapm
 
-# Run the server
-cargo run -p miniapm
+# Run collector
+cargo run -p mini-apm
 
-# Or build and run
-cargo build --release -p miniapm
-./target/release/miniapm
+# Run admin dashboard (in another terminal)
+cargo run -p mini-apm-admin
 ```
 
 ## Sending Data
@@ -72,9 +115,9 @@ curl -X POST http://localhost:3000/ingest/errors \
   -H "Authorization: Bearer proj_abc123..." \
   -H "Content-Type: application/json" \
   -d '{
-    "error_type": "RuntimeError",
+    "exception_class": "RuntimeError",
     "message": "Something went wrong",
-    "backtrace": "app/models/user.rb:42:in `validate'\n...",
+    "backtrace": ["app/models/user.rb:42:in `validate'"],
     "context": {"user_id": 123}
   }'
 ```
@@ -94,29 +137,32 @@ curl -X POST http://localhost:3000/ingest/deploys \
 
 ## Configuration
 
-All configuration is via environment variables:
+### Collector (`miniapm`)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SQLITE_PATH` | `./data/miniapm.db` | Database file location |
-| `RUST_LOG` | `miniapm=info` | Log level |
-| `RETENTION_DAYS_REQUESTS` | `7` | Days to keep request data |
+| `RUST_LOG` | `mini_apm=info` | Log level |
 | `RETENTION_DAYS_ERRORS` | `30` | Days to keep error data |
 | `RETENTION_DAYS_SPANS` | `7` | Days to keep trace spans |
 | `RETENTION_DAYS_HOURLY_ROLLUPS` | `90` | Days to keep hourly aggregates |
 | `SLOW_REQUEST_THRESHOLD_MS` | `500` | Threshold for slow request alerts |
-| `ENABLE_USER_ACCOUNTS` | `false` | Enable multi-user authentication |
 | `ENABLE_PROJECTS` | `false` | Enable multi-project mode |
-| `SESSION_SECRET` | (generated) | Required when user accounts enabled |
 
-See `.env.example` for a complete template.
+### Dashboard (`miniapm-admin`)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SQLITE_PATH` | `./data/miniapm.db` | Database file location (same as collector) |
+| `ENABLE_USER_ACCOUNTS` | `false` | Enable multi-user authentication |
+| `SESSION_SECRET` | (required) | Secret for session cookies |
+| `MINI_APM_URL` | `http://localhost:3001` | URL for generating links |
 
 ## Multi-User Mode
 
-To enable login and user management:
+To enable login and user management on the dashboard:
 
 ```bash
-# Generate a session secret
 export SESSION_SECRET=$(openssl rand -hex 32)
 export ENABLE_USER_ACCOUNTS=true
 ```
@@ -128,54 +174,57 @@ Default admin credentials on first run:
 ## CLI Commands
 
 ```bash
-# Server (main binary)
-miniapm                      # Start server (default port 3000)
-miniapm -p 8080              # Start on custom port
+# Collector server
+miniapm                         # Start collector (default port 3000)
+miniapm -p 8080                 # Start on custom port
+
+# Admin dashboard
+miniapm-admin                   # Start dashboard (default port 3001)
 
 # CLI tools
 miniapm-cli create-key <name>   # Create a new API key
 miniapm-cli list-keys           # List all API keys
 ```
 
-## Docker Compose
+## Health Checks
 
-```yaml
-services:
-  miniapm:
-    image: ghcr.io/miniapm/miniapm
-    ports:
-      - "3000:3000"
-    volumes:
-      - miniapm_data:/data
-    environment:
-      - RUST_LOG=miniapm=info
-    restart: unless-stopped
+Both services expose health endpoints:
 
-volumes:
-  miniapm_data:
+```bash
+# Collector
+curl http://localhost:3000/health
+
+# Dashboard
+curl http://localhost:3001/health
 ```
-
-## Architecture
-
-- **miniapm** - Server binary with ingestion API and web dashboard
-- **miniapm-cli** - CLI tools for key management
-- **SQLite storage** - Zero-config, automatic migrations
-- **Rust/Axum** - Fast, memory-efficient
-- **OTLP/HTTP** - Standard OpenTelemetry protocol
 
 ## Development
 
 ```bash
-# Run the server
-cargo run -p miniapm
-
-# Run CLI commands
-cargo run -p miniapm-cli -- create-key mykey
-cargo run -p miniapm-cli -- list-keys
-
 # Run tests
-cargo test
+cargo test --workspace
+
+# Run collector
+cargo run -p mini-apm
+
+# Run dashboard
+cargo run -p mini-apm-admin
+
+# Run CLI
+cargo run -p mini-apm-cli -- create-key mykey
+
+# Check formatting
+cargo fmt --all --check
+
+# Run clippy
+cargo clippy --workspace
 ```
+
+## Tech Stack
+
+- **Rust** with [Rama](https://github.com/plabayo/rama) web framework
+- **SQLite** - Zero-config, automatic migrations
+- **OTLP/HTTP** - Standard OpenTelemetry protocol
 
 ## License
 

@@ -19,6 +19,17 @@ fn generate_api_key() -> String {
     format!("proj_{}", hex::encode(bytes))
 }
 
+/// Helper function to map a database row to a Project struct
+fn map_row_to_project(row: &rusqlite::Row) -> rusqlite::Result<Project> {
+    Ok(Project {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        slug: row.get(2)?,
+        api_key: row.get(3)?,
+        created_at: row.get(4)?,
+    })
+}
+
 /// Generate a slug from project name
 fn slugify(name: &str) -> String {
     name.to_lowercase()
@@ -62,15 +73,7 @@ pub fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
     let project = conn.query_row(
         "SELECT id, name, slug, api_key, created_at FROM projects ORDER BY id LIMIT 1",
         [],
-        |row| {
-            Ok(Project {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                slug: row.get(2)?,
-                api_key: row.get(3)?,
-                created_at: row.get(4)?,
-            })
-        },
+        map_row_to_project,
     )?;
 
     Ok(project)
@@ -84,15 +87,7 @@ pub fn list_all(pool: &DbPool) -> anyhow::Result<Vec<Project>> {
     )?;
 
     let projects = stmt
-        .query_map([], |row| {
-            Ok(Project {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                slug: row.get(2)?,
-                api_key: row.get(3)?,
-                created_at: row.get(4)?,
-            })
-        })?
+        .query_map([], map_row_to_project)?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(projects)
@@ -106,15 +101,7 @@ pub fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<Project>> {
         .query_row(
             "SELECT id, name, slug, api_key, created_at FROM projects WHERE id = ?1",
             [id],
-            |row| {
-                Ok(Project {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    slug: row.get(2)?,
-                    api_key: row.get(3)?,
-                    created_at: row.get(4)?,
-                })
-            },
+            map_row_to_project,
         )
         .ok();
 
@@ -129,15 +116,7 @@ pub fn find_by_slug(pool: &DbPool, slug: &str) -> anyhow::Result<Option<Project>
         .query_row(
             "SELECT id, name, slug, api_key, created_at FROM projects WHERE slug = ?1",
             [slug],
-            |row| {
-                Ok(Project {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    slug: row.get(2)?,
-                    api_key: row.get(3)?,
-                    created_at: row.get(4)?,
-                })
-            },
+            map_row_to_project,
         )
         .ok();
 
@@ -152,15 +131,7 @@ pub fn find_by_api_key(pool: &DbPool, api_key: &str) -> anyhow::Result<Option<Pr
         .query_row(
             "SELECT id, name, slug, api_key, created_at FROM projects WHERE api_key = ?1",
             [api_key],
-            |row| {
-                Ok(Project {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    slug: row.get(2)?,
-                    api_key: row.get(3)?,
-                    created_at: row.get(4)?,
-                })
-            },
+            map_row_to_project,
         )
         .ok();
 
