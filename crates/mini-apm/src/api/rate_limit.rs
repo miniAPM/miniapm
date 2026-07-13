@@ -5,7 +5,6 @@
 //! the limit is exceeded.
 
 use std::collections::HashMap;
-use std::future::Future;
 use std::net::IpAddr;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -118,39 +117,39 @@ impl<S> RateLimitService<S> {
 
 impl<S> Service<Request> for RateLimitService<S>
 where
-    S: Service<Request, Output = Response, Error = std::convert::Infallible> + Send + Sync + 'static,
+    S: Service<Request, Output = Response, Error = std::convert::Infallible>
+        + Send
+        + Sync
+        + 'static,
 {
     type Output = Response;
     type Error = std::convert::Infallible;
 
-    fn serve(
-        &self,
-        req: Request,
-    ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send + '_ {
-        async move {
-            // Extract IP from X-Forwarded-For header or use a default
-            let ip = req
-                .headers()
-                .get("X-Forwarded-For")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.split(',').next())
-                .and_then(|s| s.trim().parse::<IpAddr>().ok())
-                .unwrap_or_else(|| "127.0.0.1".parse().unwrap());
+    async fn serve(&self, req: Request) -> Result<Self::Output, Self::Error> {
+        // Extract IP from X-Forwarded-For header or use a default
+        let ip = req
+            .headers()
+            .get("X-Forwarded-For")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .and_then(|s| s.trim().parse::<IpAddr>().ok())
+            .unwrap_or_else(|| "127.0.0.1".parse().unwrap());
 
-            // Check rate limit
-            if !self.check_rate_limit(ip) {
-                let response = Response::builder()
-                    .status(StatusCode::TOO_MANY_REQUESTS)
-                    .header("Retry-After", "60")
-                    .header("Content-Type", "application/json")
-                    .body(Body::from(r#"{"error":"Rate limit exceeded. Please try again later."}"#))
-                    .unwrap();
-                return Ok(response);
-            }
-
-            // Proceed with request
-            self.inner.serve(req).await
+        // Check rate limit
+        if !self.check_rate_limit(ip) {
+            let response = Response::builder()
+                .status(StatusCode::TOO_MANY_REQUESTS)
+                .header("Retry-After", "60")
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    r#"{"error":"Rate limit exceeded. Please try again later."}"#,
+                ))
+                .unwrap();
+            return Ok(response);
         }
+
+        // Proceed with request
+        self.inner.serve(req).await
     }
 }
 
@@ -165,16 +164,11 @@ mod tests {
         type Output = Response;
         type Error = Infallible;
 
-        fn serve(
-            &self,
-            _req: Request,
-        ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send + '_ {
-            async move {
-                Ok(Response::builder()
-                    .status(StatusCode::OK)
-                    .body(Body::empty())
-                    .unwrap())
-            }
+        async fn serve(&self, _req: Request) -> Result<Self::Output, Self::Error> {
+            Ok(Response::builder()
+                .status(StatusCode::OK)
+                .body(Body::empty())
+                .unwrap())
         }
     }
 

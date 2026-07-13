@@ -22,6 +22,23 @@ pub struct User {
     pub last_login_at: Option<String>,
 }
 
+/// Map a row with the canonical user column order:
+/// id, username, password_hash, is_admin, must_change_password,
+/// invite_token, invite_expires_at, created_at, last_login_at
+fn map_user_row(row: &rusqlite::Row) -> rusqlite::Result<User> {
+    Ok(User {
+        id: row.get(0)?,
+        username: row.get(1)?,
+        password_hash: row.get(2)?,
+        is_admin: row.get::<_, i64>(3)? == 1,
+        must_change_password: row.get::<_, i64>(4)? == 1,
+        invite_token: row.get(5)?,
+        invite_expires_at: row.get(6)?,
+        created_at: row.get(7)?,
+        last_login_at: row.get(8)?,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct Session {
     pub id: i64,
@@ -46,7 +63,10 @@ impl std::fmt::Display for UsernameValidationError {
             Self::TooShort => write!(f, "Username must be at least 3 characters"),
             Self::TooLong => write!(f, "Username must be at most 32 characters"),
             Self::InvalidCharacters => {
-                write!(f, "Username can only contain letters, numbers, underscores, and dashes")
+                write!(
+                    f,
+                    "Username can only contain letters, numbers, underscores, and dashes"
+                )
             }
             Self::Empty => write!(f, "Username cannot be empty"),
         }
@@ -156,19 +176,7 @@ pub fn authenticate(pool: &DbPool, username: &str, password: &str) -> anyhow::Re
         .query_row(
             "SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at, created_at, last_login_at FROM users WHERE username = ?1",
             [username],
-            |row| {
-                Ok(User {
-                    id: row.get(0)?,
-                    username: row.get(1)?,
-                    password_hash: row.get(2)?,
-                    is_admin: row.get::<_, i64>(3)? == 1,
-                    must_change_password: row.get::<_, i64>(4)? == 1,
-                    invite_token: row.get(5)?,
-                    invite_expires_at: row.get(6)?,
-                    created_at: row.get(7)?,
-                    last_login_at: row.get(8)?,
-                })
-            },
+            map_user_row,
         )
         .ok();
 
@@ -219,19 +227,7 @@ pub fn get_user_from_session(pool: &DbPool, token: &str) -> anyhow::Result<Optio
             WHERE s.token = ?1 AND s.expires_at > ?2
             "#,
             [token, &now],
-            |row| {
-                Ok(User {
-                    id: row.get(0)?,
-                    username: row.get(1)?,
-                    password_hash: row.get(2)?,
-                    is_admin: row.get::<_, i64>(3)? == 1,
-                    must_change_password: row.get::<_, i64>(4)? == 1,
-                    invite_token: row.get(5)?,
-                    invite_expires_at: row.get(6)?,
-                    created_at: row.get(7)?,
-                    last_login_at: row.get(8)?,
-                })
-            },
+            map_user_row,
         )
         .ok();
 
@@ -264,19 +260,7 @@ pub fn list_all(pool: &DbPool) -> anyhow::Result<Vec<User>> {
     )?;
 
     let users = stmt
-        .query_map([], |row| {
-            Ok(User {
-                id: row.get(0)?,
-                username: row.get(1)?,
-                password_hash: row.get(2)?,
-                is_admin: row.get::<_, i64>(3)? == 1,
-                must_change_password: row.get::<_, i64>(4)? == 1,
-                invite_token: row.get(5)?,
-                invite_expires_at: row.get(6)?,
-                created_at: row.get(7)?,
-                last_login_at: row.get(8)?,
-            })
-        })?
+        .query_map([], map_user_row)?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(users)
@@ -309,7 +293,11 @@ pub fn delete(pool: &DbPool, user_id: i64) -> anyhow::Result<()> {
 }
 
 /// Verify password for a user by ID
-pub fn verify_password_for_user(pool: &DbPool, user_id: i64, password: &str) -> anyhow::Result<bool> {
+pub fn verify_password_for_user(
+    pool: &DbPool,
+    user_id: i64,
+    password: &str,
+) -> anyhow::Result<bool> {
     let conn = pool.get()?;
 
     let password_hash: Option<String> = conn
@@ -365,19 +353,7 @@ pub fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<User>> {
         .query_row(
             "SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at, created_at, last_login_at FROM users WHERE id = ?1",
             [id],
-            |row| {
-                Ok(User {
-                    id: row.get(0)?,
-                    username: row.get(1)?,
-                    password_hash: row.get(2)?,
-                    is_admin: row.get::<_, i64>(3)? == 1,
-                    must_change_password: row.get::<_, i64>(4)? == 1,
-                    invite_token: row.get(5)?,
-                    invite_expires_at: row.get(6)?,
-                    created_at: row.get(7)?,
-                    last_login_at: row.get(8)?,
-                })
-            },
+            map_user_row,
         )
         .ok();
 
@@ -415,19 +391,7 @@ pub fn find_by_invite_token(pool: &DbPool, token: &str) -> anyhow::Result<Option
         .query_row(
             "SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at, created_at, last_login_at FROM users WHERE invite_token = ?1 AND invite_expires_at > ?2",
             [token, &now],
-            |row| {
-                Ok(User {
-                    id: row.get(0)?,
-                    username: row.get(1)?,
-                    password_hash: row.get(2)?,
-                    is_admin: row.get::<_, i64>(3)? == 1,
-                    must_change_password: row.get::<_, i64>(4)? == 1,
-                    invite_token: row.get(5)?,
-                    invite_expires_at: row.get(6)?,
-                    created_at: row.get(7)?,
-                    last_login_at: row.get(8)?,
-                })
-            },
+            map_user_row,
         )
         .ok();
 
@@ -499,19 +463,31 @@ mod tests {
     #[test]
     fn test_validate_username_empty() {
         assert_eq!(validate_username(""), Err(UsernameValidationError::Empty));
-        assert_eq!(validate_username("   "), Err(UsernameValidationError::Empty));
+        assert_eq!(
+            validate_username("   "),
+            Err(UsernameValidationError::Empty)
+        );
     }
 
     #[test]
     fn test_validate_username_too_short() {
-        assert_eq!(validate_username("ab"), Err(UsernameValidationError::TooShort));
-        assert_eq!(validate_username("a"), Err(UsernameValidationError::TooShort));
+        assert_eq!(
+            validate_username("ab"),
+            Err(UsernameValidationError::TooShort)
+        );
+        assert_eq!(
+            validate_username("a"),
+            Err(UsernameValidationError::TooShort)
+        );
     }
 
     #[test]
     fn test_validate_username_too_long() {
         let long_name = "a".repeat(33);
-        assert_eq!(validate_username(&long_name), Err(UsernameValidationError::TooLong));
+        assert_eq!(
+            validate_username(&long_name),
+            Err(UsernameValidationError::TooLong)
+        );
     }
 
     #[test]
@@ -795,7 +771,9 @@ mod tests {
         assert_eq!(deleted, 1);
 
         // Check that only expired invite was deleted
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count, 2); // valid_user and active_user remain
     }
 }

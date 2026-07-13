@@ -104,28 +104,23 @@ where
             // Validate session
             match models::user::get_user_from_session(&pool, &token) {
                 Ok(Some(user)) => {
-                    // Check if password change is required
-                    if user.must_change_password {
-                        // Allow access to change-password page and static files
-                        if path == "/auth/change-password" || path.starts_with("/static") {
-                            req.extensions().insert(CurrentUser {
-                                id: user.id,
-                                username: user.username.clone(),
-                                is_admin: user.is_admin,
-                                must_change_password: user.must_change_password,
-                            });
-                            return self.inner.serve(req).await;
-                        }
-                        return Ok(Redirect::temporary("/auth/change-password").into_response());
-                    }
-
-                    // User authenticated, inject CurrentUser and proceed
-                    req.extensions().insert(CurrentUser {
+                    let current_user = CurrentUser {
                         id: user.id,
                         username: user.username.clone(),
                         is_admin: user.is_admin,
                         must_change_password: user.must_change_password,
-                    });
+                    };
+
+                    // Check if password change is required
+                    if user.must_change_password {
+                        // Only allow the change-password page and static files
+                        if path != "/auth/change-password" && !path.starts_with("/static") {
+                            return Ok(Redirect::temporary("/auth/change-password").into_response());
+                        }
+                    }
+
+                    // User authenticated, inject CurrentUser and proceed
+                    req.extensions().insert(current_user);
                     self.inner.serve(req).await
                 }
                 _ => Ok(Redirect::temporary("/auth/login").into_response()),

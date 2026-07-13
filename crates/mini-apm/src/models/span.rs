@@ -264,6 +264,27 @@ pub struct TraceSummary {
     pub happened_at: String,
 }
 
+/// Map a row with the canonical trace summary column order:
+/// trace_id, root_span_name, root_span_type, duration_ms, span_count,
+/// status_code, service_name, http_method, http_url, http_status_code, happened_at
+fn map_trace_summary_row(row: &rusqlite::Row) -> rusqlite::Result<TraceSummary> {
+    Ok(TraceSummary {
+        trace_id: row.get(0)?,
+        root_span_name: row.get(1)?,
+        root_span_type: row
+            .get::<_, Option<String>>(2)?
+            .and_then(|s| RootSpanType::parse(&s)),
+        duration_ms: row.get(3)?,
+        span_count: row.get(4)?,
+        status_code: row.get(5)?,
+        service_name: row.get(6)?,
+        http_method: row.get(7)?,
+        http_url: row.get(8)?,
+        http_status_code: row.get(9)?,
+        happened_at: row.get(10)?,
+    })
+}
+
 impl TraceSummary {
     /// Returns a clean, human-readable name for the trace
     pub fn display_name(&self) -> String {
@@ -752,23 +773,7 @@ pub fn list_traces_paginated(
                 limit,
                 offset
             ],
-            |row| {
-                Ok(TraceSummary {
-                    trace_id: row.get(0)?,
-                    root_span_name: row.get(1)?,
-                    root_span_type: row
-                        .get::<_, Option<String>>(2)?
-                        .and_then(|s| RootSpanType::parse(&s)),
-                    duration_ms: row.get(3)?,
-                    span_count: row.get(4)?,
-                    status_code: row.get(5)?,
-                    service_name: row.get(6)?,
-                    http_method: row.get(7)?,
-                    http_url: row.get(8)?,
-                    http_status_code: row.get(9)?,
-                    happened_at: row.get(10)?,
-                })
-            },
+            map_trace_summary_row,
         )?
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -1027,23 +1032,10 @@ pub fn slow_traces(
     )?;
 
     let traces = stmt
-        .query_map(rusqlite::params![threshold_ms, project_id, limit], |row| {
-            Ok(TraceSummary {
-                trace_id: row.get(0)?,
-                root_span_name: row.get(1)?,
-                root_span_type: row
-                    .get::<_, Option<String>>(2)?
-                    .and_then(|s| RootSpanType::parse(&s)),
-                duration_ms: row.get(3)?,
-                span_count: row.get(4)?,
-                status_code: row.get(5)?,
-                service_name: row.get(6)?,
-                http_method: row.get(7)?,
-                http_url: row.get(8)?,
-                http_status_code: row.get(9)?,
-                happened_at: row.get(10)?,
-            })
-        })?
+        .query_map(
+            rusqlite::params![threshold_ms, project_id, limit],
+            map_trace_summary_row,
+        )?
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(traces)
@@ -1206,13 +1198,14 @@ pub fn routes_summary(
     }
 
     // Sort by requested field
+    use std::cmp::Reverse;
     match sort {
-        "avg" => result.sort_by(|a, b| b.avg_ms.cmp(&a.avg_ms)),
-        "p95" => result.sort_by(|a, b| b.p95_ms.cmp(&a.p95_ms)),
-        "p99" => result.sort_by(|a, b| b.p99_ms.cmp(&a.p99_ms)),
-        "max" => result.sort_by(|a, b| b.max_ms.cmp(&a.max_ms)),
-        "db" => result.sort_by(|a, b| b.avg_db_ms.cmp(&a.avg_db_ms)),
-        "errors" => result.sort_by(|a, b| b.error_count.cmp(&a.error_count)),
+        "avg" => result.sort_by_key(|r| Reverse(r.avg_ms)),
+        "p95" => result.sort_by_key(|r| Reverse(r.p95_ms)),
+        "p99" => result.sort_by_key(|r| Reverse(r.p99_ms)),
+        "max" => result.sort_by_key(|r| Reverse(r.max_ms)),
+        "db" => result.sort_by_key(|r| Reverse(r.avg_db_ms)),
+        "errors" => result.sort_by_key(|r| Reverse(r.error_count)),
         _ => {} // default: already sorted by request_count
     }
 
@@ -1425,7 +1418,7 @@ pub fn detect_n_plus_1(spans: &[SpanDisplay]) -> Vec<NPlus1Issue> {
         .collect();
 
     // Sort by count descending
-    issues.sort_by(|a, b| b.count.cmp(&a.count));
+    issues.sort_by_key(|i| std::cmp::Reverse(i.count));
     issues
 }
 

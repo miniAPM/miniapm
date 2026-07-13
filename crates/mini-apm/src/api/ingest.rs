@@ -168,8 +168,7 @@ mod tests {
             }],
         };
 
-        let status =
-            ingest_spans(State(pool.clone()), Extension(ctx), Json(otlp_request)).await;
+        let status = ingest_spans(State(pool.clone()), Extension(ctx), Json(otlp_request)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
     }
 
@@ -183,8 +182,7 @@ mod tests {
             resource_spans: vec![],
         };
 
-        let status =
-            ingest_spans(State(pool.clone()), Extension(ctx), Json(otlp_request)).await;
+        let status = ingest_spans(State(pool.clone()), Extension(ctx), Json(otlp_request)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
     }
 
@@ -274,8 +272,7 @@ mod tests {
             ],
         };
 
-        let status =
-            ingest_errors_batch(State(pool.clone()), Extension(ctx), Json(batch)).await;
+        let status = ingest_errors_batch(State(pool.clone()), Extension(ctx), Json(batch)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
     }
 
@@ -287,8 +284,7 @@ mod tests {
 
         let batch = IncomingErrorBatch { errors: vec![] };
 
-        let status =
-            ingest_errors_batch(State(pool.clone()), Extension(ctx), Json(batch)).await;
+        let status = ingest_errors_batch(State(pool.clone()), Extension(ctx), Json(batch)).await;
         assert_eq!(status, StatusCode::ACCEPTED);
     }
 

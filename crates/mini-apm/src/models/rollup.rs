@@ -313,8 +313,16 @@ mod tests {
     fn test_delete_hourly_before() {
         let pool = test_pool();
 
-        insert_hourly(&pool, &sample_hourly_rollup("2024-01-01T10:00:00Z", "/api/old")).unwrap();
-        insert_hourly(&pool, &sample_hourly_rollup("2024-01-15T10:00:00Z", "/api/recent")).unwrap();
+        insert_hourly(
+            &pool,
+            &sample_hourly_rollup("2024-01-01T10:00:00Z", "/api/old"),
+        )
+        .unwrap();
+        insert_hourly(
+            &pool,
+            &sample_hourly_rollup("2024-01-15T10:00:00Z", "/api/recent"),
+        )
+        .unwrap();
 
         let deleted = delete_hourly_before(&pool, "2024-01-10T00:00:00Z").unwrap();
 
@@ -332,7 +340,11 @@ mod tests {
     fn test_delete_hourly_before_none_to_delete() {
         let pool = test_pool();
 
-        insert_hourly(&pool, &sample_hourly_rollup("2024-06-01T10:00:00Z", "/api/recent")).unwrap();
+        insert_hourly(
+            &pool,
+            &sample_hourly_rollup("2024-06-01T10:00:00Z", "/api/recent"),
+        )
+        .unwrap();
 
         let deleted = delete_hourly_before(&pool, "2024-01-01T00:00:00Z").unwrap();
 

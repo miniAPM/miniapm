@@ -124,9 +124,7 @@ impl Config {
 
         // Validate session secret is long enough when user accounts are enabled
         if self.enable_user_accounts && self.session_secret.len() < 32 {
-            errors.push(
-                "SESSION_SECRET should be at least 32 characters for security".to_string(),
-            );
+            errors.push("SESSION_SECRET should be at least 32 characters for security".to_string());
         }
 
         // Validate sqlite_path parent directory exists or can be created (skip for :memory:)
@@ -203,10 +201,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("must start with http://"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must start with http://")
+        );
     }
 
     #[test]
@@ -224,10 +224,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("RETENTION_DAYS_ERRORS must be positive"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("RETENTION_DAYS_ERRORS must be positive")
+        );
     }
 
     #[test]
@@ -237,10 +239,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("RETENTION_DAYS_SPANS must be positive"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("RETENTION_DAYS_SPANS must be positive")
+        );
     }
 
     #[test]
@@ -250,10 +254,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("SLOW_REQUEST_THRESHOLD_MS must be positive"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("SLOW_REQUEST_THRESHOLD_MS must be positive")
+        );
     }
 
     #[test]
@@ -264,10 +270,12 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("SESSION_SECRET should be at least 32 characters"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("SESSION_SECRET should be at least 32 characters")
+        );
     }
 
     #[test]

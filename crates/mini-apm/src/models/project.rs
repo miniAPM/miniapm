@@ -192,8 +192,8 @@ pub fn count(pool: &DbPool) -> anyhow::Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db;
     use crate::config::Config;
+    use crate::db;
 
     fn test_pool() -> DbPool {
         let config = Config {
