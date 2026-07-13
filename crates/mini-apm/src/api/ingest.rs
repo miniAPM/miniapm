@@ -3,10 +3,11 @@
 //! Handles incoming telemetry data: spans, deploys, errors.
 
 use rama::http::StatusCode;
-use rama::http::service::web::extract::{Extension, Json, State};
+use rama::http::service::web::extract::{Json, State};
 use serde::Deserialize;
 
 use crate::api::auth::ProjectContext;
+use crate::api::extract::Extension;
 use crate::{
     DbPool,
     models::{deploy, error as app_error, span},

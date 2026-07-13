@@ -1,7 +1,7 @@
 use std::future::Future;
 
 use rama::Layer;
-use rama::extensions::ExtensionsMut;
+use rama::extensions::ExtensionsRef;
 use rama::http::service::web::response::IntoResponse;
 use rama::http::service::web::response::Redirect;
 use rama::http::{Request, Response};
@@ -21,6 +21,8 @@ pub struct CurrentUser {
     pub is_admin: bool,
     pub must_change_password: bool,
 }
+
+impl rama::extensions::Extension for CurrentUser {}
 
 /// Layer that applies web session authentication
 #[derive(Clone)]
@@ -63,7 +65,7 @@ where
 
     fn serve(
         &self,
-        mut req: Request,
+        req: Request,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send + '_ {
         let pool = self.state.pool.clone();
         let enable_user_accounts = std::env::var("ENABLE_USER_ACCOUNTS")
@@ -71,7 +73,13 @@ where
             .unwrap_or(false);
 
         async move {
-            let path = req.uri().path();
+            let path = req
+                .uri()
+                .path()
+                .unwrap_or_default()
+                .as_encoded_str()
+                .into_owned();
+            let path = path.as_str();
 
             // Skip protection for unprotected routes
             let is_unprotected = path == "/health"
@@ -100,7 +108,7 @@ where
                     if user.must_change_password {
                         // Allow access to change-password page and static files
                         if path == "/auth/change-password" || path.starts_with("/static") {
-                            req.extensions_mut().insert(CurrentUser {
+                            req.extensions().insert(CurrentUser {
                                 id: user.id,
                                 username: user.username.clone(),
                                 is_admin: user.is_admin,
@@ -112,7 +120,7 @@ where
                     }
 
                     // User authenticated, inject CurrentUser and proceed
-                    req.extensions_mut().insert(CurrentUser {
+                    req.extensions().insert(CurrentUser {
                         id: user.id,
                         username: user.username.clone(),
                         is_admin: user.is_admin,

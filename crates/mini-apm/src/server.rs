@@ -1,8 +1,10 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use rama::Layer;
 use rama::conversion::FromRef;
 use rama::graceful::Shutdown;
+use rama::http::layer::error_handling::ErrorHandlerLayer;
 use rama::http::server::HttpServer;
 use rama::http::service::web::{Router, response::Html};
 use rama::rt::Executor;
@@ -77,6 +79,7 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
     graceful.spawn_task_fn(move |guard| async move {
         let exec = Executor::graceful(guard);
 
+        let app = Arc::new(ErrorHandlerLayer::new().into_layer(app));
         if let Err(e) = HttpServer::auto(exec).listen(&addr, app).await {
             tracing::error!("Server error: {}", e);
         }

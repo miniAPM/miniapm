@@ -3,9 +3,15 @@ pub mod web;
 mod cookies;
 mod template;
 
+use std::convert::Infallible;
+use std::sync::Arc;
+
 use rama::Layer;
 use rama::conversion::FromRef;
+use rama::http::layer::error_handling::ErrorHandlerLayer;
 use rama::http::service::web::{Router, response::Html};
+use rama::http::{Request, Response};
+use rama::service::Service;
 
 use mini_apm::DbPool;
 
@@ -24,11 +30,7 @@ impl FromRef<AppState> for DbPool {
 
 pub fn make_app(
     pool: DbPool,
-) -> mini_apm::api::rate_limit::RateLimitService<
-    web::security_headers::SecurityHeadersService<
-        web::auth_middleware::WebAuthService<Router<AppState>>,
-    >,
-> {
+) -> impl Service<Request, Output = Response, Error = Infallible> + Clone {
     let state = AppState { pool };
 
     let app = Router::new_with_state(state.clone())
@@ -60,11 +62,18 @@ pub fn make_app(
         .with_get("/api-key", web::api_key::index)
         .with_post("/api-key/regenerate", web::api_key::regenerate)
         // Static files
-        .with_dir("/static", "./static")
+        .with_endpoint_service(
+            "/static",
+            rama::http::service::fs::ServeDir::new("./static"),
+        )
         // 404 handler
         .with_not_found(Html("<h1>404 Not Found</h1>".to_owned()));
 
     // Apply middleware layers (outermost first)
+    // Router errors (e.g. bad path params) become responses so the
+    // service error type is Infallible as the middlewares require
+    let app = ErrorHandlerLayer::new().into_layer(app);
+
     // Auth middleware checks authentication
     let auth_layer = web::auth_middleware::WebAuthMiddleware::new(state.clone());
     let with_auth = auth_layer.layer(app);
@@ -75,5 +84,5 @@ pub fn make_app(
 
     // Rate limiting middleware (100 requests per minute per IP)
     let rate_limit = mini_apm::api::RateLimitMiddleware::with_defaults();
-    rate_limit.layer(with_security)
+    Arc::new(rate_limit.layer(with_security))
 }

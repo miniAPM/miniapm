@@ -1,9 +1,11 @@
 use askama::Template;
 use rama::http::Response;
 use rama::http::StatusCode;
-use rama::http::service::web::extract::{Extension, Form, Path, State};
+use rama::http::service::web::extract::{Form, Path, State};
 use rama::http::service::web::response::{IntoResponse, Redirect};
 use serde::Deserialize;
+
+use mini_apm::api::extract::Extension;
 
 use crate::cookies::{delete_cookie_header, get_cookie, set_cookie_header};
 use crate::template::HtmlTemplate;

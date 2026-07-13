@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod extract;
 pub mod health;
 pub mod ingest;
 pub mod rate_limit;
