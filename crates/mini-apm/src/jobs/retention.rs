@@ -136,7 +136,9 @@ mod tests {
 
         // Check that old occurrence was deleted
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM error_occurrences", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM error_occurrences", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(count, 1);
     }
@@ -157,9 +159,7 @@ mod tests {
         ).unwrap();
 
         // Insert recent hourly rollup
-        let recent_time = Utc::now()
-            .format("%Y-%m-%dT%H:00:00Z")
-            .to_string();
+        let recent_time = Utc::now().format("%Y-%m-%dT%H:00:00Z").to_string();
         conn.execute(
             "INSERT INTO rollups_hourly (hour, path, method, request_count, error_count, total_ms_sum, db_ms_sum, db_count_sum) VALUES (?1, '/test', 'GET', 10, 0, 100.0, 10.0, 5)",
             [&recent_time],
@@ -186,14 +186,16 @@ mod tests {
         conn.execute(
             "INSERT INTO deploys (git_sha, deployed_at) VALUES ('old-sha', ?1)",
             [&old_time],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Insert recent deploy
         let recent_time = Utc::now().to_rfc3339();
         conn.execute(
             "INSERT INTO deploys (git_sha, deployed_at) VALUES ('new-sha', ?1)",
             [&recent_time],
-        ).unwrap();
+        )
+        .unwrap();
 
         // Run cleanup
         cleanup(&pool, &config).unwrap();
@@ -264,11 +266,15 @@ mod tests {
         cleanup(&pool, &config).unwrap();
 
         // Check that only expired invite was deleted
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0)).unwrap();
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(count, 1);
 
         // Verify the valid user remains
-        let username: String = conn.query_row("SELECT username FROM users", [], |row| row.get(0)).unwrap();
+        let username: String = conn
+            .query_row("SELECT username FROM users", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(username, "valid_user");
     }
 }

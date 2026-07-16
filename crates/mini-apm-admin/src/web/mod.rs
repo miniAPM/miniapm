@@ -13,3 +13,17 @@ pub mod traces;
 pub use auth_middleware::WebAuthMiddleware;
 pub use project_context::WebProjectContext;
 pub use security_headers::SecurityHeadersMiddleware;
+
+use chrono::{DateTime, Duration, Utc};
+
+/// Parse a dashboard period filter into a lower time bound.
+/// Anything other than "1h", "24h", "7d", "30d" means "all" (no bound).
+pub fn period_start(period: &str) -> Option<DateTime<Utc>> {
+    match period {
+        "1h" => Some(Utc::now() - Duration::hours(1)),
+        "24h" => Some(Utc::now() - Duration::hours(24)),
+        "7d" => Some(Utc::now() - Duration::days(7)),
+        "30d" => Some(Utc::now() - Duration::days(30)),
+        _ => None,
+    }
+}

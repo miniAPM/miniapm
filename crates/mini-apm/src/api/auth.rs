@@ -6,7 +6,7 @@
 use std::future::Future;
 
 use rama::Layer;
-use rama::extensions::ExtensionsMut;
+use rama::extensions::ExtensionsRef;
 use rama::http::header::AUTHORIZATION;
 use rama::http::{Body, Request, Response, StatusCode};
 use rama::service::Service;
@@ -18,6 +18,8 @@ use crate::server::AppState;
 pub struct ProjectContext {
     pub project_id: Option<i64>,
 }
+
+impl rama::extensions::Extension for ProjectContext {}
 
 /// Layer that applies API key authentication
 #[derive(Clone)]
@@ -62,7 +64,7 @@ where
 
     fn serve(
         &self,
-        mut req: Request,
+        req: Request,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send {
         let inner = self.inner.clone();
         let pool = self.state.pool.clone();
@@ -87,7 +89,7 @@ where
             // Validate API key against database
             match crate::models::project::find_by_api_key(&pool, api_key) {
                 Ok(Some(project)) => {
-                    req.extensions_mut().insert(ProjectContext {
+                    req.extensions().insert(ProjectContext {
                         project_id: Some(project.id),
                     });
                     inner.serve(req).await
@@ -162,7 +164,7 @@ mod tests {
         let test_service =
             rama::service::BoxService::new(rama::service::service_fn(|req: Request| async move {
                 let uri = req.uri();
-                if uri.path() == "/test" {
+                if uri.path().is_some_and(|p| p == "/test") {
                     Ok(Response::builder()
                         .status(StatusCode::OK)
                         .body(Body::from("ok"))

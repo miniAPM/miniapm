@@ -1,5 +1,4 @@
 use askama::Template;
-use chrono::{Duration, Utc};
 use rama::http::service::web::extract::{Form, Path, Query, State};
 use rama::http::service::web::response::Redirect;
 use serde::Deserialize;
@@ -51,13 +50,7 @@ pub async fn index(
     let search = query.search.clone().filter(|s| !s.is_empty());
     let page = query.page.unwrap_or(1).max(1);
 
-    let since = match period.as_str() {
-        "1h" => Some(Utc::now() - Duration::hours(1)),
-        "24h" => Some(Utc::now() - Duration::hours(24)),
-        "7d" => Some(Utc::now() - Duration::days(7)),
-        "30d" => Some(Utc::now() - Duration::days(30)),
-        _ => None, // "all"
-    };
+    let since = super::period_start(&period);
 
     let since_str = since.map(|s| s.to_rfc3339());
 

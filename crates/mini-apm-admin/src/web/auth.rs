@@ -1,9 +1,11 @@
 use askama::Template;
 use rama::http::Response;
 use rama::http::StatusCode;
-use rama::http::service::web::extract::{Extension, Form, Path, State};
+use rama::http::service::web::extract::{Form, Path, State};
 use rama::http::service::web::response::{IntoResponse, Redirect};
 use serde::Deserialize;
+
+use mini_apm::api::extract::Extension;
 
 use crate::cookies::{delete_cookie_header, get_cookie, set_cookie_header};
 use crate::template::HtmlTemplate;
@@ -169,7 +171,8 @@ pub async fn change_password_submit(
 
     // Verify current password (skip only if must_change_password is set, allowing first-time change)
     if !current_user.must_change_password && !form.current_password.is_empty() {
-        match models::user::verify_password_for_user(&pool, current_user.id, &form.current_password) {
+        match models::user::verify_password_for_user(&pool, current_user.id, &form.current_password)
+        {
             Ok(true) => {} // Password verified, continue
             Ok(false) => {
                 return HtmlTemplate(ChangePasswordTemplate {

@@ -21,7 +21,7 @@ mini-apm-admin = { path = "crates/mini-apm-admin" }
 tokio = { version = "1", features = ["full"] }
 
 # Web framework
-rama = { version = "0.3.0-alpha.4", features = ["http-full"] }
+rama = { version = "0.3.0", features = ["http-full"] }
 
 # Database
 rusqlite = { version = "0.31", features = ["bundled"] }
