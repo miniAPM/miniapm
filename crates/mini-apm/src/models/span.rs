@@ -961,6 +961,13 @@ pub fn count_since(pool: &DbPool, project_id: Option<i64>, since: &str) -> anyho
 // Dashboard Stats (from root spans)
 // ============================================================================
 
+/// Nearest-rank percentile (0.0-1.0) over `sorted` (ascending), rounded to the
+/// nearest ms. `sorted` must be non-empty.
+fn percentile_ms(sorted: &[f64], p: f64) -> i64 {
+    let idx = ((p * (sorted.len() as f64 - 1.0)).round() as usize).min(sorted.len() - 1);
+    sorted[idx].round() as i64
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LatencyStats {
     pub avg_ms: i64,
@@ -991,13 +998,11 @@ pub fn latency_stats_since(
     }
 
     let avg = values.iter().sum::<f64>() / values.len() as f64;
-    let p95_idx = ((0.95 * (values.len() as f64 - 1.0)).round() as usize).min(values.len() - 1);
-    let p99_idx = ((0.99 * (values.len() as f64 - 1.0)).round() as usize).min(values.len() - 1);
 
     Ok(LatencyStats {
         avg_ms: avg.round() as i64,
-        p95_ms: values[p95_idx].round() as i64,
-        p99_ms: values[p99_idx].round() as i64,
+        p95_ms: percentile_ms(&values, 0.95),
+        p99_ms: percentile_ms(&values, 0.99),
     })
 }
 
@@ -1261,12 +1266,9 @@ fn calculate_route_percentiles(
         return Ok((0, 0));
     }
 
-    let p95_idx = ((0.95 * (values.len() as f64 - 1.0)).round() as usize).min(values.len() - 1);
-    let p99_idx = ((0.99 * (values.len() as f64 - 1.0)).round() as usize).min(values.len() - 1);
-
     Ok((
-        values[p95_idx].round() as i64,
-        values[p99_idx].round() as i64,
+        percentile_ms(&values, 0.95),
+        percentile_ms(&values, 0.99),
     ))
 }
 

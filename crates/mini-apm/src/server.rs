@@ -1,11 +1,15 @@
+use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rama::Layer;
+use rama::Service;
 use rama::conversion::FromRef;
 use rama::graceful::Shutdown;
+use rama::http::Request;
 use rama::http::layer::error_handling::ErrorHandlerLayer;
 use rama::http::server::HttpServer;
+use rama::http::service::web::response::IntoResponse;
 use rama::http::service::web::{Router, response::Html};
 use rama::rt::Executor;
 
@@ -73,13 +77,22 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
     let addr = format!("0.0.0.0:{}", port);
     tracing::info!("MiniAPM collector listening on http://{} (API only)", addr);
 
-    // Graceful shutdown setup
+    let app = Arc::new(ErrorHandlerLayer::new().into_layer(app));
+    serve_with_graceful_shutdown(addr, app).await
+}
+
+/// Run an HTTP server on `addr` until Ctrl+C/SIGTERM, then drain in-flight
+/// connections (up to 30s) before returning.
+pub async fn serve_with_graceful_shutdown<S, Resp>(addr: String, app: S) -> anyhow::Result<()>
+where
+    S: Service<Request, Output = Resp, Error = Infallible> + Clone + 'static,
+    Resp: IntoResponse + Send + 'static,
+{
     let graceful = Shutdown::default();
 
     graceful.spawn_task_fn(move |guard| async move {
         let exec = Executor::graceful(guard);
 
-        let app = Arc::new(ErrorHandlerLayer::new().into_layer(app));
         if let Err(e) = HttpServer::auto(exec).listen(&addr, app).await {
             tracing::error!("Server error: {}", e);
         }

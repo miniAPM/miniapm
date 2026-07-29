@@ -211,15 +211,25 @@ pub async fn change_password_submit(
 
 // Admin-only handlers
 
-pub async fn users_page(
-    State(pool): State<DbPool>,
-    Extension(current_user): Extension<CurrentUser>,
-) -> Response {
-    if !current_user.is_admin {
-        return (StatusCode::FORBIDDEN, "Admin access required").into_response();
+/// Returns a `403 Forbidden` response unless `current_user` is an admin.
+fn require_admin(current_user: &CurrentUser) -> Option<Response> {
+    if current_user.is_admin {
+        None
+    } else {
+        Some((StatusCode::FORBIDDEN, "Admin access required").into_response())
     }
+}
 
-    let users = models::user::list_all(&pool).unwrap_or_default();
+/// Re-renders the users list with a status message, reloading the user list
+/// from the database. Shared by all handlers below that mutate users.
+fn render_users_page(
+    pool: &DbPool,
+    current_user_id: i64,
+    error: Option<String>,
+    success: Option<String>,
+    invite_url: Option<String>,
+) -> Response {
+    let users = models::user::list_all(pool).unwrap_or_default();
     let ctx = WebProjectContext {
         current_project: None,
         projects: vec![],
@@ -228,13 +238,24 @@ pub async fn users_page(
 
     HtmlTemplate(UsersTemplate {
         users,
-        current_user_id: current_user.id,
-        error: None,
-        success: None,
-        invite_url: None,
+        current_user_id,
+        error,
+        success,
+        invite_url,
         ctx,
     })
     .into_response()
+}
+
+pub async fn users_page(
+    State(pool): State<DbPool>,
+    Extension(current_user): Extension<CurrentUser>,
+) -> Response {
+    if let Some(forbidden) = require_admin(&current_user) {
+        return forbidden;
+    }
+
+    render_users_page(&pool, current_user.id, None, None, None)
 }
 
 pub async fn create_user(
@@ -242,35 +263,25 @@ pub async fn create_user(
     Extension(current_user): Extension<CurrentUser>,
     Form(form): Form<CreateUserForm>,
 ) -> Response {
-    if !current_user.is_admin {
-        return (StatusCode::FORBIDDEN, "Admin access required").into_response();
+    if let Some(forbidden) = require_admin(&current_user) {
+        return forbidden;
     }
-
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
 
     // Validate username
     if let Err(validation_error) = models::user::validate_username(&form.username) {
-        let users = models::user::list_all(&pool).unwrap_or_default();
-        return HtmlTemplate(UsersTemplate {
-            users,
-            current_user_id: current_user.id,
-            error: Some(validation_error.to_string()),
-            success: None,
-            invite_url: None,
-            ctx,
-        })
-        .into_response();
+        return render_users_page(
+            &pool,
+            current_user.id,
+            Some(validation_error.to_string()),
+            None,
+            None,
+        );
     }
 
     let is_admin = form.is_admin.as_deref() == Some("on");
 
     match models::user::create_with_invite(&pool, &form.username, is_admin) {
         Ok(invite_token) => {
-            let users = models::user::list_all(&pool).unwrap_or_default();
             let base_url = std::env::var("MINI_APM_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".to_string());
             let invite_url = format!(
@@ -278,28 +289,21 @@ pub async fn create_user(
                 base_url.trim_end_matches('/'),
                 invite_token
             );
-            HtmlTemplate(UsersTemplate {
-                users,
-                current_user_id: current_user.id,
-                error: None,
-                success: Some(format!("User '{}' created", form.username)),
-                invite_url: Some(invite_url),
-                ctx,
-            })
-            .into_response()
+            render_users_page(
+                &pool,
+                current_user.id,
+                None,
+                Some(format!("User '{}' created", form.username)),
+                Some(invite_url),
+            )
         }
-        Err(_) => {
-            let users = models::user::list_all(&pool).unwrap_or_default();
-            HtmlTemplate(UsersTemplate {
-                users,
-                current_user_id: current_user.id,
-                error: Some("Failed to create user (username may already exist)".to_string()),
-                success: None,
-                invite_url: None,
-                ctx,
-            })
-            .into_response()
-        }
+        Err(_) => render_users_page(
+            &pool,
+            current_user.id,
+            Some("Failed to create user (username may already exist)".to_string()),
+            None,
+            None,
+        ),
     }
 }
 
@@ -313,54 +317,35 @@ pub async fn delete_user(
     Extension(current_user): Extension<CurrentUser>,
     Form(form): Form<DeleteUserForm>,
 ) -> Response {
-    if !current_user.is_admin {
-        return (StatusCode::FORBIDDEN, "Admin access required").into_response();
+    if let Some(forbidden) = require_admin(&current_user) {
+        return forbidden;
     }
 
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
-
     if form.user_id == current_user.id {
-        let users = models::user::list_all(&pool).unwrap_or_default();
-        return HtmlTemplate(UsersTemplate {
-            users,
-            current_user_id: current_user.id,
-            error: Some("Cannot delete yourself".to_string()),
-            success: None,
-            invite_url: None,
-            ctx,
-        })
-        .into_response();
+        return render_users_page(
+            &pool,
+            current_user.id,
+            Some("Cannot delete yourself".to_string()),
+            None,
+            None,
+        );
     }
 
     match models::user::delete(&pool, form.user_id) {
-        Ok(_) => {
-            let users = models::user::list_all(&pool).unwrap_or_default();
-            HtmlTemplate(UsersTemplate {
-                users,
-                current_user_id: current_user.id,
-                error: None,
-                success: Some("User deleted".to_string()),
-                invite_url: None,
-                ctx,
-            })
-            .into_response()
-        }
-        Err(_) => {
-            let users = models::user::list_all(&pool).unwrap_or_default();
-            HtmlTemplate(UsersTemplate {
-                users,
-                current_user_id: current_user.id,
-                error: Some("Failed to delete user".to_string()),
-                success: None,
-                invite_url: None,
-                ctx,
-            })
-            .into_response()
-        }
+        Ok(_) => render_users_page(
+            &pool,
+            current_user.id,
+            None,
+            Some("User deleted".to_string()),
+            None,
+        ),
+        Err(_) => render_users_page(
+            &pool,
+            current_user.id,
+            Some("Failed to delete user".to_string()),
+            None,
+            None,
+        ),
     }
 }
 
@@ -372,22 +357,25 @@ pub struct InviteForm {
     pub confirm_password: String,
 }
 
+/// Rendered when an invite token is missing, unknown, or expired.
+fn invalid_invite_response() -> Response {
+    rama::http::Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/html; charset=utf-8")
+        .body(rama::http::Body::from(
+            "<h1>Invalid or expired invite link</h1><p><a href=\"/auth/login\">Go to login</a></p>",
+        ))
+        .unwrap()
+}
+
 pub async fn invite_page(State(pool): State<DbPool>, Path(token): Path<String>) -> Response {
     match models::user::find_by_invite_token(&pool, &token) {
-        Ok(Some(user)) => HtmlTemplate(
-            InviteTemplate {
-                username: user.username,
-                error: None,
-            }
-        )
+        Ok(Some(user)) => HtmlTemplate(InviteTemplate {
+            username: user.username,
+            error: None,
+        })
         .into_response(),
-        _ => rama::http::Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "text/html; charset=utf-8")
-            .body(rama::http::Body::from(
-                "<h1>Invalid or expired invite link</h1><p><a href=\"/auth/login\">Go to login</a></p>",
-            ))
-            .unwrap(),
+        _ => invalid_invite_response(),
     }
 }
 
@@ -398,13 +386,7 @@ pub async fn invite_submit(
 ) -> Response {
     let user = match models::user::find_by_invite_token(&pool, &token) {
         Ok(Some(u)) => u,
-        _ => return rama::http::Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "text/html; charset=utf-8")
-            .body(rama::http::Body::from(
-                "<h1>Invalid or expired invite link</h1><p><a href=\"/auth/login\">Go to login</a></p>",
-            ))
-            .unwrap(),
+        _ => return invalid_invite_response(),
     };
 
     if form.password != form.confirm_password {

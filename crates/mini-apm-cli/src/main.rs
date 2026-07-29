@@ -1,6 +1,5 @@
 use clap::{Parser, Subcommand};
-use mini_apm::{config::Config, db, models};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use mini_apm::{config::Config, db, init_tracing, models};
 
 #[derive(Parser)]
 #[command(name = "miniapm-cli")]
@@ -32,13 +31,7 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "miniapm=info".into()),
-        )
-        .init();
+    init_tracing("miniapm=info");
 
     let cli = Cli::parse();
     let config = Config::from_env()?;

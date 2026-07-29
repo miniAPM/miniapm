@@ -1,6 +1,5 @@
 use clap::Parser;
-use mini_apm::{config::Config, db, server};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use mini_apm::{config::Config, db, init_tracing, server};
 
 #[derive(Parser)]
 #[command(name = "miniapm")]
@@ -12,13 +11,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "mini_apm=info,tower_http=info".into()),
-        )
-        .init();
+    init_tracing("mini_apm=info,tower_http=info");
 
     let cli = Cli::parse();
     let config = Config::from_env()?;
