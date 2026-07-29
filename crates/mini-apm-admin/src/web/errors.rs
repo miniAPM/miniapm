@@ -61,6 +61,7 @@ pub async fn index(
         search.as_deref(),
         since_str.as_deref(),
     )
+    .await
     .unwrap_or(0);
 
     let total_pages = (total_count + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -76,10 +77,12 @@ pub async fn index(
         PAGE_SIZE,
         offset,
     )
+    .await
     .unwrap_or_default();
 
-    let hourly_errors =
-        models::error::hourly_error_stats(&pool, project_id, 24).unwrap_or_default();
+    let hourly_errors = models::error::hourly_error_stats(&pool, project_id, 24)
+        .await
+        .unwrap_or_default();
 
     HtmlTemplate(ErrorsIndexTemplate {
         errors,
@@ -113,13 +116,17 @@ pub async fn show(
         projects: vec![],
         projects_enabled: false,
     };
-    let error = models::error::find(&pool, id).unwrap_or(None);
+    let error = models::error::find(&pool, id).await.unwrap_or(None);
     let occurrences = if error.is_some() {
-        models::error::occurrences(&pool, id, 10).unwrap_or_default()
+        models::error::occurrences(&pool, id, 10)
+            .await
+            .unwrap_or_default()
     } else {
         vec![]
     };
-    let trend_24h = models::error::error_trend_24h(&pool, id).unwrap_or_default();
+    let trend_24h = models::error::error_trend_24h(&pool, id)
+        .await
+        .unwrap_or_default();
 
     HtmlTemplate(ErrorShowTemplate {
         error,
@@ -142,7 +149,7 @@ pub async fn update_status(
     // Validate status
     let valid_statuses = ["open", "resolved", "ignored"];
     if valid_statuses.contains(&form.status.as_str()) {
-        let _ = models::error::update_status(&pool, id, &form.status);
+        let _ = models::error::update_status(&pool, id, &form.status).await;
     }
     Redirect::temporary("/errors")
 }

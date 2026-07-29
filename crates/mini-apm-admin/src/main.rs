@@ -17,8 +17,8 @@ async fn main() -> anyhow::Result<()> {
     config.validate()?;
     config.log_summary();
 
-    let pool = db::init(&config)?;
-    models::user::ensure_default_admin(&pool)?;
+    let pool = db::init(&config).await?;
+    models::user::ensure_default_admin(&pool).await?;
 
     run(pool, port).await
 }

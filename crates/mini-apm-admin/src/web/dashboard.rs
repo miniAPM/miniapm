@@ -34,18 +34,29 @@ pub async fn index(State(pool): State<DbPool>) -> HtmlTemplate<DashboardTemplate
     let project_id = ctx.project_id();
     let since = (Utc::now() - Duration::hours(24)).to_rfc3339();
 
-    let requests_24h = span::count_since(&pool, project_id, &since).unwrap_or(0);
-    let errors_24h = models::error::count_since(&pool, project_id, &since).unwrap_or(0);
-    let latency_stats =
-        span::latency_stats_since(&pool, project_id, &since).unwrap_or(span::LatencyStats {
+    let requests_24h = span::count_since(&pool, project_id, &since).await.unwrap_or(0);
+    let errors_24h = models::error::count_since(&pool, project_id, &since)
+        .await
+        .unwrap_or(0);
+    let latency_stats = span::latency_stats_since(&pool, project_id, &since)
+        .await
+        .unwrap_or(span::LatencyStats {
             avg_ms: 0,
             p95_ms: 0,
             p99_ms: 0,
         });
-    let recent_errors = models::error::list(&pool, project_id, Some("open"), 5).unwrap_or_default();
-    let slow_requests = span::slow_traces(&pool, project_id, 500.0, 5).unwrap_or_default();
-    let hourly_stats = span::hourly_stats(&pool, project_id, 24).unwrap_or_default();
-    let deploys = models::deploy::list_since(&pool, project_id, &since).unwrap_or_default();
+    let recent_errors = models::error::list(&pool, project_id, Some("open"), 5)
+        .await
+        .unwrap_or_default();
+    let slow_requests = span::slow_traces(&pool, project_id, 500.0, 5)
+        .await
+        .unwrap_or_default();
+    let hourly_stats = span::hourly_stats(&pool, project_id, 24)
+        .await
+        .unwrap_or_default();
+    let deploys = models::deploy::list_since(&pool, project_id, &since)
+        .await
+        .unwrap_or_default();
 
     HtmlTemplate(DashboardTemplate {
         requests_24h,

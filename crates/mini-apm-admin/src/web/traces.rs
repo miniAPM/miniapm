@@ -70,6 +70,7 @@ pub async fn index(
         search.as_deref(),
         min_duration_ms,
     )
+    .await
     .unwrap_or(0);
 
     let total_pages = (total_count + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -86,6 +87,7 @@ pub async fn index(
         PAGE_SIZE,
         offset,
     )
+    .await
     .unwrap_or_default();
 
     HtmlTemplate(TracesIndexTemplate {
@@ -119,7 +121,7 @@ pub async fn show(
         projects: vec![],
         projects_enabled: false,
     };
-    let trace = models::span::get_trace(&pool, &trace_id).unwrap_or(None);
+    let trace = models::span::get_trace(&pool, &trace_id).await.unwrap_or(None);
 
     // Detect N+1 issues
     let n_plus_1_issues = if let Some(ref t) = trace {

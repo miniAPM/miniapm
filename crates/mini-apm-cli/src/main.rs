@@ -38,16 +38,16 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Commands::CreateKey { name } => {
-            let pool = db::init(&config)?;
-            let key = mini_apm::models::api_key::create(&pool, &name)?;
+            let pool = db::init(&config).await?;
+            let key = mini_apm::models::api_key::create(&pool, &name).await?;
             println!("API Key created successfully!\n");
             println!("Name: {}", name);
             println!("Key:  {}", key);
             println!("\nStore this key securely - it cannot be retrieved later.");
         }
         Commands::ListKeys => {
-            let pool = db::init(&config)?;
-            let keys = mini_apm::models::api_key::list(&pool)?;
+            let pool = db::init(&config).await?;
+            let keys = mini_apm::models::api_key::list(&pool).await?;
             if keys.is_empty() {
                 println!("No API keys found.");
             } else {
@@ -63,8 +63,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::ResetPassword { username, password } => {
-            let pool = db::init(&config)?;
-            match models::user::reset_password(&pool, &username, &password) {
+            let pool = db::init(&config).await?;
+            match models::user::reset_password(&pool, &username, &password).await {
                 Ok(()) => {
                     println!("Password reset successfully for user: {}", username);
                 }
@@ -75,8 +75,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Commands::ListUsers => {
-            let pool = db::init(&config)?;
-            let users = models::user::list_all(&pool)?;
+            let pool = db::init(&config).await?;
+            let users = models::user::list_all(&pool).await?;
             if users.is_empty() {
                 println!("No users found.");
             } else {

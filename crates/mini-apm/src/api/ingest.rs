@@ -23,7 +23,7 @@ pub async fn ingest_spans(
     Extension(ctx): Extension<ProjectContext>,
     Json(otlp_request): Json<span::OtlpTraceRequest>,
 ) -> StatusCode {
-    match span::insert_otlp_batch(&pool, &otlp_request, ctx.project_id) {
+    match span::insert_otlp_batch(&pool, &otlp_request, ctx.project_id).await {
         Ok(count) => {
             tracing::debug!("Ingested {} spans (project_id={:?})", count, ctx.project_id);
             StatusCode::ACCEPTED
@@ -40,7 +40,7 @@ pub async fn ingest_deploys(
     Extension(ctx): Extension<ProjectContext>,
     Json(incoming): Json<deploy::IncomingDeploy>,
 ) -> StatusCode {
-    match deploy::insert(&pool, &incoming, ctx.project_id) {
+    match deploy::insert(&pool, &incoming, ctx.project_id).await {
         Ok(id) => {
             tracing::info!(
                 "Recorded deploy id={} git_sha={} (project_id={:?})",
@@ -62,7 +62,7 @@ pub async fn ingest_errors(
     Extension(ctx): Extension<ProjectContext>,
     Json(incoming): Json<app_error::IncomingError>,
 ) -> StatusCode {
-    match app_error::insert(&pool, &incoming, ctx.project_id) {
+    match app_error::insert(&pool, &incoming, ctx.project_id).await {
         Ok(id) => {
             tracing::debug!(
                 "Recorded error id={} class={} (project_id={:?})",
@@ -88,7 +88,7 @@ pub async fn ingest_errors_batch(
     let mut error_count = 0;
 
     for error in batch.errors {
-        match app_error::insert(&pool, &error, ctx.project_id) {
+        match app_error::insert(&pool, &error, ctx.project_id).await {
             Ok(_) => success_count += 1,
             Err(e) => {
                 tracing::warn!("Failed to record error: {}", e);
@@ -118,9 +118,9 @@ mod tests {
     use crate::db;
     use crate::models::project;
 
-    fn test_pool() -> DbPool {
+    async fn test_pool() -> DbPool {
         let config = Config::default();
-        db::init(&config).expect("Failed to create test database")
+        db::init(&config).await.expect("Failed to create test database")
     }
 
     fn project_context(project_id: Option<i64>) -> ProjectContext {
@@ -129,8 +129,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_spans_success() {
-        let pool = test_pool();
-        let proj = project::ensure_default_project(&pool).unwrap();
+        let pool = test_pool().await;
+        let proj = project::ensure_default_project(&pool).await.unwrap();
         let ctx = project_context(Some(proj.id));
 
         let otlp_request = span::OtlpTraceRequest {
@@ -174,8 +174,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_spans_empty() {
-        let pool = test_pool();
-        let proj = project::ensure_default_project(&pool).unwrap();
+        let pool = test_pool().await;
+        let proj = project::ensure_default_project(&pool).await.unwrap();
         let ctx = project_context(Some(proj.id));
 
         let otlp_request = span::OtlpTraceRequest {
@@ -188,8 +188,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_error_success() {
-        let pool = test_pool();
-        let proj = project::ensure_default_project(&pool).unwrap();
+        let pool = test_pool().await;
+        let proj = project::ensure_default_project(&pool).await.unwrap();
         let ctx = project_context(Some(proj.id));
 
         let incoming = app_error::IncomingError {
@@ -210,8 +210,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_error_with_source_context() {
-        let pool = test_pool();
-        let proj = project::ensure_default_project(&pool).unwrap();
+        let pool = test_pool().await;
+        let proj = project::ensure_default_project(&pool).await.unwrap();
         let ctx = project_context(Some(proj.id));
 
         let incoming = app_error::IncomingError {
@@ -241,8 +241,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_errors_batch_success() {
-        let pool = test_pool();
-        let proj = project::ensure_default_project(&pool).unwrap();
+        let pool = test_pool().await;
+        let proj = project::ensure_default_project(&pool).await.unwrap();
         let ctx = project_context(Some(proj.id));
 
         let batch = IncomingErrorBatch {
@@ -278,8 +278,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_errors_batch_empty() {
-        let pool = test_pool();
-        let proj = project::ensure_default_project(&pool).unwrap();
+        let pool = test_pool().await;
+        let proj = project::ensure_default_project(&pool).await.unwrap();
         let ctx = project_context(Some(proj.id));
 
         let batch = IncomingErrorBatch { errors: vec![] };
@@ -290,8 +290,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_deploy_success() {
-        let pool = test_pool();
-        let proj = project::ensure_default_project(&pool).unwrap();
+        let pool = test_pool().await;
+        let proj = project::ensure_default_project(&pool).await.unwrap();
         let ctx = project_context(Some(proj.id));
 
         let incoming = deploy::IncomingDeploy {
@@ -309,8 +309,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_deploy_minimal() {
-        let pool = test_pool();
-        let proj = project::ensure_default_project(&pool).unwrap();
+        let pool = test_pool().await;
+        let proj = project::ensure_default_project(&pool).await.unwrap();
         let ctx = project_context(Some(proj.id));
 
         let incoming = deploy::IncomingDeploy {
@@ -328,8 +328,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_ingest_without_project_id() {
-        let pool = test_pool();
-        let _proj = project::ensure_default_project(&pool).unwrap();
+        let pool = test_pool().await;
+        let _proj = project::ensure_default_project(&pool).await.unwrap();
         let ctx = project_context(None); // No project_id
 
         let incoming = deploy::IncomingDeploy {

@@ -2,7 +2,7 @@ use crate::DbPool;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Deploy {
     pub id: i64,
     pub project_id: Option<i64>,
@@ -34,51 +34,39 @@ pub struct IncomingDeploy {
     pub timestamp: Option<String>,
 }
 
-/// Helper function to map a database row to a Deploy struct
-fn map_row_to_deploy(row: &rusqlite::Row) -> rusqlite::Result<Deploy> {
-    Ok(Deploy {
-        id: row.get(0)?,
-        project_id: row.get(1)?,
-        git_sha: row.get(2)?,
-        version: row.get(3)?,
-        env: row.get(4)?,
-        deployed_at: row.get(5)?,
-        description: row.get(6)?,
-        deployer: row.get(7)?,
-    })
-}
-
-pub fn insert(
+pub async fn insert(
     pool: &DbPool,
     deploy: &IncomingDeploy,
     project_id: Option<i64>,
 ) -> anyhow::Result<i64> {
-    let conn = pool.get()?;
     let now = Utc::now().to_rfc3339();
-    let timestamp = deploy.timestamp.as_ref().unwrap_or(&now);
+    let timestamp = deploy.timestamp.as_deref().unwrap_or(&now);
 
-    conn.execute(
+    let result = sqlx::query(
         r#"
         INSERT INTO deploys (project_id, git_sha, version, env, deployed_at, description, deployer)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         "#,
-        (
-            project_id,
-            &deploy.git_sha,
-            &deploy.version,
-            &deploy.env,
-            timestamp,
-            &deploy.description,
-            &deploy.deployer,
-        ),
-    )?;
+    )
+    .bind(project_id)
+    .bind(&deploy.git_sha)
+    .bind(deploy.version.as_deref())
+    .bind(deploy.env.as_deref())
+    .bind(timestamp)
+    .bind(deploy.description.as_deref())
+    .bind(deploy.deployer.as_deref())
+    .execute(pool)
+    .await?;
 
-    Ok(conn.last_insert_rowid())
+    Ok(result.last_insert_rowid())
 }
 
-pub fn list(pool: &DbPool, project_id: Option<i64>, limit: i64) -> anyhow::Result<Vec<Deploy>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
+pub async fn list(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    limit: i64,
+) -> anyhow::Result<Vec<Deploy>> {
+    let deploys = sqlx::query_as::<_, Deploy>(
         r#"
         SELECT id, project_id, git_sha, version, env,
                strftime('%Y-%m-%d %H:%M', deployed_at) as deployed_at,
@@ -88,23 +76,22 @@ pub fn list(pool: &DbPool, project_id: Option<i64>, limit: i64) -> anyhow::Resul
         ORDER BY deployed_at DESC
         LIMIT ?2
         "#,
-    )?;
-
-    let deploys = stmt
-        .query_map(rusqlite::params![project_id, limit], map_row_to_deploy)?
-        .collect::<Result<Vec<_>, _>>()?;
+    )
+    .bind(project_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
 
     Ok(deploys)
 }
 
 /// Get deploys within a time range for chart markers
-pub fn list_since(
+pub async fn list_since(
     pool: &DbPool,
     project_id: Option<i64>,
     since: &str,
 ) -> anyhow::Result<Vec<Deploy>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
+    let deploys = sqlx::query_as::<_, Deploy>(
         r#"
         SELECT id, project_id, git_sha, version, env,
                deployed_at,
@@ -113,41 +100,41 @@ pub fn list_since(
         WHERE deployed_at >= ?1 AND (?2 IS NULL OR project_id = ?2)
         ORDER BY deployed_at ASC
         "#,
-    )?;
-
-    let deploys = stmt
-        .query_map(rusqlite::params![since, project_id], map_row_to_deploy)?
-        .collect::<Result<Vec<_>, _>>()?;
+    )
+    .bind(since)
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
 
     Ok(deploys)
 }
 
 /// Get the most recent deploy
-pub fn latest(pool: &DbPool, project_id: Option<i64>) -> anyhow::Result<Option<Deploy>> {
-    let conn = pool.get()?;
-    let deploy = conn
-        .query_row(
-            r#"
-            SELECT id, project_id, git_sha, version, env,
-                   strftime('%Y-%m-%d %H:%M', deployed_at) as deployed_at,
-                   description, deployer
-            FROM deploys
-            WHERE (?1 IS NULL OR project_id = ?1)
-            ORDER BY deployed_at DESC
-            LIMIT 1
-            "#,
-            rusqlite::params![project_id],
-            map_row_to_deploy,
-        )
-        .ok();
+pub async fn latest(pool: &DbPool, project_id: Option<i64>) -> anyhow::Result<Option<Deploy>> {
+    let deploy = sqlx::query_as::<_, Deploy>(
+        r#"
+        SELECT id, project_id, git_sha, version, env,
+               strftime('%Y-%m-%d %H:%M', deployed_at) as deployed_at,
+               description, deployer
+        FROM deploys
+        WHERE (?1 IS NULL OR project_id = ?1)
+        ORDER BY deployed_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(project_id)
+    .fetch_optional(pool)
+    .await?;
 
     Ok(deploy)
 }
 
-pub fn delete_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
-    let conn = pool.get()?;
-    let deleted = conn.execute("DELETE FROM deploys WHERE deployed_at < ?1", [before])?;
-    Ok(deleted)
+pub async fn delete_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
+    let result = sqlx::query("DELETE FROM deploys WHERE deployed_at < ?1")
+        .bind(before)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() as usize)
 }
 
 #[cfg(test)]
@@ -156,9 +143,9 @@ mod tests {
     use crate::config::Config;
     use crate::db;
 
-    fn test_pool() -> DbPool {
+    async fn test_pool() -> DbPool {
         let config = Config::default();
-        db::init(&config).expect("Failed to create test database")
+        db::init(&config).await.expect("Failed to create test database")
     }
 
     #[test]
@@ -191,9 +178,9 @@ mod tests {
         assert_eq!(deploy.short_sha(), "abc");
     }
 
-    #[test]
-    fn test_insert_deploy() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_insert_deploy() {
+        let pool = test_pool().await;
         let incoming = IncomingDeploy {
             git_sha: "abc123".to_string(),
             version: Some("v1.0.0".to_string()),
@@ -203,15 +190,15 @@ mod tests {
             timestamp: None,
         };
 
-        let id = insert(&pool, &incoming, None).unwrap();
+        let id = insert(&pool, &incoming, None).await.unwrap();
 
         assert!(id > 0);
     }
 
-    #[test]
-    fn test_insert_deploy_with_project() {
-        let pool = test_pool();
-        let project = crate::models::project::create(&pool, "Test").unwrap();
+    #[tokio::test]
+    async fn test_insert_deploy_with_project() {
+        let pool = test_pool().await;
+        let project = crate::models::project::create(&pool, "Test").await.unwrap();
 
         let incoming = IncomingDeploy {
             git_sha: "def456".to_string(),
@@ -222,17 +209,17 @@ mod tests {
             timestamp: None,
         };
 
-        let id = insert(&pool, &incoming, Some(project.id)).unwrap();
-        let deploys = list(&pool, Some(project.id), 10).unwrap();
+        let id = insert(&pool, &incoming, Some(project.id)).await.unwrap();
+        let deploys = list(&pool, Some(project.id), 10).await.unwrap();
 
         assert_eq!(deploys.len(), 1);
         assert_eq!(deploys[0].id, id);
         assert_eq!(deploys[0].project_id, Some(project.id));
     }
 
-    #[test]
-    fn test_list_deploys() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_list_deploys() {
+        let pool = test_pool().await;
 
         for i in 0..5 {
             let incoming = IncomingDeploy {
@@ -243,16 +230,16 @@ mod tests {
                 deployer: None,
                 timestamp: None,
             };
-            insert(&pool, &incoming, None).unwrap();
+            insert(&pool, &incoming, None).await.unwrap();
         }
 
-        let deploys = list(&pool, None, 10).unwrap();
+        let deploys = list(&pool, None, 10).await.unwrap();
         assert_eq!(deploys.len(), 5);
     }
 
-    #[test]
-    fn test_list_deploys_limit() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_list_deploys_limit() {
+        let pool = test_pool().await;
 
         for i in 0..5 {
             let incoming = IncomingDeploy {
@@ -263,16 +250,16 @@ mod tests {
                 deployer: None,
                 timestamp: None,
             };
-            insert(&pool, &incoming, None).unwrap();
+            insert(&pool, &incoming, None).await.unwrap();
         }
 
-        let deploys = list(&pool, None, 3).unwrap();
+        let deploys = list(&pool, None, 3).await.unwrap();
         assert_eq!(deploys.len(), 3);
     }
 
-    #[test]
-    fn test_latest_deploy() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_latest_deploy() {
+        let pool = test_pool().await;
 
         let incoming1 = IncomingDeploy {
             git_sha: "first".to_string(),
@@ -282,7 +269,7 @@ mod tests {
             deployer: None,
             timestamp: Some("2024-01-01T00:00:00Z".to_string()),
         };
-        insert(&pool, &incoming1, None).unwrap();
+        insert(&pool, &incoming1, None).await.unwrap();
 
         let incoming2 = IncomingDeploy {
             git_sha: "second".to_string(),
@@ -292,22 +279,22 @@ mod tests {
             deployer: None,
             timestamp: Some("2024-01-02T00:00:00Z".to_string()),
         };
-        insert(&pool, &incoming2, None).unwrap();
+        insert(&pool, &incoming2, None).await.unwrap();
 
-        let deploy = latest(&pool, None).unwrap().unwrap();
+        let deploy = latest(&pool, None).await.unwrap().unwrap();
         assert_eq!(deploy.git_sha, "second");
     }
 
-    #[test]
-    fn test_latest_deploy_empty() {
-        let pool = test_pool();
-        let deploy = latest(&pool, None).unwrap();
+    #[tokio::test]
+    async fn test_latest_deploy_empty() {
+        let pool = test_pool().await;
+        let deploy = latest(&pool, None).await.unwrap();
         assert!(deploy.is_none());
     }
 
-    #[test]
-    fn test_delete_before() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_delete_before() {
+        let pool = test_pool().await;
 
         let old = IncomingDeploy {
             git_sha: "old".to_string(),
@@ -317,7 +304,7 @@ mod tests {
             deployer: None,
             timestamp: Some("2020-01-01T00:00:00Z".to_string()),
         };
-        insert(&pool, &old, None).unwrap();
+        insert(&pool, &old, None).await.unwrap();
 
         let recent = IncomingDeploy {
             git_sha: "recent".to_string(),
@@ -327,12 +314,12 @@ mod tests {
             deployer: None,
             timestamp: Some("2024-01-01T00:00:00Z".to_string()),
         };
-        insert(&pool, &recent, None).unwrap();
+        insert(&pool, &recent, None).await.unwrap();
 
-        let deleted = delete_before(&pool, "2023-01-01").unwrap();
+        let deleted = delete_before(&pool, "2023-01-01").await.unwrap();
         assert_eq!(deleted, 1);
 
-        let remaining = list(&pool, None, 10).unwrap();
+        let remaining = list(&pool, None, 10).await.unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].git_sha, "recent");
     }

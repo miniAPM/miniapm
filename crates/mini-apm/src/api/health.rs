@@ -27,10 +27,7 @@ pub async fn health_handler(State(pool): State<DbPool>) -> (StatusCode, Json<Hea
     let uptime_seconds = START_TIME.get().map(|t| t.elapsed().as_secs()).unwrap_or(0);
 
     // Actually verify database connectivity
-    let db_ok = match pool.get() {
-        Ok(conn) => conn.query_row("SELECT 1", [], |_| Ok(())).is_ok(),
-        Err(_) => false,
-    };
+    let db_ok = sqlx::query("SELECT 1").execute(&pool).await.is_ok();
 
     if db_ok {
         (
@@ -62,15 +59,15 @@ mod tests {
     use crate::config::Config;
     use crate::db;
 
-    fn test_pool() -> DbPool {
+    async fn test_pool() -> DbPool {
         let config = Config::default();
-        db::init(&config).expect("Failed to create test database")
+        db::init(&config).await.expect("Failed to create test database")
     }
 
     #[tokio::test]
     async fn test_health_handler_ok() {
         init_start_time();
-        let pool = test_pool();
+        let pool = test_pool().await;
 
         let (status, Json(response)) = health_handler(State(pool)).await;
 

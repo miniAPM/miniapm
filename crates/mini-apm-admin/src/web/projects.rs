@@ -33,7 +33,7 @@ pub async fn index(
         projects: vec![],
         projects_enabled: false,
     };
-    let projects = project::list_all(&pool).unwrap_or_default();
+    let projects = project::list_all(&pool).await.unwrap_or_default();
 
     HtmlTemplate(ProjectsTemplate {
         projects,
@@ -67,7 +67,7 @@ pub async fn create(State(pool): State<DbPool>, Form(form): Form<CreateForm>) ->
         return Redirect::to("/projects");
     }
 
-    let _ = project::create(&pool, form.name.trim());
+    let _ = project::create(&pool, form.name.trim()).await;
     Redirect::to("/projects")
 }
 
@@ -77,7 +77,7 @@ pub struct DeleteForm {
 }
 
 pub async fn delete(State(pool): State<DbPool>, Form(form): Form<DeleteForm>) -> impl IntoResponse {
-    let _ = project::delete(&pool, form.id);
+    let _ = project::delete(&pool, form.id).await;
     Redirect::to("/projects")
 }
 
@@ -90,6 +90,6 @@ pub async fn regenerate_key(
     State(pool): State<DbPool>,
     Form(form): Form<RegenerateKeyForm>,
 ) -> impl IntoResponse {
-    let _ = project::regenerate_api_key(&pool, form.id);
+    let _ = project::regenerate_api_key(&pool, form.id).await;
     Redirect::to("/projects")
 }

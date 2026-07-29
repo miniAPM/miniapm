@@ -72,9 +72,10 @@ pub struct CreateUserForm {
 }
 
 // Helper to get current user from cookies
-pub fn get_current_user(pool: &DbPool, req: &rama::http::Request) -> Option<models::User> {
+pub async fn get_current_user(pool: &DbPool, req: &rama::http::Request) -> Option<models::User> {
     let token = get_cookie(req, SESSION_COOKIE)?;
     models::user::get_user_from_session(pool, &token)
+        .await
         .ok()
         .flatten()
 }
@@ -86,10 +87,10 @@ pub async fn login_page() -> Response {
 }
 
 pub async fn login_submit(State(pool): State<DbPool>, Form(form): Form<LoginForm>) -> Response {
-    match models::user::authenticate(&pool, &form.username, &form.password) {
+    match models::user::authenticate(&pool, &form.username, &form.password).await {
         Ok(Some(user)) => {
             // Create session
-            match models::user::create_session(&pool, user.id) {
+            match models::user::create_session(&pool, user.id).await {
                 Ok(token) => {
                     let cookie_header = set_cookie_header(SESSION_COOKIE, &token, 7 * 86400);
 
@@ -136,7 +137,7 @@ pub async fn change_password_page(
     State(pool): State<DbPool>,
     req: rama::http::Request,
 ) -> Response {
-    let Some(user) = get_current_user(&pool, &req) else {
+    let Some(user) = get_current_user(&pool, &req).await else {
         return Redirect::temporary("/auth/login").into_response();
     };
 
@@ -172,6 +173,7 @@ pub async fn change_password_submit(
     // Verify current password (skip only if must_change_password is set, allowing first-time change)
     if !current_user.must_change_password && !form.current_password.is_empty() {
         match models::user::verify_password_for_user(&pool, current_user.id, &form.current_password)
+            .await
         {
             Ok(true) => {} // Password verified, continue
             Ok(false) => {
@@ -199,7 +201,7 @@ pub async fn change_password_submit(
     }
 
     // Change password
-    match models::user::change_password(&pool, current_user.id, &form.new_password) {
+    match models::user::change_password(&pool, current_user.id, &form.new_password).await {
         Ok(_) => Redirect::temporary("/").into_response(),
         Err(_) => HtmlTemplate(ChangePasswordTemplate {
             error: Some("Failed to change password".to_string()),
@@ -222,14 +224,14 @@ fn require_admin(current_user: &CurrentUser) -> Option<Response> {
 
 /// Re-renders the users list with a status message, reloading the user list
 /// from the database. Shared by all handlers below that mutate users.
-fn render_users_page(
+async fn render_users_page(
     pool: &DbPool,
     current_user_id: i64,
     error: Option<String>,
     success: Option<String>,
     invite_url: Option<String>,
 ) -> Response {
-    let users = models::user::list_all(pool).unwrap_or_default();
+    let users = models::user::list_all(pool).await.unwrap_or_default();
     let ctx = WebProjectContext {
         current_project: None,
         projects: vec![],
@@ -255,7 +257,7 @@ pub async fn users_page(
         return forbidden;
     }
 
-    render_users_page(&pool, current_user.id, None, None, None)
+    render_users_page(&pool, current_user.id, None, None, None).await
 }
 
 pub async fn create_user(
@@ -275,12 +277,13 @@ pub async fn create_user(
             Some(validation_error.to_string()),
             None,
             None,
-        );
+        )
+        .await;
     }
 
     let is_admin = form.is_admin.as_deref() == Some("on");
 
-    match models::user::create_with_invite(&pool, &form.username, is_admin) {
+    match models::user::create_with_invite(&pool, &form.username, is_admin).await {
         Ok(invite_token) => {
             let base_url = std::env::var("MINI_APM_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".to_string());
@@ -296,14 +299,18 @@ pub async fn create_user(
                 Some(format!("User '{}' created", form.username)),
                 Some(invite_url),
             )
+            .await
         }
-        Err(_) => render_users_page(
-            &pool,
-            current_user.id,
-            Some("Failed to create user (username may already exist)".to_string()),
-            None,
-            None,
-        ),
+        Err(_) => {
+            render_users_page(
+                &pool,
+                current_user.id,
+                Some("Failed to create user (username may already exist)".to_string()),
+                None,
+                None,
+            )
+            .await
+        }
     }
 }
 
@@ -328,24 +335,31 @@ pub async fn delete_user(
             Some("Cannot delete yourself".to_string()),
             None,
             None,
-        );
+        )
+        .await;
     }
 
-    match models::user::delete(&pool, form.user_id) {
-        Ok(_) => render_users_page(
-            &pool,
-            current_user.id,
-            None,
-            Some("User deleted".to_string()),
-            None,
-        ),
-        Err(_) => render_users_page(
-            &pool,
-            current_user.id,
-            Some("Failed to delete user".to_string()),
-            None,
-            None,
-        ),
+    match models::user::delete(&pool, form.user_id).await {
+        Ok(_) => {
+            render_users_page(
+                &pool,
+                current_user.id,
+                None,
+                Some("User deleted".to_string()),
+                None,
+            )
+            .await
+        }
+        Err(_) => {
+            render_users_page(
+                &pool,
+                current_user.id,
+                Some("Failed to delete user".to_string()),
+                None,
+                None,
+            )
+            .await
+        }
     }
 }
 
@@ -369,7 +383,7 @@ fn invalid_invite_response() -> Response {
 }
 
 pub async fn invite_page(State(pool): State<DbPool>, Path(token): Path<String>) -> Response {
-    match models::user::find_by_invite_token(&pool, &token) {
+    match models::user::find_by_invite_token(&pool, &token).await {
         Ok(Some(user)) => HtmlTemplate(InviteTemplate {
             username: user.username,
             error: None,
@@ -384,7 +398,7 @@ pub async fn invite_submit(
     Path(token): Path<String>,
     Form(form): Form<InviteForm>,
 ) -> Response {
-    let user = match models::user::find_by_invite_token(&pool, &token) {
+    let user = match models::user::find_by_invite_token(&pool, &token).await {
         Ok(Some(u)) => u,
         _ => return invalid_invite_response(),
     };
@@ -406,7 +420,10 @@ pub async fn invite_submit(
     }
 
     // Accept the invite and set password
-    if models::user::accept_invite(&pool, user.id, &form.password).is_err() {
+    if models::user::accept_invite(&pool, user.id, &form.password)
+        .await
+        .is_err()
+    {
         return HtmlTemplate(InviteTemplate {
             username: user.username,
             error: Some("Failed to set password".to_string()),
@@ -415,7 +432,7 @@ pub async fn invite_submit(
     }
 
     // Create session and log them in
-    match models::user::create_session(&pool, user.id) {
+    match models::user::create_session(&pool, user.id).await {
         Ok(session_token) => {
             let cookie_header = set_cookie_header(SESSION_COOKIE, &session_token, 7 * 86400);
             rama::http::Response::builder()

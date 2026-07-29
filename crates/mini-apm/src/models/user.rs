@@ -7,7 +7,7 @@ use chrono::{Duration, Utc};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct User {
     pub id: i64,
     pub username: String,
@@ -22,22 +22,7 @@ pub struct User {
     pub last_login_at: Option<String>,
 }
 
-/// Map a row with the canonical user column order:
-/// id, username, password_hash, is_admin, must_change_password,
-/// invite_token, invite_expires_at, created_at, last_login_at
-fn map_user_row(row: &rusqlite::Row) -> rusqlite::Result<User> {
-    Ok(User {
-        id: row.get(0)?,
-        username: row.get(1)?,
-        password_hash: row.get(2)?,
-        is_admin: row.get::<_, i64>(3)? == 1,
-        must_change_password: row.get::<_, i64>(4)? == 1,
-        invite_token: row.get(5)?,
-        invite_expires_at: row.get(6)?,
-        created_at: row.get(7)?,
-        last_login_at: row.get(8)?,
-    })
-}
+const USER_COLUMNS: &str = "id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at, created_at, last_login_at";
 
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -142,20 +127,24 @@ fn generate_random_password() -> String {
 }
 
 /// Create the default admin user if no users exist
-pub fn ensure_default_admin(pool: &DbPool) -> anyhow::Result<()> {
-    let conn = pool.get()?;
-
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))?;
+pub async fn ensure_default_admin(pool: &DbPool) -> anyhow::Result<()> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+        .fetch_one(pool)
+        .await?;
 
     if count == 0 {
         let password = generate_random_password();
         let password_hash = hash_password(&password)?;
         let now = Utc::now().to_rfc3339();
 
-        conn.execute(
+        sqlx::query(
             "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES (?1, ?2, 1, 1, ?3)",
-            ("admin", &password_hash, &now),
-        )?;
+        )
+        .bind("admin")
+        .bind(&password_hash)
+        .bind(&now)
+        .execute(pool)
+        .await?;
 
         tracing::info!("============================================================");
         tracing::info!("Created default admin user");
@@ -169,16 +158,16 @@ pub fn ensure_default_admin(pool: &DbPool) -> anyhow::Result<()> {
 }
 
 /// Authenticate a user and return them if successful
-pub fn authenticate(pool: &DbPool, username: &str, password: &str) -> anyhow::Result<Option<User>> {
-    let conn = pool.get()?;
-
-    let user: Option<User> = conn
-        .query_row(
-            "SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at, created_at, last_login_at FROM users WHERE username = ?1",
-            [username],
-            map_user_row,
-        )
-        .ok();
+pub async fn authenticate(
+    pool: &DbPool,
+    username: &str,
+    password: &str,
+) -> anyhow::Result<Option<User>> {
+    let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE username = ?1");
+    let user: Option<User> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(username)
+        .fetch_optional(pool)
+        .await?;
 
     match user {
         Some(ref u)
@@ -188,10 +177,11 @@ pub fn authenticate(pool: &DbPool, username: &str, password: &str) -> anyhow::Re
         {
             // Update last login time
             let now = Utc::now().to_rfc3339();
-            let _ = conn.execute(
-                "UPDATE users SET last_login_at = ?1 WHERE id = ?2",
-                (&now, u.id),
-            );
+            let _ = sqlx::query("UPDATE users SET last_login_at = ?1 WHERE id = ?2")
+                .bind(&now)
+                .bind(u.id)
+                .execute(pool)
+                .await;
             Ok(user)
         }
         _ => Ok(None),
@@ -199,115 +189,122 @@ pub fn authenticate(pool: &DbPool, username: &str, password: &str) -> anyhow::Re
 }
 
 /// Create a new session for a user
-pub fn create_session(pool: &DbPool, user_id: i64) -> anyhow::Result<String> {
-    let conn = pool.get()?;
+pub async fn create_session(pool: &DbPool, user_id: i64) -> anyhow::Result<String> {
     let token = generate_token();
     let now = Utc::now();
     let expires = now + Duration::days(7);
 
-    conn.execute(
+    sqlx::query(
         "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
-        (&token, user_id, now.to_rfc3339(), expires.to_rfc3339()),
-    )?;
+    )
+    .bind(&token)
+    .bind(user_id)
+    .bind(now.to_rfc3339())
+    .bind(expires.to_rfc3339())
+    .execute(pool)
+    .await?;
 
     Ok(token)
 }
 
 /// Get user from session token
-pub fn get_user_from_session(pool: &DbPool, token: &str) -> anyhow::Result<Option<User>> {
-    let conn = pool.get()?;
+pub async fn get_user_from_session(pool: &DbPool, token: &str) -> anyhow::Result<Option<User>> {
     let now = Utc::now().to_rfc3339();
 
-    let user: Option<User> = conn
-        .query_row(
-            r#"
-            SELECT u.id, u.username, u.password_hash, u.is_admin, u.must_change_password, u.invite_token, u.invite_expires_at, u.created_at, u.last_login_at
-            FROM users u
-            JOIN sessions s ON s.user_id = u.id
-            WHERE s.token = ?1 AND s.expires_at > ?2
-            "#,
-            [token, &now],
-            map_user_row,
-        )
-        .ok();
+    let user: Option<User> = sqlx::query_as(
+        r#"
+        SELECT u.id, u.username, u.password_hash, u.is_admin, u.must_change_password,
+               u.invite_token, u.invite_expires_at, u.created_at, u.last_login_at
+        FROM users u
+        JOIN sessions s ON s.user_id = u.id
+        WHERE s.token = ?1 AND s.expires_at > ?2
+        "#,
+    )
+    .bind(token)
+    .bind(&now)
+    .fetch_optional(pool)
+    .await?;
 
     Ok(user)
 }
 
 /// Delete a session (logout)
-pub fn delete_session(pool: &DbPool, token: &str) -> anyhow::Result<()> {
-    let conn = pool.get()?;
-    conn.execute("DELETE FROM sessions WHERE token = ?1", [token])?;
+pub async fn delete_session(pool: &DbPool, token: &str) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM sessions WHERE token = ?1")
+        .bind(token)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 /// Delete expired sessions (cleanup)
-pub fn delete_expired_sessions(pool: &DbPool) -> anyhow::Result<usize> {
-    let conn = pool.get()?;
+pub async fn delete_expired_sessions(pool: &DbPool) -> anyhow::Result<usize> {
     let now = Utc::now().to_rfc3339();
-    let deleted = conn.execute("DELETE FROM sessions WHERE expires_at < ?1", [&now])?;
-    Ok(deleted)
+    let result = sqlx::query("DELETE FROM sessions WHERE expires_at < ?1")
+        .bind(&now)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() as usize)
 }
 
 /// List all users (admin only)
-pub fn list_all(pool: &DbPool) -> anyhow::Result<Vec<User>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
+pub async fn list_all(pool: &DbPool) -> anyhow::Result<Vec<User>> {
+    let users = sqlx::query_as::<_, User>(
         r#"SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at,
-                  strftime('%Y-%m-%d %H:%M', created_at),
-                  CASE WHEN last_login_at IS NOT NULL THEN strftime('%Y-%m-%d %H:%M', last_login_at) ELSE NULL END
+                  strftime('%Y-%m-%d %H:%M', created_at) AS created_at,
+                  CASE WHEN last_login_at IS NOT NULL THEN strftime('%Y-%m-%d %H:%M', last_login_at) ELSE NULL END AS last_login_at
            FROM users ORDER BY username"#,
-    )?;
-
-    let users = stmt
-        .query_map([], map_user_row)?
-        .collect::<Result<Vec<_>, _>>()?;
+    )
+    .fetch_all(pool)
+    .await?;
 
     Ok(users)
 }
 
 /// Create a new user (admin only)
-pub fn create(
+pub async fn create(
     pool: &DbPool,
     username: &str,
     password: &str,
     is_admin: bool,
 ) -> anyhow::Result<i64> {
-    let conn = pool.get()?;
     let password_hash = hash_password(password)?;
     let now = Utc::now().to_rfc3339();
 
-    conn.execute(
+    let result = sqlx::query(
         "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES (?1, ?2, ?3, 0, ?4)",
-        (username, &password_hash, if is_admin { 1 } else { 0 }, &now),
-    )?;
+    )
+    .bind(username)
+    .bind(&password_hash)
+    .bind(is_admin)
+    .bind(&now)
+    .execute(pool)
+    .await?;
 
-    Ok(conn.last_insert_rowid())
+    Ok(result.last_insert_rowid())
 }
 
 /// Delete a user (admin only, cannot delete self)
-pub fn delete(pool: &DbPool, user_id: i64) -> anyhow::Result<()> {
-    let conn = pool.get()?;
-    conn.execute("DELETE FROM users WHERE id = ?1", [user_id])?;
+pub async fn delete(pool: &DbPool, user_id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM users WHERE id = ?1")
+        .bind(user_id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 /// Verify password for a user by ID
-pub fn verify_password_for_user(
+pub async fn verify_password_for_user(
     pool: &DbPool,
     user_id: i64,
     password: &str,
 ) -> anyhow::Result<bool> {
-    let conn = pool.get()?;
-
-    let password_hash: Option<String> = conn
-        .query_row(
-            "SELECT password_hash FROM users WHERE id = ?1",
-            [user_id],
-            |row| row.get(0),
-        )
-        .ok()
-        .flatten();
+    let password_hash: Option<String> =
+        sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?1")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?
+            .flatten();
 
     match password_hash {
         Some(hash) => Ok(verify_password(password, &hash)),
@@ -316,29 +313,39 @@ pub fn verify_password_for_user(
 }
 
 /// Change password
-pub fn change_password(pool: &DbPool, user_id: i64, new_password: &str) -> anyhow::Result<()> {
-    let conn = pool.get()?;
+pub async fn change_password(
+    pool: &DbPool,
+    user_id: i64,
+    new_password: &str,
+) -> anyhow::Result<()> {
     let password_hash = hash_password(new_password)?;
 
-    conn.execute(
-        "UPDATE users SET password_hash = ?1, must_change_password = 0 WHERE id = ?2",
-        (&password_hash, user_id),
-    )?;
+    sqlx::query("UPDATE users SET password_hash = ?1, must_change_password = 0 WHERE id = ?2")
+        .bind(&password_hash)
+        .bind(user_id)
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
 
 /// Reset password by username (for CLI use)
-pub fn reset_password(pool: &DbPool, username: &str, new_password: &str) -> anyhow::Result<()> {
-    let conn = pool.get()?;
+pub async fn reset_password(
+    pool: &DbPool,
+    username: &str,
+    new_password: &str,
+) -> anyhow::Result<()> {
     let password_hash = hash_password(new_password)?;
 
-    let rows_affected = conn.execute(
+    let result = sqlx::query(
         "UPDATE users SET password_hash = ?1, must_change_password = 0 WHERE username = ?2",
-        (&password_hash, username),
-    )?;
+    )
+    .bind(&password_hash)
+    .bind(username)
+    .execute(pool)
+    .await?;
 
-    if rows_affected == 0 {
+    if result.rows_affected() == 0 {
         anyhow::bail!("User '{}' not found", username);
     }
 
@@ -346,16 +353,12 @@ pub fn reset_password(pool: &DbPool, username: &str, new_password: &str) -> anyh
 }
 
 /// Find user by ID
-pub fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<User>> {
-    let conn = pool.get()?;
-
-    let user: Option<User> = conn
-        .query_row(
-            "SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at, created_at, last_login_at FROM users WHERE id = ?1",
-            [id],
-            map_user_row,
-        )
-        .ok();
+pub async fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<User>> {
+    let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?1");
+    let user: Option<User> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
 
     Ok(user)
 }
@@ -368,60 +371,71 @@ pub fn generate_invite_token() -> String {
 }
 
 /// Create a new user with an invite token (no password yet)
-pub fn create_with_invite(pool: &DbPool, username: &str, is_admin: bool) -> anyhow::Result<String> {
-    let conn = pool.get()?;
+pub async fn create_with_invite(
+    pool: &DbPool,
+    username: &str,
+    is_admin: bool,
+) -> anyhow::Result<String> {
     let invite_token = generate_invite_token();
     let now = Utc::now();
     let expires = now + Duration::days(7);
 
-    conn.execute(
+    sqlx::query(
         "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        (username, if is_admin { 1 } else { 0 }, &invite_token, expires.to_rfc3339(), now.to_rfc3339()),
-    )?;
+    )
+    .bind(username)
+    .bind(is_admin)
+    .bind(&invite_token)
+    .bind(expires.to_rfc3339())
+    .bind(now.to_rfc3339())
+    .execute(pool)
+    .await?;
 
     Ok(invite_token)
 }
 
 /// Find user by invite token
-pub fn find_by_invite_token(pool: &DbPool, token: &str) -> anyhow::Result<Option<User>> {
-    let conn = pool.get()?;
+pub async fn find_by_invite_token(pool: &DbPool, token: &str) -> anyhow::Result<Option<User>> {
     let now = Utc::now().to_rfc3339();
+    let sql =
+        format!("SELECT {USER_COLUMNS} FROM users WHERE invite_token = ?1 AND invite_expires_at > ?2");
 
-    let user: Option<User> = conn
-        .query_row(
-            "SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at, created_at, last_login_at FROM users WHERE invite_token = ?1 AND invite_expires_at > ?2",
-            [token, &now],
-            map_user_row,
-        )
-        .ok();
+    let user: Option<User> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(token)
+        .bind(&now)
+        .fetch_optional(pool)
+        .await?;
 
     Ok(user)
 }
 
 /// Accept an invite - set password and clear invite token
-pub fn accept_invite(pool: &DbPool, user_id: i64, password: &str) -> anyhow::Result<()> {
-    let conn = pool.get()?;
+pub async fn accept_invite(pool: &DbPool, user_id: i64, password: &str) -> anyhow::Result<()> {
     let password_hash = hash_password(password)?;
 
-    conn.execute(
+    sqlx::query(
         "UPDATE users SET password_hash = ?1, invite_token = NULL, invite_expires_at = NULL WHERE id = ?2",
-        (&password_hash, user_id),
-    )?;
+    )
+    .bind(&password_hash)
+    .bind(user_id)
+    .execute(pool)
+    .await?;
 
     Ok(())
 }
 
 /// Delete users with expired invite tokens who never activated their account
-pub fn delete_expired_invites(pool: &DbPool) -> anyhow::Result<usize> {
-    let conn = pool.get()?;
+pub async fn delete_expired_invites(pool: &DbPool) -> anyhow::Result<usize> {
     let now = Utc::now().to_rfc3339();
 
-    let deleted = conn.execute(
+    let result = sqlx::query(
         "DELETE FROM users WHERE invite_token IS NOT NULL AND invite_expires_at < ?1 AND password_hash IS NULL",
-        [&now],
-    )?;
+    )
+    .bind(&now)
+    .execute(pool)
+    .await?;
 
-    Ok(deleted)
+    Ok(result.rows_affected() as usize)
 }
 
 #[cfg(test)]
@@ -429,24 +443,10 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::db;
-    use std::sync::atomic::{AtomicU64, Ordering};
 
-    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-    fn test_pool() -> DbPool {
+    async fn test_pool() -> DbPool {
         let config = Config::default();
-        db::init(&config).expect("Failed to create test database")
-    }
-
-    /// Create a test pool with shared cache for tests that need direct SQL execution
-    fn test_pool_shared() -> DbPool {
-        let test_id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let db_name = format!("file:user_test_{}?mode=memory&cache=shared", test_id);
-        let config = Config {
-            sqlite_path: db_name,
-            ..Default::default()
-        };
-        db::init(&config).expect("Failed to create test database")
+        db::init(&config).await.expect("Failed to create test database")
     }
 
     #[test]
@@ -548,231 +548,252 @@ mod tests {
         assert_eq!(token.len(), 24); // 12 bytes = 24 hex chars
     }
 
-    #[test]
-    fn test_ensure_default_admin() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_ensure_default_admin() {
+        let pool = test_pool().await;
 
-        ensure_default_admin(&pool).unwrap();
+        ensure_default_admin(&pool).await.unwrap();
 
-        let users = list_all(&pool).unwrap();
+        let users = list_all(&pool).await.unwrap();
         assert_eq!(users.len(), 1);
         assert_eq!(users[0].username, "admin");
         assert!(users[0].is_admin);
         assert!(users[0].must_change_password);
     }
 
-    #[test]
-    fn test_ensure_default_admin_idempotent() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_ensure_default_admin_idempotent() {
+        let pool = test_pool().await;
 
-        ensure_default_admin(&pool).unwrap();
-        ensure_default_admin(&pool).unwrap();
+        ensure_default_admin(&pool).await.unwrap();
+        ensure_default_admin(&pool).await.unwrap();
 
-        let users = list_all(&pool).unwrap();
+        let users = list_all(&pool).await.unwrap();
         assert_eq!(users.len(), 1);
     }
 
-    #[test]
-    fn test_create_user() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_create_user() {
+        let pool = test_pool().await;
 
-        let id = create(&pool, "testuser", "password123", false).unwrap();
+        let id = create(&pool, "testuser", "password123", false).await.unwrap();
 
-        let user = find(&pool, id).unwrap().unwrap();
+        let user = find(&pool, id).await.unwrap().unwrap();
         assert_eq!(user.username, "testuser");
         assert!(!user.is_admin);
         assert!(!user.must_change_password);
     }
 
-    #[test]
-    fn test_create_admin_user() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_create_admin_user() {
+        let pool = test_pool().await;
 
-        let id = create(&pool, "admin2", "password", true).unwrap();
+        let id = create(&pool, "admin2", "password", true).await.unwrap();
 
-        let user = find(&pool, id).unwrap().unwrap();
+        let user = find(&pool, id).await.unwrap().unwrap();
         assert!(user.is_admin);
     }
 
-    #[test]
-    fn test_authenticate_success() {
-        let pool = test_pool();
-        create(&pool, "authuser", "secret", false).unwrap();
+    #[tokio::test]
+    async fn test_authenticate_success() {
+        let pool = test_pool().await;
+        create(&pool, "authuser", "secret", false).await.unwrap();
 
-        let user = authenticate(&pool, "authuser", "secret").unwrap();
+        let user = authenticate(&pool, "authuser", "secret").await.unwrap();
 
         assert!(user.is_some());
         assert_eq!(user.unwrap().username, "authuser");
     }
 
-    #[test]
-    fn test_authenticate_wrong_password() {
-        let pool = test_pool();
-        create(&pool, "authuser2", "secret", false).unwrap();
+    #[tokio::test]
+    async fn test_authenticate_wrong_password() {
+        let pool = test_pool().await;
+        create(&pool, "authuser2", "secret", false).await.unwrap();
 
-        let user = authenticate(&pool, "authuser2", "wrong").unwrap();
-
-        assert!(user.is_none());
-    }
-
-    #[test]
-    fn test_authenticate_nonexistent_user() {
-        let pool = test_pool();
-
-        let user = authenticate(&pool, "nobody", "password").unwrap();
+        let user = authenticate(&pool, "authuser2", "wrong").await.unwrap();
 
         assert!(user.is_none());
     }
 
-    #[test]
-    fn test_session_lifecycle() {
-        let pool = test_pool();
-        let user_id = create(&pool, "sessionuser", "pass", false).unwrap();
+    #[tokio::test]
+    async fn test_authenticate_nonexistent_user() {
+        let pool = test_pool().await;
+
+        let user = authenticate(&pool, "nobody", "password").await.unwrap();
+
+        assert!(user.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_session_lifecycle() {
+        let pool = test_pool().await;
+        let user_id = create(&pool, "sessionuser", "pass", false).await.unwrap();
 
         // Create session
-        let token = create_session(&pool, user_id).unwrap();
+        let token = create_session(&pool, user_id).await.unwrap();
         assert_eq!(token.len(), 64); // 32 bytes = 64 hex chars
 
         // Get user from session
-        let user = get_user_from_session(&pool, &token).unwrap();
+        let user = get_user_from_session(&pool, &token).await.unwrap();
         assert!(user.is_some());
         assert_eq!(user.unwrap().id, user_id);
 
         // Delete session
-        delete_session(&pool, &token).unwrap();
+        delete_session(&pool, &token).await.unwrap();
 
         // Session should be gone
-        let user = get_user_from_session(&pool, &token).unwrap();
+        let user = get_user_from_session(&pool, &token).await.unwrap();
         assert!(user.is_none());
     }
 
-    #[test]
-    fn test_change_password() {
-        let pool = test_pool();
-        let user_id = create(&pool, "changepass", "old", false).unwrap();
+    #[tokio::test]
+    async fn test_change_password() {
+        let pool = test_pool().await;
+        let user_id = create(&pool, "changepass", "old", false).await.unwrap();
 
-        change_password(&pool, user_id, "new").unwrap();
+        change_password(&pool, user_id, "new").await.unwrap();
 
         // Old password should fail
-        let result = authenticate(&pool, "changepass", "old").unwrap();
+        let result = authenticate(&pool, "changepass", "old").await.unwrap();
         assert!(result.is_none());
 
         // New password should work
-        let result = authenticate(&pool, "changepass", "new").unwrap();
+        let result = authenticate(&pool, "changepass", "new").await.unwrap();
         assert!(result.is_some());
     }
 
-    #[test]
-    fn test_delete_user() {
-        let pool = test_pool();
-        let user_id = create(&pool, "deleteme", "pass", false).unwrap();
+    #[tokio::test]
+    async fn test_delete_user() {
+        let pool = test_pool().await;
+        let user_id = create(&pool, "deleteme", "pass", false).await.unwrap();
 
-        delete(&pool, user_id).unwrap();
+        delete(&pool, user_id).await.unwrap();
 
-        let user = find(&pool, user_id).unwrap();
+        let user = find(&pool, user_id).await.unwrap();
         assert!(user.is_none());
     }
 
-    #[test]
-    fn test_list_all_users() {
-        let pool = test_pool();
-        create(&pool, "user1", "pass", false).unwrap();
-        create(&pool, "user2", "pass", true).unwrap();
+    #[tokio::test]
+    async fn test_list_all_users() {
+        let pool = test_pool().await;
+        create(&pool, "user1", "pass", false).await.unwrap();
+        create(&pool, "user2", "pass", true).await.unwrap();
 
-        let users = list_all(&pool).unwrap();
+        let users = list_all(&pool).await.unwrap();
 
         assert_eq!(users.len(), 2);
     }
 
-    #[test]
-    fn test_verify_password_for_user_success() {
-        let pool = test_pool();
-        let user_id = create(&pool, "verifyuser", "mypassword", false).unwrap();
+    #[tokio::test]
+    async fn test_verify_password_for_user_success() {
+        let pool = test_pool().await;
+        let user_id = create(&pool, "verifyuser", "mypassword", false).await.unwrap();
 
-        let result = verify_password_for_user(&pool, user_id, "mypassword").unwrap();
+        let result = verify_password_for_user(&pool, user_id, "mypassword")
+            .await
+            .unwrap();
 
         assert!(result);
     }
 
-    #[test]
-    fn test_verify_password_for_user_wrong_password() {
-        let pool = test_pool();
-        let user_id = create(&pool, "verifyuser2", "mypassword", false).unwrap();
+    #[tokio::test]
+    async fn test_verify_password_for_user_wrong_password() {
+        let pool = test_pool().await;
+        let user_id = create(&pool, "verifyuser2", "mypassword", false).await.unwrap();
 
-        let result = verify_password_for_user(&pool, user_id, "wrongpassword").unwrap();
-
-        assert!(!result);
-    }
-
-    #[test]
-    fn test_verify_password_for_user_nonexistent() {
-        let pool = test_pool();
-
-        let result = verify_password_for_user(&pool, 99999, "anypassword").unwrap();
+        let result = verify_password_for_user(&pool, user_id, "wrongpassword")
+            .await
+            .unwrap();
 
         assert!(!result);
     }
 
-    #[test]
-    fn test_invite_flow() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_verify_password_for_user_nonexistent() {
+        let pool = test_pool().await;
+
+        let result = verify_password_for_user(&pool, 99999, "anypassword")
+            .await
+            .unwrap();
+
+        assert!(!result);
+    }
+
+    #[tokio::test]
+    async fn test_invite_flow() {
+        let pool = test_pool().await;
 
         // Create user with invite
-        let invite_token = create_with_invite(&pool, "invited", false).unwrap();
+        let invite_token = create_with_invite(&pool, "invited", false).await.unwrap();
 
         // Find by invite token
-        let user = find_by_invite_token(&pool, &invite_token).unwrap();
+        let user = find_by_invite_token(&pool, &invite_token).await.unwrap();
         assert!(user.is_some());
         let user = user.unwrap();
         assert_eq!(user.username, "invited");
         assert!(user.password_hash.is_none());
 
         // Accept invite
-        accept_invite(&pool, user.id, "newpassword").unwrap();
+        accept_invite(&pool, user.id, "newpassword").await.unwrap();
 
         // Invite token should no longer work
-        let user = find_by_invite_token(&pool, &invite_token).unwrap();
+        let user = find_by_invite_token(&pool, &invite_token).await.unwrap();
         assert!(user.is_none());
 
         // But user can now authenticate
-        let user = authenticate(&pool, "invited", "newpassword").unwrap();
+        let user = authenticate(&pool, "invited", "newpassword").await.unwrap();
         assert!(user.is_some());
     }
 
-    #[test]
-    fn test_delete_expired_invites() {
-        let pool = test_pool_shared();
-        let conn = pool.get().unwrap();
+    #[tokio::test]
+    async fn test_delete_expired_invites() {
+        let pool = test_pool().await;
 
         // Create an expired invite (invite_expires_at in the past, no password)
         let expired_time = (Utc::now() - Duration::days(1)).to_rfc3339();
         let now = Utc::now().to_rfc3339();
-        conn.execute(
+        sqlx::query(
             "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at) VALUES (?1, 0, 'expired-token', ?2, ?3)",
-            ("expired_user", &expired_time, &now),
-        ).unwrap();
+        )
+        .bind("expired_user")
+        .bind(&expired_time)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         // Create a valid (non-expired) invite
         let future_time = (Utc::now() + Duration::days(1)).to_rfc3339();
-        conn.execute(
+        sqlx::query(
             "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at) VALUES (?1, 0, 'valid-token', ?2, ?3)",
-            ("valid_user", &future_time, &now),
-        ).unwrap();
+        )
+        .bind("valid_user")
+        .bind(&future_time)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         // Create an activated user (has password, invite cleared)
         let password_hash = hash_password("password").unwrap();
-        conn.execute(
+        sqlx::query(
             "INSERT INTO users (username, password_hash, is_admin, created_at) VALUES (?1, ?2, 0, ?3)",
-            ("active_user", &password_hash, &now),
-        ).unwrap();
+        )
+        .bind("active_user")
+        .bind(&password_hash)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .unwrap();
 
         // Run cleanup
-        let deleted = delete_expired_invites(&pool).unwrap();
+        let deleted = delete_expired_invites(&pool).await.unwrap();
         assert_eq!(deleted, 1);
 
         // Check that only expired invite was deleted
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+            .fetch_one(&pool)
+            .await
             .unwrap();
         assert_eq!(count, 2); // valid_user and active_user remain
     }

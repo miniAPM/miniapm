@@ -87,7 +87,7 @@ where
             };
 
             // Validate API key against database
-            match crate::models::project::find_by_api_key(&pool, api_key) {
+            match crate::models::project::find_by_api_key(&pool, api_key).await {
                 Ok(Some(project)) => {
                     req.extensions().insert(ProjectContext {
                         project_id: Some(project.id),
@@ -114,16 +114,18 @@ where
 mod tests {
     use super::*;
     use crate::DbPool;
-    use r2d2::Pool;
-    use r2d2_sqlite::SqliteConnectionManager;
     use rama::service::Service;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 
-    fn create_test_pool() -> DbPool {
-        let manager = SqliteConnectionManager::memory();
-        let pool = Pool::builder().max_size(1).build(manager).unwrap();
+    async fn create_test_pool() -> DbPool {
+        let options = SqliteConnectOptions::new().in_memory(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
 
-        let conn = pool.get().unwrap();
-        conn.execute_batch(
+        sqlx::query(
             r#"
             CREATE TABLE projects (
                 id INTEGER PRIMARY KEY,
@@ -134,6 +136,8 @@ mod tests {
             );
             "#,
         )
+        .execute(&pool)
+        .await
         .unwrap();
 
         pool
@@ -182,7 +186,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_requires_authorization_header() {
-        let pool = create_test_pool();
+        let pool = create_test_pool().await;
         let app = create_app(pool);
 
         let req = Request::builder().uri("/test").body(Body::empty()).unwrap();
@@ -193,7 +197,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_requires_bearer_prefix() {
-        let pool = create_test_pool();
+        let pool = create_test_pool().await;
         let app = create_app(pool);
 
         let req = Request::builder()
@@ -208,9 +212,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_rejects_invalid_key() {
-        let pool = create_test_pool();
+        let pool = create_test_pool().await;
         // Create a valid project API key first
-        crate::models::project::ensure_default_project(&pool).unwrap();
+        crate::models::project::ensure_default_project(&pool)
+            .await
+            .unwrap();
 
         let app = create_app(pool);
 
@@ -226,8 +232,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_accepts_valid_project_key() {
-        let pool = create_test_pool();
-        let project = crate::models::project::ensure_default_project(&pool).unwrap();
+        let pool = create_test_pool().await;
+        let project = crate::models::project::ensure_default_project(&pool)
+            .await
+            .unwrap();
 
         let app = create_app(pool);
 

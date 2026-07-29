@@ -23,6 +23,7 @@ pub async fn index(State(pool): State<DbPool>) -> HtmlTemplate<ApiKeyTemplate> {
 
     // Get the default project's API key
     let api_key = project::ensure_default_project(&pool)
+        .await
         .map(|p| p.api_key)
         .unwrap_or_else(|_| "Error loading API key".to_string());
 
@@ -31,8 +32,8 @@ pub async fn index(State(pool): State<DbPool>) -> HtmlTemplate<ApiKeyTemplate> {
 
 pub async fn regenerate(State(pool): State<DbPool>) -> impl IntoResponse {
     // Get the default project and regenerate its key
-    if let Ok(project) = project::ensure_default_project(&pool) {
-        let _ = project::regenerate_api_key(&pool, project.id);
+    if let Ok(project) = project::ensure_default_project(&pool).await {
+        let _ = project::regenerate_api_key(&pool, project.id).await;
     }
     Redirect::to("/api-key")
 }

@@ -20,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
     config.validate()?;
     config.log_summary();
 
-    let pool = db::init(&config)?;
+    let pool = db::init(&config).await?;
 
     server::run(pool, config, cli.port).await?;
 

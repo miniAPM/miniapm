@@ -52,10 +52,12 @@ pub async fn index(
     let since_str = since.to_rfc3339();
 
     let routes = span::routes_summary(&pool, project_id, &since_str, search.as_deref(), &sort, 100)
+        .await
         .unwrap_or_default();
 
-    let total_count =
-        span::routes_count(&pool, project_id, &since_str, search.as_deref()).unwrap_or(0);
+    let total_count = span::routes_count(&pool, project_id, &since_str, search.as_deref())
+        .await
+        .unwrap_or(0);
 
     let max_requests = routes.iter().map(|r| r.request_count).max().unwrap_or(1);
 

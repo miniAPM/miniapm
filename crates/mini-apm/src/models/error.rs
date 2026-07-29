@@ -3,7 +3,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct AppError {
     pub id: i64,
     pub fingerprint: String,
@@ -82,14 +82,13 @@ pub struct IncomingSourceContext {
 /// Minimum similarity threshold for grouping errors (50%)
 const SIMILARITY_THRESHOLD: f64 = 0.5;
 
-pub fn insert(
+pub async fn insert(
     pool: &DbPool,
     error: &IncomingError,
     project_id: Option<i64>,
 ) -> anyhow::Result<i64> {
-    let conn = pool.get()?;
     let now = Utc::now().to_rfc3339();
-    let timestamp = error.timestamp.as_ref().unwrap_or(&now);
+    let timestamp = error.timestamp.as_deref().unwrap_or(&now);
 
     // Generate location-based fingerprint for smart grouping
     let location_fingerprint =
@@ -98,50 +97,56 @@ pub fn insert(
     // Try to find existing error by:
     // 1. First check exact fingerprint match (backward compatibility)
     // 2. Then check location fingerprint + message similarity >= 50%
-    let existing: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM errors WHERE fingerprint = ?1 AND ((?2 IS NULL AND project_id IS NULL) OR project_id = ?2)",
-            rusqlite::params![&error.fingerprint, project_id],
-            |row| row.get(0),
-        )
-        .ok();
+    let existing: Option<i64> = sqlx::query_scalar(
+        "SELECT id FROM errors WHERE fingerprint = ?1 AND ((?2 IS NULL AND project_id IS NULL) OR project_id = ?2)",
+    )
+    .bind(&error.fingerprint)
+    .bind(project_id)
+    .fetch_optional(pool)
+    .await?;
 
     let error_id = if let Some(id) = existing {
         // Exact fingerprint match - update existing error
-        conn.execute(
+        sqlx::query(
             "UPDATE errors SET last_seen_at = ?1, occurrence_count = occurrence_count + 1 WHERE id = ?2",
-            (timestamp, id),
-        )?;
+        )
+        .bind(timestamp)
+        .bind(id)
+        .execute(pool)
+        .await?;
         id
     } else {
         // Try to find similar error by location + message similarity
         let similar_error =
-            find_similar_error(&conn, project_id, &location_fingerprint, &error.message)?;
+            find_similar_error(pool, project_id, &location_fingerprint, &error.message).await?;
 
         if let Some(id) = similar_error {
             // Found similar error - group with it
-            conn.execute(
+            sqlx::query(
                 "UPDATE errors SET last_seen_at = ?1, occurrence_count = occurrence_count + 1 WHERE id = ?2",
-                (timestamp, id),
-            )?;
+            )
+            .bind(timestamp)
+            .bind(id)
+            .execute(pool)
+            .await?;
             id
         } else {
             // No similar error found - create new one with location fingerprint
-            conn.execute(
+            let result = sqlx::query(
                 r#"
                 INSERT INTO errors (project_id, fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'open')
                 "#,
-                (
-                    project_id,
-                    &location_fingerprint,
-                    &error.exception_class,
-                    &error.message,
-                    timestamp,
-                    timestamp,
-                ),
-            )?;
-            conn.last_insert_rowid()
+            )
+            .bind(project_id)
+            .bind(&location_fingerprint)
+            .bind(&error.exception_class)
+            .bind(&error.message)
+            .bind(timestamp)
+            .bind(timestamp)
+            .execute(pool)
+            .await?;
+            result.last_insert_rowid()
         }
     };
 
@@ -158,42 +163,40 @@ pub fn insert(
     });
 
     // Insert occurrence
-    conn.execute(
+    sqlx::query(
         r#"
         INSERT INTO error_occurrences (error_id, request_id, user_id, backtrace, params, happened_at, source_context)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
         "#,
-        (
-            error_id,
-            &error.request_id,
-            &error.user_id,
-            serde_json::to_string(&error.backtrace)?,
-            error.params.as_ref().and_then(|p| serde_json::to_string(p).ok()),
-            timestamp,
-            source_context_json,
-        ),
-    )?;
+    )
+    .bind(error_id)
+    .bind(error.request_id.as_deref())
+    .bind(error.user_id.as_deref())
+    .bind(serde_json::to_string(&error.backtrace)?)
+    .bind(error.params.as_ref().and_then(|p| serde_json::to_string(p).ok()))
+    .bind(timestamp)
+    .bind(source_context_json)
+    .execute(pool)
+    .await?;
 
     Ok(error_id)
 }
 
 /// Find an existing error with the same location fingerprint and similar message
-fn find_similar_error(
-    conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+async fn find_similar_error(
+    pool: &DbPool,
     project_id: Option<i64>,
     location_fingerprint: &str,
     message: &str,
 ) -> anyhow::Result<Option<i64>> {
     // Find errors with the same location fingerprint
-    let mut stmt = conn.prepare(
+    let candidates: Vec<(i64, String)> = sqlx::query_as(
         "SELECT id, message FROM errors WHERE fingerprint = ?1 AND ((?2 IS NULL AND project_id IS NULL) OR project_id = ?2)"
-    )?;
-
-    let candidates: Vec<(i64, String)> = stmt
-        .query_map(rusqlite::params![location_fingerprint, project_id], |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    )
+    .bind(location_fingerprint)
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
 
     // Check message similarity for each candidate
     for (id, existing_message) in candidates {
@@ -206,13 +209,13 @@ fn find_similar_error(
     Ok(None)
 }
 
-pub fn list(
+pub async fn list(
     pool: &DbPool,
     project_id: Option<i64>,
     status: Option<&str>,
     limit: i64,
 ) -> anyhow::Result<Vec<AppError>> {
-    list_filtered(pool, project_id, status, None, None, "last_seen", limit)
+    list_filtered(pool, project_id, status, None, None, "last_seen", limit).await
 }
 
 pub struct ErrorListResult {
@@ -220,7 +223,7 @@ pub struct ErrorListResult {
     pub total_count: i64,
 }
 
-pub fn list_filtered(
+pub async fn list_filtered(
     pool: &DbPool,
     project_id: Option<i64>,
     status: Option<&str>,
@@ -229,11 +232,11 @@ pub fn list_filtered(
     sort_by: &str,
     limit: i64,
 ) -> anyhow::Result<Vec<AppError>> {
-    list_paginated(pool, project_id, status, search, since, sort_by, limit, 0)
+    list_paginated(pool, project_id, status, search, since, sort_by, limit, 0).await
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn list_paginated(
+pub async fn list_paginated(
     pool: &DbPool,
     project_id: Option<i64>,
     status: Option<&str>,
@@ -243,8 +246,6 @@ pub fn list_paginated(
     limit: i64,
     offset: i64,
 ) -> anyhow::Result<Vec<AppError>> {
-    let conn = pool.get()?;
-
     let order_clause = match sort_by {
         "first_seen" => "first_seen_at DESC",
         "count" => "occurrence_count DESC",
@@ -254,8 +255,8 @@ pub fn list_paginated(
     let sql = format!(
         r#"
         SELECT id, fingerprint, exception_class, message,
-               strftime('%Y-%m-%d %H:%M', first_seen_at),
-               strftime('%Y-%m-%d %H:%M', last_seen_at),
+               strftime('%Y-%m-%d %H:%M', first_seen_at) AS first_seen_at,
+               strftime('%Y-%m-%d %H:%M', last_seen_at) AS last_seen_at,
                occurrence_count, status
         FROM errors
         WHERE (?1 IS NULL OR project_id = ?1)
@@ -268,27 +269,27 @@ pub fn list_paginated(
         order_clause
     );
 
-    let mut stmt = conn.prepare(&sql)?;
-    let errors = stmt
-        .query_map(
-            rusqlite::params![project_id, status, search, since, limit, offset],
-            map_error,
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
+    let errors = sqlx::query_as::<_, AppError>(sqlx::AssertSqlSafe(sql))
+        .bind(project_id)
+        .bind(status)
+        .bind(search)
+        .bind(since)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
 
     Ok(errors)
 }
 
-pub fn count_filtered(
+pub async fn count_filtered(
     pool: &DbPool,
     project_id: Option<i64>,
     status: Option<&str>,
     search: Option<&str>,
     since: Option<&str>,
 ) -> anyhow::Result<i64> {
-    let conn = pool.get()?;
-
-    let count: i64 = conn.query_row(
+    let count: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)
         FROM errors
@@ -297,87 +298,105 @@ pub fn count_filtered(
           AND (?3 IS NULL OR exception_class LIKE '%' || ?3 || '%' OR message LIKE '%' || ?3 || '%')
           AND (?4 IS NULL OR last_seen_at >= ?4)
         "#,
-        rusqlite::params![project_id, status, search, since],
-        |row| row.get(0),
-    )?;
+    )
+    .bind(project_id)
+    .bind(status)
+    .bind(search)
+    .bind(since)
+    .fetch_one(pool)
+    .await?;
 
     Ok(count)
 }
 
-pub fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<AppError>> {
-    let conn = pool.get()?;
-    let error = conn
-        .query_row(
-            "SELECT id, fingerprint, exception_class, message,
-                    strftime('%Y-%m-%d %H:%M', first_seen_at),
-                    strftime('%Y-%m-%d %H:%M', last_seen_at),
-                    occurrence_count, status
-             FROM errors WHERE id = ?1",
-            [id],
-            map_error,
-        )
-        .ok();
+pub async fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<AppError>> {
+    let error = sqlx::query_as::<_, AppError>(
+        "SELECT id, fingerprint, exception_class, message,
+                strftime('%Y-%m-%d %H:%M', first_seen_at) AS first_seen_at,
+                strftime('%Y-%m-%d %H:%M', last_seen_at) AS last_seen_at,
+                occurrence_count, status
+         FROM errors WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
     Ok(error)
 }
 
-pub fn occurrences(
+pub async fn occurrences(
     pool: &DbPool,
     error_id: i64,
     limit: i64,
 ) -> anyhow::Result<Vec<ErrorOccurrence>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
+    #[allow(clippy::type_complexity)]
+    let rows: Vec<(
+        i64,
+        i64,
+        Option<String>,
+        Option<String>,
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+    )> = sqlx::query_as(
         "SELECT id, error_id, request_id, user_id, backtrace, params,
                 strftime('%Y-%m-%d %H:%M', happened_at), source_context
          FROM error_occurrences WHERE error_id = ?1 ORDER BY happened_at DESC LIMIT ?2",
-    )?;
+    )
+    .bind(error_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
 
-    let occs = stmt
-        .query_map([error_id, limit], |row| {
-            let backtrace_str: String = row.get(4)?;
-            let params_str: Option<String> = row.get(5)?;
-            let source_context_str: Option<String> = row.get(7)?;
-            Ok(ErrorOccurrence {
-                id: row.get(0)?,
-                error_id: row.get(1)?,
-                request_id: row.get(2)?,
-                user_id: row.get(3)?,
-                backtrace: serde_json::from_str(&backtrace_str).unwrap_or_default(),
-                params: params_str.and_then(|s| serde_json::from_str(&s).ok()),
-                happened_at: row.get(6)?,
-                source_context: source_context_str.and_then(|s| serde_json::from_str(&s).ok()),
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let occs = rows
+        .into_iter()
+        .map(
+            |(id, error_id, request_id, user_id, backtrace_str, params_str, happened_at, source_context_str)| {
+                ErrorOccurrence {
+                    id,
+                    error_id,
+                    request_id,
+                    user_id,
+                    backtrace: serde_json::from_str(&backtrace_str).unwrap_or_default(),
+                    params: params_str.and_then(|s| serde_json::from_str(&s).ok()),
+                    happened_at,
+                    source_context: source_context_str.and_then(|s| serde_json::from_str(&s).ok()),
+                }
+            },
+        )
+        .collect();
 
     Ok(occs)
 }
 
-pub fn count_since(pool: &DbPool, project_id: Option<i64>, since: &str) -> anyhow::Result<i64> {
-    let conn = pool.get()?;
-    let count: i64 = conn.query_row(
+pub async fn count_since(pool: &DbPool, project_id: Option<i64>, since: &str) -> anyhow::Result<i64> {
+    let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM error_occurrences eo
          JOIN errors e ON e.id = eo.error_id
          WHERE eo.happened_at >= ?1 AND (?2 IS NULL OR e.project_id = ?2)",
-        rusqlite::params![since, project_id],
-        |row| row.get(0),
-    )?;
+    )
+    .bind(since)
+    .bind(project_id)
+    .fetch_one(pool)
+    .await?;
     Ok(count)
 }
 
-pub fn update_status(pool: &DbPool, id: i64, status: &str) -> anyhow::Result<()> {
-    let conn = pool.get()?;
-    conn.execute("UPDATE errors SET status = ?1 WHERE id = ?2", (status, id))?;
+pub async fn update_status(pool: &DbPool, id: i64, status: &str) -> anyhow::Result<()> {
+    sqlx::query("UPDATE errors SET status = ?1 WHERE id = ?2")
+        .bind(status)
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
-pub fn delete_occurrences_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
-    let conn = pool.get()?;
-    let deleted = conn.execute(
-        "DELETE FROM error_occurrences WHERE happened_at < ?1",
-        [before],
-    )?;
-    Ok(deleted)
+pub async fn delete_occurrences_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
+    let result = sqlx::query("DELETE FROM error_occurrences WHERE happened_at < ?1")
+        .bind(before)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() as usize)
 }
 
 /// Error trend point for charting
@@ -388,13 +407,12 @@ pub struct ErrorTrendPoint {
 }
 
 /// Get hourly error occurrence counts for a specific error (for trend sparklines)
-pub fn error_trend(
+pub async fn error_trend(
     pool: &DbPool,
     error_id: i64,
     hours: i64,
 ) -> anyhow::Result<Vec<ErrorTrendPoint>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
+    let rows: Vec<(String, i64)> = sqlx::query_as(
         r#"
         WITH hours AS (
             SELECT datetime('now', '-' || (value - 1) || ' hours') as hour
@@ -420,26 +438,24 @@ pub fn error_trend(
         GROUP BY strftime('%Y-%m-%d %H:00', h.hour)
         ORDER BY hour ASC
         "#,
-    )?;
+    )
+    .bind(error_id)
+    .bind(hours)
+    .fetch_all(pool)
+    .await?;
 
-    let points = stmt
-        .query_map(rusqlite::params![error_id, hours], |row| {
-            Ok(ErrorTrendPoint {
-                hour: row.get(0)?,
-                count: row.get(1)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let points = rows
+        .into_iter()
+        .map(|(hour, count)| ErrorTrendPoint { hour, count })
+        .collect();
 
     Ok(points)
 }
 
 /// Get simplified 24h trend for an error (returns just the hourly counts as a string for sparkline)
-pub fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec<i64>> {
-    let conn = pool.get()?;
-
+pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec<i64>> {
     // Get occurrence counts per hour for the last 24 hours
-    let mut stmt = conn.prepare(
+    let rows: Vec<(String, i64)> = sqlx::query_as(
         r#"
         SELECT strftime('%Y-%m-%d %H', happened_at) as hour, COUNT(*) as cnt
         FROM error_occurrences
@@ -447,14 +463,12 @@ pub fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec<i64>>
         GROUP BY hour
         ORDER BY hour ASC
         "#,
-    )?;
+    )
+    .bind(error_id)
+    .fetch_all(pool)
+    .await?;
 
-    let hour_counts: std::collections::HashMap<String, i64> = stmt
-        .query_map([error_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+    let hour_counts: std::collections::HashMap<String, i64> = rows.into_iter().collect();
 
     // Generate 24 hours of data, filling in zeros where no occurrences
     let mut counts = Vec::with_capacity(24);
@@ -468,14 +482,13 @@ pub fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec<i64>>
 }
 
 /// Get overall hourly error counts (for error index chart)
-pub fn hourly_error_stats(
+pub async fn hourly_error_stats(
     pool: &DbPool,
     project_id: Option<i64>,
     hours: i64,
 ) -> anyhow::Result<Vec<ErrorTrendPoint>> {
-    let conn = pool.get()?;
-
-    let mut stmt = conn.prepare(
+    // Collect data into a HashMap for lookup
+    let rows: Vec<(String, i64)> = sqlx::query_as(
         r#"
         SELECT strftime('%Y-%m-%d %H:00', eo.happened_at) as hour_label, COUNT(*) as cnt
         FROM error_occurrences eo
@@ -485,15 +498,13 @@ pub fn hourly_error_stats(
         GROUP BY strftime('%Y-%m-%d %H', eo.happened_at)
         ORDER BY eo.happened_at ASC
         "#,
-    )?;
+    )
+    .bind(project_id)
+    .bind(hours)
+    .fetch_all(pool)
+    .await?;
 
-    // Collect data into a HashMap for lookup
-    let data_points: std::collections::HashMap<String, i64> = stmt
-        .query_map(rusqlite::params![project_id, hours], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-        })?
-        .filter_map(|r| r.ok())
-        .collect();
+    let data_points: std::collections::HashMap<String, i64> = rows.into_iter().collect();
 
     // Fill in all hours with zeros for missing data
     let mut points = Vec::with_capacity(hours as usize);
@@ -507,19 +518,6 @@ pub fn hourly_error_stats(
     }
 
     Ok(points)
-}
-
-fn map_error(row: &rusqlite::Row) -> rusqlite::Result<AppError> {
-    Ok(AppError {
-        id: row.get(0)?,
-        fingerprint: row.get(1)?,
-        exception_class: row.get(2)?,
-        message: row.get(3)?,
-        first_seen_at: row.get(4)?,
-        last_seen_at: row.get(5)?,
-        occurrence_count: row.get(6)?,
-        status: row.get(7)?,
-    })
 }
 
 /// Calculate text similarity using word-based Jaccard similarity (0.0 to 1.0)

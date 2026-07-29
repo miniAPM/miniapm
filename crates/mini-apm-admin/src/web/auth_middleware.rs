@@ -102,7 +102,7 @@ where
             };
 
             // Validate session
-            match models::user::get_user_from_session(&pool, &token) {
+            match models::user::get_user_from_session(&pool, &token).await {
                 Ok(Some(user)) => {
                     let current_user = CurrentUser {
                         id: user.id,

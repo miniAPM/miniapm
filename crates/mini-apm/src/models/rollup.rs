@@ -1,7 +1,7 @@
 use crate::DbPool;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct HourlyRollup {
     pub id: i64,
     pub hour: String,
@@ -17,7 +17,7 @@ pub struct HourlyRollup {
     pub db_count_sum: i64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct DailyRollup {
     pub id: i64,
     pub date: String,
@@ -32,63 +32,60 @@ pub struct DailyRollup {
     pub avg_db_count: Option<f64>,
 }
 
-pub fn insert_hourly(pool: &DbPool, rollup: &HourlyRollup) -> anyhow::Result<()> {
-    let conn = pool.get()?;
-    conn.execute(
+pub async fn insert_hourly(pool: &DbPool, rollup: &HourlyRollup) -> anyhow::Result<()> {
+    sqlx::query(
         r#"
         INSERT OR REPLACE INTO rollups_hourly
         (hour, path, method, request_count, error_count, total_ms_sum, total_ms_p50, total_ms_p95, total_ms_p99, db_ms_sum, db_count_sum)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
         "#,
-        (
-            &rollup.hour,
-            &rollup.path,
-            &rollup.method,
-            rollup.request_count,
-            rollup.error_count,
-            rollup.total_ms_sum,
-            rollup.total_ms_p50,
-            rollup.total_ms_p95,
-            rollup.total_ms_p99,
-            rollup.db_ms_sum,
-            rollup.db_count_sum,
-        ),
-    )?;
+    )
+    .bind(&rollup.hour)
+    .bind(&rollup.path)
+    .bind(&rollup.method)
+    .bind(rollup.request_count)
+    .bind(rollup.error_count)
+    .bind(rollup.total_ms_sum)
+    .bind(rollup.total_ms_p50)
+    .bind(rollup.total_ms_p95)
+    .bind(rollup.total_ms_p99)
+    .bind(rollup.db_ms_sum)
+    .bind(rollup.db_count_sum)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
-pub fn insert_daily(pool: &DbPool, rollup: &DailyRollup) -> anyhow::Result<()> {
-    let conn = pool.get()?;
-    conn.execute(
+pub async fn insert_daily(pool: &DbPool, rollup: &DailyRollup) -> anyhow::Result<()> {
+    sqlx::query(
         r#"
         INSERT OR REPLACE INTO rollups_daily
         (date, path, method, request_count, error_count, total_ms_p50, total_ms_p95, total_ms_p99, avg_db_ms, avg_db_count)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         "#,
-        (
-            &rollup.date,
-            &rollup.path,
-            &rollup.method,
-            rollup.request_count,
-            rollup.error_count,
-            rollup.total_ms_p50,
-            rollup.total_ms_p95,
-            rollup.total_ms_p99,
-            rollup.avg_db_ms,
-            rollup.avg_db_count,
-        ),
-    )?;
+    )
+    .bind(&rollup.date)
+    .bind(&rollup.path)
+    .bind(&rollup.method)
+    .bind(rollup.request_count)
+    .bind(rollup.error_count)
+    .bind(rollup.total_ms_p50)
+    .bind(rollup.total_ms_p95)
+    .bind(rollup.total_ms_p99)
+    .bind(rollup.avg_db_ms)
+    .bind(rollup.avg_db_count)
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
-pub fn daily_for_range(
+pub async fn daily_for_range(
     pool: &DbPool,
     start: &str,
     end: &str,
     limit: i64,
 ) -> anyhow::Result<Vec<DailyRollup>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
+    let rollups = sqlx::query_as::<_, DailyRollup>(
         r#"
         SELECT id, date, path, method, request_count, error_count,
                total_ms_p50, total_ms_p95, total_ms_p99, avg_db_ms, avg_db_count
@@ -97,33 +94,22 @@ pub fn daily_for_range(
         ORDER BY request_count DESC
         LIMIT ?3
         "#,
-    )?;
-
-    let rollups = stmt
-        .query_map(rusqlite::params![start, end, limit], |row| {
-            Ok(DailyRollup {
-                id: row.get(0)?,
-                date: row.get(1)?,
-                path: row.get(2)?,
-                method: row.get(3)?,
-                request_count: row.get(4)?,
-                error_count: row.get(5)?,
-                total_ms_p50: row.get(6)?,
-                total_ms_p95: row.get(7)?,
-                total_ms_p99: row.get(8)?,
-                avg_db_ms: row.get(9)?,
-                avg_db_count: row.get(10)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    )
+    .bind(start)
+    .bind(end)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
 
     Ok(rollups)
 }
 
-pub fn delete_hourly_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
-    let conn = pool.get()?;
-    let deleted = conn.execute("DELETE FROM rollups_hourly WHERE hour < ?1", [before])?;
-    Ok(deleted)
+pub async fn delete_hourly_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
+    let result = sqlx::query("DELETE FROM rollups_hourly WHERE hour < ?1")
+        .bind(before)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() as usize)
 }
 
 #[cfg(test)]
@@ -132,9 +118,17 @@ mod tests {
     use crate::config::Config;
     use crate::db;
 
-    fn test_pool() -> DbPool {
+    async fn test_pool() -> DbPool {
         let config = Config::default();
-        db::init(&config).expect("Failed to create test database")
+        db::init(&config).await.expect("Failed to create test database")
+    }
+
+    async fn count_rows(pool: &DbPool, table: &str) -> i64 {
+        let sql = format!("SELECT COUNT(*) FROM {table}");
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+            .fetch_one(pool)
+            .await
+            .unwrap()
     }
 
     fn sample_hourly_rollup(hour: &str, path: &str) -> HourlyRollup {
@@ -170,190 +164,201 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_insert_hourly_rollup() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_insert_hourly_rollup() {
+        let pool = test_pool().await;
         let rollup = sample_hourly_rollup("2024-01-15T10:00:00Z", "/api/users");
 
-        let result = insert_hourly(&pool, &rollup);
+        let result = insert_hourly(&pool, &rollup).await;
 
         assert!(result.is_ok());
 
         // Verify it was inserted
-        let conn = pool.get().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM rollups_hourly", [], |row| row.get(0))
-            .unwrap();
+        let count = count_rows(&pool, "rollups_hourly").await;
         assert_eq!(count, 1);
     }
 
-    #[test]
-    fn test_insert_hourly_rollup_replaces_duplicate() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_insert_hourly_rollup_replaces_duplicate() {
+        let pool = test_pool().await;
 
         // Insert first rollup
         let mut rollup = sample_hourly_rollup("2024-01-15T10:00:00Z", "/api/users");
         rollup.request_count = 100;
-        insert_hourly(&pool, &rollup).unwrap();
+        insert_hourly(&pool, &rollup).await.unwrap();
 
         // Insert again with same key but different count
         rollup.request_count = 200;
-        insert_hourly(&pool, &rollup).unwrap();
+        insert_hourly(&pool, &rollup).await.unwrap();
 
         // Should still be 1 row (replaced)
-        let conn = pool.get().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM rollups_hourly", [], |row| row.get(0))
-            .unwrap();
+        let count = count_rows(&pool, "rollups_hourly").await;
         assert_eq!(count, 1);
 
         // And should have the updated value
-        let request_count: i64 = conn
-            .query_row(
-                "SELECT request_count FROM rollups_hourly WHERE path = '/api/users'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
+        let request_count: i64 = sqlx::query_scalar(
+            "SELECT request_count FROM rollups_hourly WHERE path = '/api/users'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(request_count, 200);
     }
 
-    #[test]
-    fn test_insert_daily_rollup() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_insert_daily_rollup() {
+        let pool = test_pool().await;
         let rollup = sample_daily_rollup("2024-01-15", "/api/users");
 
-        let result = insert_daily(&pool, &rollup);
+        let result = insert_daily(&pool, &rollup).await;
 
         assert!(result.is_ok());
 
         // Verify it was inserted
-        let conn = pool.get().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM rollups_daily", [], |row| row.get(0))
-            .unwrap();
+        let count = count_rows(&pool, "rollups_daily").await;
         assert_eq!(count, 1);
     }
 
-    #[test]
-    fn test_insert_daily_rollup_replaces_duplicate() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_insert_daily_rollup_replaces_duplicate() {
+        let pool = test_pool().await;
 
         let mut rollup = sample_daily_rollup("2024-01-15", "/api/users");
         rollup.request_count = 1000;
-        insert_daily(&pool, &rollup).unwrap();
+        insert_daily(&pool, &rollup).await.unwrap();
 
         rollup.request_count = 2000;
-        insert_daily(&pool, &rollup).unwrap();
+        insert_daily(&pool, &rollup).await.unwrap();
 
-        let conn = pool.get().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM rollups_daily", [], |row| row.get(0))
-            .unwrap();
+        let count = count_rows(&pool, "rollups_daily").await;
         assert_eq!(count, 1);
     }
 
-    #[test]
-    fn test_daily_for_range() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_daily_for_range() {
+        let pool = test_pool().await;
 
         // Insert multiple daily rollups
-        insert_daily(&pool, &sample_daily_rollup("2024-01-10", "/api/users")).unwrap();
-        insert_daily(&pool, &sample_daily_rollup("2024-01-15", "/api/posts")).unwrap();
-        insert_daily(&pool, &sample_daily_rollup("2024-01-20", "/api/comments")).unwrap();
+        insert_daily(&pool, &sample_daily_rollup("2024-01-10", "/api/users"))
+            .await
+            .unwrap();
+        insert_daily(&pool, &sample_daily_rollup("2024-01-15", "/api/posts"))
+            .await
+            .unwrap();
+        insert_daily(&pool, &sample_daily_rollup("2024-01-20", "/api/comments"))
+            .await
+            .unwrap();
 
         // Query range that includes first two
-        let rollups = daily_for_range(&pool, "2024-01-08", "2024-01-17", 100).unwrap();
+        let rollups = daily_for_range(&pool, "2024-01-08", "2024-01-17", 100)
+            .await
+            .unwrap();
 
         assert_eq!(rollups.len(), 2);
     }
 
-    #[test]
-    fn test_daily_for_range_with_limit() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_daily_for_range_with_limit() {
+        let pool = test_pool().await;
 
-        insert_daily(&pool, &sample_daily_rollup("2024-01-10", "/api/a")).unwrap();
-        insert_daily(&pool, &sample_daily_rollup("2024-01-10", "/api/b")).unwrap();
-        insert_daily(&pool, &sample_daily_rollup("2024-01-10", "/api/c")).unwrap();
+        insert_daily(&pool, &sample_daily_rollup("2024-01-10", "/api/a"))
+            .await
+            .unwrap();
+        insert_daily(&pool, &sample_daily_rollup("2024-01-10", "/api/b"))
+            .await
+            .unwrap();
+        insert_daily(&pool, &sample_daily_rollup("2024-01-10", "/api/c"))
+            .await
+            .unwrap();
 
-        let rollups = daily_for_range(&pool, "2024-01-01", "2024-01-31", 2).unwrap();
+        let rollups = daily_for_range(&pool, "2024-01-01", "2024-01-31", 2)
+            .await
+            .unwrap();
 
         assert_eq!(rollups.len(), 2);
     }
 
-    #[test]
-    fn test_daily_for_range_empty() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_daily_for_range_empty() {
+        let pool = test_pool().await;
 
-        let rollups = daily_for_range(&pool, "2024-01-01", "2024-01-31", 100).unwrap();
+        let rollups = daily_for_range(&pool, "2024-01-01", "2024-01-31", 100)
+            .await
+            .unwrap();
 
         assert!(rollups.is_empty());
     }
 
-    #[test]
-    fn test_daily_for_range_orders_by_request_count() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_daily_for_range_orders_by_request_count() {
+        let pool = test_pool().await;
 
         let mut low = sample_daily_rollup("2024-01-10", "/api/low");
         low.request_count = 10;
-        insert_daily(&pool, &low).unwrap();
+        insert_daily(&pool, &low).await.unwrap();
 
         let mut high = sample_daily_rollup("2024-01-10", "/api/high");
         high.request_count = 1000;
-        insert_daily(&pool, &high).unwrap();
+        insert_daily(&pool, &high).await.unwrap();
 
-        let rollups = daily_for_range(&pool, "2024-01-01", "2024-01-31", 100).unwrap();
+        let rollups = daily_for_range(&pool, "2024-01-01", "2024-01-31", 100)
+            .await
+            .unwrap();
 
         assert_eq!(rollups.len(), 2);
         assert_eq!(rollups[0].path, "/api/high"); // Highest count first
         assert_eq!(rollups[1].path, "/api/low");
     }
 
-    #[test]
-    fn test_delete_hourly_before() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_delete_hourly_before() {
+        let pool = test_pool().await;
 
         insert_hourly(
             &pool,
             &sample_hourly_rollup("2024-01-01T10:00:00Z", "/api/old"),
         )
+        .await
         .unwrap();
         insert_hourly(
             &pool,
             &sample_hourly_rollup("2024-01-15T10:00:00Z", "/api/recent"),
         )
+        .await
         .unwrap();
 
-        let deleted = delete_hourly_before(&pool, "2024-01-10T00:00:00Z").unwrap();
+        let deleted = delete_hourly_before(&pool, "2024-01-10T00:00:00Z")
+            .await
+            .unwrap();
 
         assert_eq!(deleted, 1);
 
         // Only recent should remain
-        let conn = pool.get().unwrap();
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM rollups_hourly", [], |row| row.get(0))
-            .unwrap();
+        let count = count_rows(&pool, "rollups_hourly").await;
         assert_eq!(count, 1);
     }
 
-    #[test]
-    fn test_delete_hourly_before_none_to_delete() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_delete_hourly_before_none_to_delete() {
+        let pool = test_pool().await;
 
         insert_hourly(
             &pool,
             &sample_hourly_rollup("2024-06-01T10:00:00Z", "/api/recent"),
         )
+        .await
         .unwrap();
 
-        let deleted = delete_hourly_before(&pool, "2024-01-01T00:00:00Z").unwrap();
+        let deleted = delete_hourly_before(&pool, "2024-01-01T00:00:00Z")
+            .await
+            .unwrap();
 
         assert_eq!(deleted, 0);
     }
 
-    #[test]
-    fn test_hourly_rollup_with_null_percentiles() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_hourly_rollup_with_null_percentiles() {
+        let pool = test_pool().await;
 
         let rollup = HourlyRollup {
             id: 0,
@@ -370,13 +375,13 @@ mod tests {
             db_count_sum: 100,
         };
 
-        let result = insert_hourly(&pool, &rollup);
+        let result = insert_hourly(&pool, &rollup).await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_daily_rollup_with_null_averages() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_daily_rollup_with_null_averages() {
+        let pool = test_pool().await;
 
         let rollup = DailyRollup {
             id: 0,
@@ -392,7 +397,7 @@ mod tests {
             avg_db_count: None,
         };
 
-        let result = insert_daily(&pool, &rollup);
+        let result = insert_daily(&pool, &rollup).await;
         assert!(result.is_ok());
     }
 }

@@ -45,7 +45,7 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
     api::health::init_start_time();
 
     // Always ensure default project exists (collector only)
-    let default_project = models::project::ensure_default_project(&pool)?;
+    let default_project = models::project::ensure_default_project(&pool).await?;
 
     if !config.enable_projects {
         tracing::info!("Single-project mode - API key: {}", default_project.api_key);

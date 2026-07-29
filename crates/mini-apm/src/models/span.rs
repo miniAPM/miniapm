@@ -2,6 +2,7 @@ use crate::DbPool;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use std::collections::HashMap;
 
 // ============================================================================
@@ -267,21 +268,21 @@ pub struct TraceSummary {
 /// Map a row with the canonical trace summary column order:
 /// trace_id, root_span_name, root_span_type, duration_ms, span_count,
 /// status_code, service_name, http_method, http_url, http_status_code, happened_at
-fn map_trace_summary_row(row: &rusqlite::Row) -> rusqlite::Result<TraceSummary> {
+fn map_trace_summary_row(row: &sqlx::sqlite::SqliteRow) -> Result<TraceSummary, sqlx::Error> {
     Ok(TraceSummary {
-        trace_id: row.get(0)?,
-        root_span_name: row.get(1)?,
+        trace_id: row.try_get(0)?,
+        root_span_name: row.try_get(1)?,
         root_span_type: row
-            .get::<_, Option<String>>(2)?
+            .try_get::<Option<String>, _>(2)?
             .and_then(|s| RootSpanType::parse(&s)),
-        duration_ms: row.get(3)?,
-        span_count: row.get(4)?,
-        status_code: row.get(5)?,
-        service_name: row.get(6)?,
-        http_method: row.get(7)?,
-        http_url: row.get(8)?,
-        http_status_code: row.get(9)?,
-        happened_at: row.get(10)?,
+        duration_ms: row.try_get(3)?,
+        span_count: row.try_get(4)?,
+        status_code: row.try_get(5)?,
+        service_name: row.try_get(6)?,
+        http_method: row.try_get(7)?,
+        http_url: row.try_get(8)?,
+        http_status_code: row.try_get(9)?,
+        happened_at: row.try_get(10)?,
     })
 }
 
@@ -428,9 +429,8 @@ use sha2::{Digest, Sha256};
 
 /// Backfill errors from existing spans that have exception events
 /// This is useful for extracting errors from spans that were ingested before error extraction was added
-pub fn backfill_errors_from_spans(pool: &DbPool) -> anyhow::Result<usize> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
+pub async fn backfill_errors_from_spans(pool: &DbPool) -> anyhow::Result<usize> {
+    let rows: Vec<(Option<i64>, String, String, String)> = sqlx::query_as(
         r#"
         SELECT project_id, trace_id, events_json, happened_at
         FROM spans
@@ -438,23 +438,16 @@ pub fn backfill_errors_from_spans(pool: &DbPool) -> anyhow::Result<usize> {
           AND events_json != '[]'
           AND events_json LIKE '%exception%'
         "#,
-    )?;
+    )
+    .fetch_all(pool)
+    .await?;
 
     let mut count = 0;
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, Option<i64>>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-            row.get::<_, String>(3)?,
-        ))
-    })?;
-
-    for row in rows {
-        let (project_id, trace_id, events_json, happened_at) = row?;
+    for (project_id, trace_id, events_json, happened_at) in rows {
         if let Ok(events) = serde_json::from_str::<Vec<SpanEvent>>(&events_json) {
             let events_opt = Some(events);
-            extract_and_insert_errors(pool, &events_opt, &trace_id, &happened_at, project_id);
+            extract_and_insert_errors(pool, &events_opt, &trace_id, &happened_at, project_id)
+                .await;
             count += 1;
         }
     }
@@ -463,7 +456,7 @@ pub fn backfill_errors_from_spans(pool: &DbPool) -> anyhow::Result<usize> {
 }
 
 /// Extract exception events from OTLP span and insert as errors
-fn extract_and_insert_errors(
+async fn extract_and_insert_errors(
     pool: &DbPool,
     events: &Option<Vec<SpanEvent>>,
     trace_id: &str,
@@ -510,18 +503,17 @@ fn extract_and_insert_errors(
             source_context: None,
         };
 
-        if let Err(e) = app_error::insert(pool, &incoming_error, project_id) {
+        if let Err(e) = app_error::insert(pool, &incoming_error, project_id).await {
             tracing::warn!("Failed to insert error from span event: {}", e);
         }
     }
 }
 
-pub fn insert_otlp_batch(
+pub async fn insert_otlp_batch(
     pool: &DbPool,
     request: &OtlpTraceRequest,
     project_id: Option<i64>,
 ) -> anyhow::Result<usize> {
-    let conn = pool.get()?;
     let mut count = 0;
 
     for resource_span in &request.resource_spans {
@@ -610,7 +602,7 @@ pub fn insert_otlp_batch(
                     .map(serde_json::to_string)
                     .transpose()?;
 
-                conn.execute(
+                sqlx::query(
                     r#"
                     INSERT OR REPLACE INTO spans
                     (project_id, trace_id, span_id, parent_span_id,
@@ -624,36 +616,36 @@ pub fn insert_otlp_batch(
                             ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23,
                             ?24, ?25, ?26, ?27)
                     "#,
-                    rusqlite::params![
-                        project_id,
-                        trace_id,
-                        span_id,
-                        parent_span_id,
-                        start_nano,
-                        end_nano,
-                        duration_ms,
-                        otlp_span.name,
-                        kind,
-                        status_code,
-                        status_message,
-                        category.as_str(),
-                        root_span_type.map(|r| r.as_str()),
-                        service_name,
-                        http_method,
-                        http_url,
-                        http_status,
-                        db_system,
-                        db_statement,
-                        db_operation,
-                        messaging_system,
-                        messaging_operation,
-                        request_id,
-                        attrs_json,
-                        events_json,
-                        resource_json,
-                        happened_at,
-                    ],
-                )?;
+                )
+                .bind(project_id)
+                .bind(&trace_id)
+                .bind(&span_id)
+                .bind(parent_span_id.as_deref())
+                .bind(start_nano)
+                .bind(end_nano)
+                .bind(duration_ms)
+                .bind(&otlp_span.name)
+                .bind(kind)
+                .bind(status_code)
+                .bind(status_message.as_deref())
+                .bind(category.as_str())
+                .bind(root_span_type.map(|r| r.as_str()))
+                .bind(service_name.as_deref())
+                .bind(http_method.as_deref())
+                .bind(http_url.as_deref())
+                .bind(http_status)
+                .bind(db_system.as_deref())
+                .bind(db_statement.as_deref())
+                .bind(db_operation.as_deref())
+                .bind(messaging_system.as_deref())
+                .bind(messaging_operation.as_deref())
+                .bind(request_id.as_deref())
+                .bind(&attrs_json)
+                .bind(events_json.as_deref())
+                .bind(&resource_json)
+                .bind(&happened_at)
+                .execute(pool)
+                .await?;
                 count += 1;
 
                 // Extract errors from exception events
@@ -663,7 +655,8 @@ pub fn insert_otlp_batch(
                     &trace_id,
                     &happened_at,
                     project_id,
-                );
+                )
+                .await;
             }
         }
     }
@@ -671,7 +664,7 @@ pub fn insert_otlp_batch(
     Ok(count)
 }
 
-pub fn list_traces(
+pub async fn list_traces(
     pool: &DbPool,
     project_id: Option<i64>,
     root_type_filter: Option<RootSpanType>,
@@ -687,10 +680,11 @@ pub fn list_traces(
         "recent",
         limit,
     )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn list_traces_filtered(
+pub async fn list_traces_filtered(
     pool: &DbPool,
     project_id: Option<i64>,
     root_type_filter: Option<RootSpanType>,
@@ -711,10 +705,11 @@ pub fn list_traces_filtered(
         limit,
         0,
     )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn list_traces_paginated(
+pub async fn list_traces_paginated(
     pool: &DbPool,
     project_id: Option<i64>,
     root_type_filter: Option<RootSpanType>,
@@ -725,8 +720,6 @@ pub fn list_traces_paginated(
     limit: i64,
     offset: i64,
 ) -> anyhow::Result<Vec<TraceSummary>> {
-    let conn = pool.get()?;
-
     let order_clause = match sort_by {
         "duration" => "s.duration_ms DESC",
         "spans" => "span_count DESC",
@@ -761,26 +754,26 @@ pub fn list_traces_paginated(
     );
 
     let root_type_str = root_type_filter.map(|r| r.as_str());
-    let mut stmt = conn.prepare(&sql)?;
-    let traces = stmt
-        .query_map(
-            rusqlite::params![
-                project_id,
-                root_type_str,
-                since,
-                search,
-                min_duration_ms,
-                limit,
-                offset
-            ],
-            map_trace_summary_row,
-        )?
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(project_id)
+        .bind(root_type_str)
+        .bind(since)
+        .bind(search)
+        .bind(min_duration_ms)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await?;
+
+    let traces = rows
+        .iter()
+        .map(map_trace_summary_row)
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(traces)
 }
 
-pub fn count_traces_filtered(
+pub async fn count_traces_filtered(
     pool: &DbPool,
     project_id: Option<i64>,
     root_type_filter: Option<RootSpanType>,
@@ -788,10 +781,8 @@ pub fn count_traces_filtered(
     search: Option<&str>,
     min_duration_ms: Option<f64>,
 ) -> anyhow::Result<i64> {
-    let conn = pool.get()?;
-
     let root_type_str = root_type_filter.map(|r| r.as_str());
-    let count: i64 = conn.query_row(
+    let count: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(*)
         FROM spans s
@@ -802,27 +793,19 @@ pub fn count_traces_filtered(
           AND (?4 IS NULL OR s.name LIKE '%' || ?4 || '%' OR s.http_url LIKE '%' || ?4 || '%')
           AND (?5 IS NULL OR s.duration_ms >= ?5)
         "#,
-        rusqlite::params![project_id, root_type_str, since, search, min_duration_ms],
-        |row| row.get(0),
-    )?;
+    )
+    .bind(project_id)
+    .bind(root_type_str)
+    .bind(since)
+    .bind(search)
+    .bind(min_duration_ms)
+    .fetch_one(pool)
+    .await?;
 
     Ok(count)
 }
 
-pub fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<TraceDetail>> {
-    let conn = pool.get()?;
-
-    let mut stmt = conn.prepare(
-        r#"
-        SELECT id, span_id, parent_span_id, name, span_category,
-               duration_ms, start_time_unix_nano, status_code,
-               http_method, http_status_code, db_operation, db_system, db_statement
-        FROM spans
-        WHERE trace_id = ?1
-        ORDER BY start_time_unix_nano ASC
-        "#,
-    )?;
-
+pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<TraceDetail>> {
     #[allow(clippy::type_complexity)]
     let spans: Vec<(
         i64,
@@ -838,25 +821,19 @@ pub fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<TraceDe
         Option<String>,
         Option<String>,
         Option<String>,
-    )> = stmt
-        .query_map([trace_id], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-                row.get(6)?,
-                row.get(7)?,
-                row.get(8)?,
-                row.get(9)?,
-                row.get(10)?,
-                row.get(11)?,
-                row.get(12)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    )> = sqlx::query_as(
+        r#"
+        SELECT id, span_id, parent_span_id, name, span_category,
+               duration_ms, start_time_unix_nano, status_code,
+               http_method, http_status_code, db_operation, db_system, db_statement
+        FROM spans
+        WHERE trace_id = ?1
+        ORDER BY start_time_unix_nano ASC
+        "#,
+    )
+    .bind(trace_id)
+    .fetch_all(pool)
+    .await?;
 
     if spans.is_empty() {
         return Ok(None);
@@ -941,19 +918,22 @@ pub fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<TraceDe
     }))
 }
 
-pub fn delete_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
-    let conn = pool.get()?;
-    let deleted = conn.execute("DELETE FROM spans WHERE happened_at < ?1", [before])?;
-    Ok(deleted)
+pub async fn delete_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
+    let result = sqlx::query("DELETE FROM spans WHERE happened_at < ?1")
+        .bind(before)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() as usize)
 }
 
-pub fn count_since(pool: &DbPool, project_id: Option<i64>, since: &str) -> anyhow::Result<i64> {
-    let conn = pool.get()?;
-    let count: i64 = conn.query_row(
+pub async fn count_since(pool: &DbPool, project_id: Option<i64>, since: &str) -> anyhow::Result<i64> {
+    let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM spans WHERE parent_span_id IS NULL AND (?1 IS NULL OR project_id = ?1) AND happened_at >= ?2",
-        rusqlite::params![project_id, since],
-        |row| row.get(0),
-    )?;
+    )
+    .bind(project_id)
+    .bind(since)
+    .fetch_one(pool)
+    .await?;
     Ok(count)
 }
 
@@ -975,19 +955,18 @@ pub struct LatencyStats {
     pub p99_ms: i64,
 }
 
-pub fn latency_stats_since(
+pub async fn latency_stats_since(
     pool: &DbPool,
     project_id: Option<i64>,
     since: &str,
 ) -> anyhow::Result<LatencyStats> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
+    let values: Vec<f64> = sqlx::query_scalar(
         "SELECT duration_ms FROM spans WHERE parent_span_id IS NULL AND happened_at >= ?1 AND (?2 IS NULL OR project_id = ?2) ORDER BY duration_ms ASC",
-    )?;
-
-    let values: Vec<f64> = stmt
-        .query_map(rusqlite::params![since, project_id], |row| row.get(0))?
-        .collect::<Result<Vec<_>, _>>()?;
+    )
+    .bind(since)
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
 
     if values.is_empty() {
         return Ok(LatencyStats {
@@ -1006,14 +985,13 @@ pub fn latency_stats_since(
     })
 }
 
-pub fn slow_traces(
+pub async fn slow_traces(
     pool: &DbPool,
     project_id: Option<i64>,
     threshold_ms: f64,
     limit: i64,
 ) -> anyhow::Result<Vec<TraceSummary>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
+    let rows = sqlx::query(
         r#"
         SELECT
             s.trace_id,
@@ -1034,13 +1012,16 @@ pub fn slow_traces(
         ORDER BY s.duration_ms DESC
         LIMIT ?3
         "#,
-    )?;
+    )
+    .bind(threshold_ms)
+    .bind(project_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
 
-    let traces = stmt
-        .query_map(
-            rusqlite::params![threshold_ms, project_id, limit],
-            map_trace_summary_row,
-        )?
+    let traces = rows
+        .iter()
+        .map(map_trace_summary_row)
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(traces)
@@ -1054,13 +1035,12 @@ pub struct TimeSeriesPoint {
     pub error_count: i64,
 }
 
-pub fn hourly_stats(
+pub async fn hourly_stats(
     pool: &DbPool,
     project_id: Option<i64>,
     hours: i64,
 ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
+    let rows: Vec<(String, i64, f64, i64)> = sqlx::query_as(
         r#"
         SELECT
             strftime('%Y-%m-%d %H:00', happened_at) as hour,
@@ -1074,19 +1054,25 @@ pub fn hourly_stats(
         GROUP BY strftime('%Y-%m-%d %H:00', happened_at)
         ORDER BY hour ASC
         "#,
-    )?;
+    )
+    .bind(project_id)
+    .bind(hours)
+    .fetch_all(pool)
+    .await?;
 
-    let data_points: std::collections::HashMap<String, TimeSeriesPoint> = stmt
-        .query_map(rusqlite::params![project_id, hours], |row| {
-            Ok(TimeSeriesPoint {
-                hour: row.get(0)?,
-                count: row.get(1)?,
-                avg_ms: row.get(2)?,
-                error_count: row.get(3)?,
-            })
-        })?
-        .filter_map(|r| r.ok())
-        .map(|p| (p.hour.clone(), p))
+    let data_points: std::collections::HashMap<String, TimeSeriesPoint> = rows
+        .into_iter()
+        .map(|(hour, count, avg_ms, error_count)| {
+            (
+                hour.clone(),
+                TimeSeriesPoint {
+                    hour,
+                    count,
+                    avg_ms,
+                    error_count,
+                },
+            )
+        })
         .collect();
 
     // Fill in all hours with zeros for missing data
@@ -1130,7 +1116,7 @@ pub struct RouteSummary {
     pub error_rate: f64,
 }
 
-pub fn routes_summary(
+pub async fn routes_summary(
     pool: &DbPool,
     project_id: Option<i64>,
     since: &str,
@@ -1138,10 +1124,8 @@ pub fn routes_summary(
     sort: &str,
     limit: i64,
 ) -> anyhow::Result<Vec<RouteSummary>> {
-    let conn = pool.get()?;
-
     // Get unique routes with basic stats
-    let mut stmt = conn.prepare(
+    let routes: Vec<(String, String, i64, f64, f64, f64, i64)> = sqlx::query_as(
         r#"
         SELECT
             COALESCE(name, http_url, 'unknown') as path,
@@ -1161,26 +1145,19 @@ pub fn routes_summary(
         ORDER BY request_count DESC
         LIMIT ?4
         "#,
-    )?;
-
-    let routes: Vec<(String, String, i64, f64, f64, f64, i64)> = stmt
-        .query_map(rusqlite::params![project_id, since, search, limit], |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-                row.get(6)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    )
+    .bind(project_id)
+    .bind(since)
+    .bind(search)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
 
     let mut result = Vec::new();
     for (path, method, request_count, avg_ms, max_ms, min_ms, error_count) in routes {
-        let (p95, p99) = calculate_route_percentiles(&conn, project_id, &path, since)?;
-        let (avg_db_ms, avg_db_count) = calculate_route_db_stats(&conn, project_id, &path, since)?;
+        let (p95, p99) = calculate_route_percentiles(pool, project_id, &path, since).await?;
+        let (avg_db_ms, avg_db_count) =
+            calculate_route_db_stats(pool, project_id, &path, since).await?;
         let error_rate = if request_count > 0 {
             (error_count as f64 / request_count as f64) * 100.0
         } else {
@@ -1217,14 +1194,13 @@ pub fn routes_summary(
     Ok(result)
 }
 
-pub fn routes_count(
+pub async fn routes_count(
     pool: &DbPool,
     project_id: Option<i64>,
     since: &str,
     search: Option<&str>,
 ) -> anyhow::Result<i64> {
-    let conn = pool.get()?;
-    let count: i64 = conn.query_row(
+    let count: i64 = sqlx::query_scalar(
         r#"
         SELECT COUNT(DISTINCT COALESCE(name, http_url, 'unknown') || COALESCE(http_method, 'GET'))
         FROM spans
@@ -1234,19 +1210,22 @@ pub fn routes_count(
           AND happened_at >= ?2
           AND (?3 IS NULL OR name LIKE '%' || ?3 || '%' OR http_url LIKE '%' || ?3 || '%')
         "#,
-        rusqlite::params![project_id, since, search],
-        |row| row.get(0),
-    )?;
+    )
+    .bind(project_id)
+    .bind(since)
+    .bind(search)
+    .fetch_one(pool)
+    .await?;
     Ok(count)
 }
 
-fn calculate_route_percentiles(
-    conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+async fn calculate_route_percentiles(
+    pool: &DbPool,
     project_id: Option<i64>,
     path: &str,
     since: &str,
 ) -> anyhow::Result<(i64, i64)> {
-    let mut stmt = conn.prepare(
+    let values: Vec<f64> = sqlx::query_scalar(
         r#"
         SELECT duration_ms
         FROM spans
@@ -1256,30 +1235,28 @@ fn calculate_route_percentiles(
           AND happened_at >= ?3
         ORDER BY duration_ms ASC
         "#,
-    )?;
-
-    let values: Vec<f64> = stmt
-        .query_map(rusqlite::params![path, project_id, since], |row| row.get(0))?
-        .collect::<Result<Vec<_>, _>>()?;
+    )
+    .bind(path)
+    .bind(project_id)
+    .bind(since)
+    .fetch_all(pool)
+    .await?;
 
     if values.is_empty() {
         return Ok((0, 0));
     }
 
-    Ok((
-        percentile_ms(&values, 0.95),
-        percentile_ms(&values, 0.99),
-    ))
+    Ok((percentile_ms(&values, 0.95), percentile_ms(&values, 0.99)))
 }
 
-fn calculate_route_db_stats(
-    conn: &r2d2::PooledConnection<r2d2_sqlite::SqliteConnectionManager>,
+async fn calculate_route_db_stats(
+    pool: &DbPool,
     project_id: Option<i64>,
     path: &str,
     since: &str,
 ) -> anyhow::Result<(i64, i64)> {
     // Get all trace_ids for this route
-    let mut stmt = conn.prepare(
+    let trace_ids: Vec<String> = sqlx::query_scalar(
         r#"
         SELECT trace_id
         FROM spans
@@ -1288,11 +1265,12 @@ fn calculate_route_db_stats(
           AND (?2 IS NULL OR project_id = ?2)
           AND happened_at >= ?3
         "#,
-    )?;
-
-    let trace_ids: Vec<String> = stmt
-        .query_map(rusqlite::params![path, project_id, since], |row| row.get(0))?
-        .collect::<Result<Vec<_>, _>>()?;
+    )
+    .bind(path)
+    .bind(project_id)
+    .bind(since)
+    .fetch_all(pool)
+    .await?;
 
     if trace_ids.is_empty() {
         return Ok((0, 0));
@@ -1319,11 +1297,11 @@ fn calculate_route_db_stats(
         placeholders
     );
 
-    let mut stmt = conn.prepare(&sql)?;
-    let result: (f64, f64) = stmt
-        .query_row(rusqlite::params_from_iter(trace_ids.iter()), |row| {
-            Ok((row.get(0)?, row.get(1)?))
-        })?;
+    let mut query = sqlx::query_as(sqlx::AssertSqlSafe(sql));
+    for trace_id in &trace_ids {
+        query = query.bind(trace_id);
+    }
+    let result: (f64, f64) = query.fetch_one(pool).await?;
 
     Ok((result.0.round() as i64, result.1.round() as i64))
 }
@@ -1425,14 +1403,9 @@ pub fn detect_n_plus_1(spans: &[SpanDisplay]) -> Vec<NPlus1Issue> {
 }
 
 /// Check if a trace has N+1 issues (for list view)
-pub fn has_n_plus_1(pool: &DbPool, trace_id: &str) -> bool {
-    let conn = match pool.get() {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-
+pub async fn has_n_plus_1(pool: &DbPool, trace_id: &str) -> bool {
     // Count DB spans grouped by normalized statement pattern
-    let result: Result<i64, _> = conn.query_row(
+    let result: Result<i64, _> = sqlx::query_scalar(
         r#"
         SELECT COUNT(*) FROM (
             SELECT db_statement, COUNT(*) as cnt
@@ -1442,9 +1415,11 @@ pub fn has_n_plus_1(pool: &DbPool, trace_id: &str) -> bool {
             HAVING cnt >= ?2
         )
         "#,
-        rusqlite::params![trace_id, N_PLUS_1_THRESHOLD as i64],
-        |row| row.get(0),
-    );
+    )
+    .bind(trace_id)
+    .bind(N_PLUS_1_THRESHOLD as i64)
+    .fetch_one(pool)
+    .await;
 
     result.unwrap_or(0) > 0
 }

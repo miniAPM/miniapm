@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 
 const PREFIX: &str = "mini_apm_k_";
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ApiKey {
     pub id: i64,
     pub name: String,
@@ -13,64 +13,54 @@ pub struct ApiKey {
     pub last_used_at: Option<String>,
 }
 
-pub fn create(pool: &DbPool, name: &str) -> anyhow::Result<String> {
-    let conn = pool.get()?;
-
+pub async fn create(pool: &DbPool, name: &str) -> anyhow::Result<String> {
     // Generate random key
     let random_bytes: [u8; 24] = rand::thread_rng().r#gen();
     let raw_key = format!("{}{}", PREFIX, hex::encode(random_bytes));
     let key_hash = hash_key(&raw_key);
 
-    conn.execute(
-        "INSERT INTO api_keys (name, key_hash, created_at) VALUES (?1, ?2, ?3)",
-        (&name, &key_hash, Utc::now().to_rfc3339()),
-    )?;
+    sqlx::query("INSERT INTO api_keys (name, key_hash, created_at) VALUES (?1, ?2, ?3)")
+        .bind(name)
+        .bind(&key_hash)
+        .bind(Utc::now().to_rfc3339())
+        .execute(pool)
+        .await?;
 
     Ok(raw_key)
 }
 
-pub fn verify(pool: &DbPool, raw_key: &str) -> anyhow::Result<bool> {
+pub async fn verify(pool: &DbPool, raw_key: &str) -> anyhow::Result<bool> {
     if raw_key.is_empty() {
         return Ok(false);
     }
 
-    let conn = pool.get()?;
     let key_hash = hash_key(raw_key);
 
-    let exists: bool = conn
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM api_keys WHERE key_hash = ?1)",
-            [&key_hash],
-            |row| row.get(0),
-        )
-        .unwrap_or(false);
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM api_keys WHERE key_hash = ?1)")
+            .bind(&key_hash)
+            .fetch_one(pool)
+            .await
+            .unwrap_or(false);
 
     if exists {
         // Update last_used_at
-        let _ = conn.execute(
-            "UPDATE api_keys SET last_used_at = ?1 WHERE key_hash = ?2",
-            (Utc::now().to_rfc3339(), &key_hash),
-        );
+        let _ = sqlx::query("UPDATE api_keys SET last_used_at = ?1 WHERE key_hash = ?2")
+            .bind(Utc::now().to_rfc3339())
+            .bind(&key_hash)
+            .execute(pool)
+            .await;
     }
 
     Ok(exists)
 }
 
-pub fn list(pool: &DbPool) -> anyhow::Result<Vec<ApiKey>> {
-    let conn = pool.get()?;
-    let mut stmt = conn
-        .prepare("SELECT id, name, created_at, last_used_at FROM api_keys ORDER BY created_at")?;
-
-    let keys = stmt
-        .query_map([], |row| {
-            Ok(ApiKey {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                created_at: row.get(2)?,
-                last_used_at: row.get(3)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+pub async fn list(pool: &DbPool) -> anyhow::Result<Vec<ApiKey>> {
+    let keys = sqlx::query_as::<_, ApiKey>(
+        "SELECT id, name, created_at, last_used_at FROM api_keys ORDER BY created_at",
+    )
+    .fetch_all(pool)
+    .await?;
 
     Ok(keys)
 }
@@ -87,16 +77,16 @@ mod tests {
     use crate::config::Config;
     use crate::db;
 
-    fn test_pool() -> DbPool {
+    async fn test_pool() -> DbPool {
         let config = Config::default();
-        db::init(&config).expect("Failed to create test database")
+        db::init(&config).await.expect("Failed to create test database")
     }
 
-    #[test]
-    fn test_create_api_key_format() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_create_api_key_format() {
+        let pool = test_pool().await;
 
-        let key = create(&pool, "test-key").unwrap();
+        let key = create(&pool, "test-key").await.unwrap();
 
         // Should start with prefix
         assert!(key.starts_with(PREFIX));
@@ -104,70 +94,70 @@ mod tests {
         assert_eq!(key.len(), 11 + 48);
     }
 
-    #[test]
-    fn test_create_api_key_unique() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_create_api_key_unique() {
+        let pool = test_pool().await;
 
-        let key1 = create(&pool, "key1").unwrap();
-        let key2 = create(&pool, "key2").unwrap();
+        let key1 = create(&pool, "key1").await.unwrap();
+        let key2 = create(&pool, "key2").await.unwrap();
 
         assert_ne!(key1, key2);
     }
 
-    #[test]
-    fn test_verify_valid_key() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_verify_valid_key() {
+        let pool = test_pool().await;
 
-        let key = create(&pool, "test-key").unwrap();
-        let is_valid = verify(&pool, &key).unwrap();
+        let key = create(&pool, "test-key").await.unwrap();
+        let is_valid = verify(&pool, &key).await.unwrap();
 
         assert!(is_valid);
     }
 
-    #[test]
-    fn test_verify_invalid_key() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_verify_invalid_key() {
+        let pool = test_pool().await;
 
-        let is_valid = verify(&pool, "mini_apm_k_invalid_key_12345").unwrap();
-
-        assert!(!is_valid);
-    }
-
-    #[test]
-    fn test_verify_empty_key() {
-        let pool = test_pool();
-
-        let is_valid = verify(&pool, "").unwrap();
+        let is_valid = verify(&pool, "mini_apm_k_invalid_key_12345").await.unwrap();
 
         assert!(!is_valid);
     }
 
-    #[test]
-    fn test_verify_updates_last_used_at() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_verify_empty_key() {
+        let pool = test_pool().await;
 
-        let key = create(&pool, "test-key").unwrap();
+        let is_valid = verify(&pool, "").await.unwrap();
+
+        assert!(!is_valid);
+    }
+
+    #[tokio::test]
+    async fn test_verify_updates_last_used_at() {
+        let pool = test_pool().await;
+
+        let key = create(&pool, "test-key").await.unwrap();
 
         // Initially last_used_at should be None
-        let keys = list(&pool).unwrap();
+        let keys = list(&pool).await.unwrap();
         assert!(keys[0].last_used_at.is_none());
 
         // Verify the key (which updates last_used_at)
-        verify(&pool, &key).unwrap();
+        verify(&pool, &key).await.unwrap();
 
         // Now last_used_at should be set
-        let keys = list(&pool).unwrap();
+        let keys = list(&pool).await.unwrap();
         assert!(keys[0].last_used_at.is_some());
     }
 
-    #[test]
-    fn test_list_api_keys() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_list_api_keys() {
+        let pool = test_pool().await;
 
-        create(&pool, "key-alpha").unwrap();
-        create(&pool, "key-beta").unwrap();
+        create(&pool, "key-alpha").await.unwrap();
+        create(&pool, "key-beta").await.unwrap();
 
-        let keys = list(&pool).unwrap();
+        let keys = list(&pool).await.unwrap();
 
         assert_eq!(keys.len(), 2);
         // Should be ordered by created_at
@@ -175,11 +165,11 @@ mod tests {
         assert_eq!(keys[1].name, "key-beta");
     }
 
-    #[test]
-    fn test_list_empty() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_list_empty() {
+        let pool = test_pool().await;
 
-        let keys = list(&pool).unwrap();
+        let keys = list(&pool).await.unwrap();
 
         assert!(keys.is_empty());
     }
@@ -210,13 +200,13 @@ mod tests {
         assert_eq!(hash.len(), 64);
     }
 
-    #[test]
-    fn test_api_key_struct_fields() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_api_key_struct_fields() {
+        let pool = test_pool().await;
 
-        create(&pool, "my-api-key").unwrap();
+        create(&pool, "my-api-key").await.unwrap();
 
-        let keys = list(&pool).unwrap();
+        let keys = list(&pool).await.unwrap();
         let key = &keys[0];
 
         assert!(key.id > 0);

@@ -24,9 +24,13 @@ tokio = { version = "1", features = ["full"] }
 rama = { version = "0.3.0", features = ["http-full"] }
 
 # Database
-rusqlite = { version = "0.31", features = ["bundled"] }
-r2d2 = "0.8"
-r2d2_sqlite = "0.24"
+sqlx = { version = "0.9.0", default-features = false, features = [
+    "sqlite",
+    "sqlite-bundled",
+    "runtime-tokio",
+    "macros",
+    "migrate",
+] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

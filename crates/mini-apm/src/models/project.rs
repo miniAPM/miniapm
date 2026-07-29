@@ -3,7 +3,7 @@ use chrono::Utc;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Project {
     pub id: i64,
     pub name: String,
@@ -19,17 +19,6 @@ fn generate_api_key() -> String {
     format!("proj_{}", hex::encode(bytes))
 }
 
-/// Helper function to map a database row to a Project struct
-fn map_row_to_project(row: &rusqlite::Row) -> rusqlite::Result<Project> {
-    Ok(Project {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        slug: row.get(2)?,
-        api_key: row.get(3)?,
-        created_at: row.get(4)?,
-    })
-}
-
 /// Generate a slug from project name
 fn slugify(name: &str) -> String {
     name.to_lowercase()
@@ -43,25 +32,30 @@ fn slugify(name: &str) -> String {
 }
 
 /// Ensure default project exists when projects are enabled
-pub fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
-    let conn = pool.get()?;
-
+pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
     // Check if any project exists
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))?;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects")
+        .fetch_one(pool)
+        .await?;
 
     if count == 0 {
         let now = Utc::now().to_rfc3339();
         let api_key = generate_api_key();
 
-        conn.execute(
+        let result = sqlx::query(
             "INSERT INTO projects (name, slug, api_key, created_at) VALUES (?1, ?2, ?3, ?4)",
-            ("Default", "default", &api_key, &now),
-        )?;
+        )
+        .bind("Default")
+        .bind("default")
+        .bind(&api_key)
+        .bind(&now)
+        .execute(pool)
+        .await?;
 
         tracing::info!("Created default project with API key: {}", api_key);
 
         return Ok(Project {
-            id: conn.last_insert_rowid(),
+            id: result.last_insert_rowid(),
             name: "Default".to_string(),
             slug: "default".to_string(),
             api_key,
@@ -70,91 +64,80 @@ pub fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
     }
 
     // Return first project
-    let project = conn.query_row(
+    let project = sqlx::query_as::<_, Project>(
         "SELECT id, name, slug, api_key, created_at FROM projects ORDER BY id LIMIT 1",
-        [],
-        map_row_to_project,
-    )?;
+    )
+    .fetch_one(pool)
+    .await?;
 
     Ok(project)
 }
 
 /// List all projects
-pub fn list_all(pool: &DbPool) -> anyhow::Result<Vec<Project>> {
-    let conn = pool.get()?;
-    let mut stmt = conn.prepare(
-        "SELECT id, name, slug, api_key, strftime('%Y-%m-%d %H:%M', created_at) FROM projects ORDER BY name",
-    )?;
-
-    let projects = stmt
-        .query_map([], map_row_to_project)?
-        .collect::<Result<Vec<_>, _>>()?;
+pub async fn list_all(pool: &DbPool) -> anyhow::Result<Vec<Project>> {
+    let projects = sqlx::query_as::<_, Project>(
+        "SELECT id, name, slug, api_key, strftime('%Y-%m-%d %H:%M', created_at) AS created_at FROM projects ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await?;
 
     Ok(projects)
 }
 
 /// Find project by ID
-pub fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<Project>> {
-    let conn = pool.get()?;
-
-    let project = conn
-        .query_row(
-            "SELECT id, name, slug, api_key, created_at FROM projects WHERE id = ?1",
-            [id],
-            map_row_to_project,
-        )
-        .ok();
+pub async fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<Project>> {
+    let project = sqlx::query_as::<_, Project>(
+        "SELECT id, name, slug, api_key, created_at FROM projects WHERE id = ?1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
 
     Ok(project)
 }
 
 /// Find project by slug
-pub fn find_by_slug(pool: &DbPool, slug: &str) -> anyhow::Result<Option<Project>> {
-    let conn = pool.get()?;
-
-    let project = conn
-        .query_row(
-            "SELECT id, name, slug, api_key, created_at FROM projects WHERE slug = ?1",
-            [slug],
-            map_row_to_project,
-        )
-        .ok();
+pub async fn find_by_slug(pool: &DbPool, slug: &str) -> anyhow::Result<Option<Project>> {
+    let project = sqlx::query_as::<_, Project>(
+        "SELECT id, name, slug, api_key, created_at FROM projects WHERE slug = ?1",
+    )
+    .bind(slug)
+    .fetch_optional(pool)
+    .await?;
 
     Ok(project)
 }
 
 /// Find project by API key
-pub fn find_by_api_key(pool: &DbPool, api_key: &str) -> anyhow::Result<Option<Project>> {
-    let conn = pool.get()?;
-
-    let project = conn
-        .query_row(
-            "SELECT id, name, slug, api_key, created_at FROM projects WHERE api_key = ?1",
-            [api_key],
-            map_row_to_project,
-        )
-        .ok();
+pub async fn find_by_api_key(pool: &DbPool, api_key: &str) -> anyhow::Result<Option<Project>> {
+    let project = sqlx::query_as::<_, Project>(
+        "SELECT id, name, slug, api_key, created_at FROM projects WHERE api_key = ?1",
+    )
+    .bind(api_key)
+    .fetch_optional(pool)
+    .await?;
 
     Ok(project)
 }
 
 /// Create a new project
-pub fn create(pool: &DbPool, name: &str) -> anyhow::Result<Project> {
-    let conn = pool.get()?;
-
+pub async fn create(pool: &DbPool, name: &str) -> anyhow::Result<Project> {
     let now = Utc::now().to_rfc3339();
     let slug = slugify(name);
     let api_key = generate_api_key();
 
-    conn.execute(
+    let result = sqlx::query(
         "INSERT INTO projects (name, slug, api_key, created_at) VALUES (?1, ?2, ?3, ?4)",
-        (name, &slug, &api_key, &now),
-    )?;
-
-    let project_id = conn.last_insert_rowid();
+    )
+    .bind(name)
+    .bind(&slug)
+    .bind(&api_key)
+    .bind(&now)
+    .execute(pool)
+    .await?;
 
     Ok(Project {
-        id: project_id,
+        id: result.last_insert_rowid(),
         name: name.to_string(),
         slug,
         api_key,
@@ -163,29 +146,32 @@ pub fn create(pool: &DbPool, name: &str) -> anyhow::Result<Project> {
 }
 
 /// Delete a project
-pub fn delete(pool: &DbPool, id: i64) -> anyhow::Result<()> {
-    let conn = pool.get()?;
-    conn.execute("DELETE FROM projects WHERE id = ?1", [id])?;
+pub async fn delete(pool: &DbPool, id: i64) -> anyhow::Result<()> {
+    sqlx::query("DELETE FROM projects WHERE id = ?1")
+        .bind(id)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 /// Regenerate API key for a project
-pub fn regenerate_api_key(pool: &DbPool, id: i64) -> anyhow::Result<String> {
-    let conn = pool.get()?;
+pub async fn regenerate_api_key(pool: &DbPool, id: i64) -> anyhow::Result<String> {
     let new_key = generate_api_key();
 
-    conn.execute(
-        "UPDATE projects SET api_key = ?1 WHERE id = ?2",
-        (&new_key, id),
-    )?;
+    sqlx::query("UPDATE projects SET api_key = ?1 WHERE id = ?2")
+        .bind(&new_key)
+        .bind(id)
+        .execute(pool)
+        .await?;
 
     Ok(new_key)
 }
 
 /// Get project count
-pub fn count(pool: &DbPool) -> anyhow::Result<i64> {
-    let conn = pool.get()?;
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))?;
+pub async fn count(pool: &DbPool) -> anyhow::Result<i64> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects")
+        .fetch_one(pool)
+        .await?;
     Ok(count)
 }
 
@@ -195,12 +181,12 @@ mod tests {
     use crate::config::Config;
     use crate::db;
 
-    fn test_pool() -> DbPool {
+    async fn test_pool() -> DbPool {
         let config = Config {
             sqlite_path: ":memory:".to_string(),
             ..Default::default()
         };
-        db::init(&config).expect("Failed to create test database")
+        db::init(&config).await.expect("Failed to create test database")
     }
 
     #[test]
@@ -237,129 +223,129 @@ mod tests {
         assert_eq!(slugify("  Project  "), "project");
     }
 
-    #[test]
-    fn test_ensure_default_project_creates_one() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_ensure_default_project_creates_one() {
+        let pool = test_pool().await;
 
-        let project = ensure_default_project(&pool).unwrap();
+        let project = ensure_default_project(&pool).await.unwrap();
 
         assert_eq!(project.name, "Default");
         assert_eq!(project.slug, "default");
         assert!(project.api_key.starts_with("proj_"));
     }
 
-    #[test]
-    fn test_ensure_default_project_returns_existing() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_ensure_default_project_returns_existing() {
+        let pool = test_pool().await;
 
-        let project1 = ensure_default_project(&pool).unwrap();
-        let project2 = ensure_default_project(&pool).unwrap();
+        let project1 = ensure_default_project(&pool).await.unwrap();
+        let project2 = ensure_default_project(&pool).await.unwrap();
 
         assert_eq!(project1.id, project2.id);
         assert_eq!(project1.api_key, project2.api_key);
     }
 
-    #[test]
-    fn test_create_project() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_create_project() {
+        let pool = test_pool().await;
 
-        let project = create(&pool, "Test Project").unwrap();
+        let project = create(&pool, "Test Project").await.unwrap();
 
         assert_eq!(project.name, "Test Project");
         assert_eq!(project.slug, "test-project");
         assert!(project.api_key.starts_with("proj_"));
     }
 
-    #[test]
-    fn test_find_project_by_id() {
-        let pool = test_pool();
-        let created = create(&pool, "Find Me").unwrap();
+    #[tokio::test]
+    async fn test_find_project_by_id() {
+        let pool = test_pool().await;
+        let created = create(&pool, "Find Me").await.unwrap();
 
-        let found = find(&pool, created.id).unwrap();
+        let found = find(&pool, created.id).await.unwrap();
 
         assert!(found.is_some());
         assert_eq!(found.unwrap().name, "Find Me");
     }
 
-    #[test]
-    fn test_find_project_by_id_not_found() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_find_project_by_id_not_found() {
+        let pool = test_pool().await;
 
-        let found = find(&pool, 99999).unwrap();
+        let found = find(&pool, 99999).await.unwrap();
 
         assert!(found.is_none());
     }
 
-    #[test]
-    fn test_find_project_by_slug() {
-        let pool = test_pool();
-        create(&pool, "My App").unwrap();
+    #[tokio::test]
+    async fn test_find_project_by_slug() {
+        let pool = test_pool().await;
+        create(&pool, "My App").await.unwrap();
 
-        let found = find_by_slug(&pool, "my-app").unwrap();
+        let found = find_by_slug(&pool, "my-app").await.unwrap();
 
         assert!(found.is_some());
         assert_eq!(found.unwrap().name, "My App");
     }
 
-    #[test]
-    fn test_find_project_by_api_key() {
-        let pool = test_pool();
-        let created = create(&pool, "API Test").unwrap();
+    #[tokio::test]
+    async fn test_find_project_by_api_key() {
+        let pool = test_pool().await;
+        let created = create(&pool, "API Test").await.unwrap();
 
-        let found = find_by_api_key(&pool, &created.api_key).unwrap();
+        let found = find_by_api_key(&pool, &created.api_key).await.unwrap();
 
         assert!(found.is_some());
         assert_eq!(found.unwrap().id, created.id);
     }
 
-    #[test]
-    fn test_list_all_projects() {
-        let pool = test_pool();
-        create(&pool, "Project A").unwrap();
-        create(&pool, "Project B").unwrap();
-        create(&pool, "Project C").unwrap();
+    #[tokio::test]
+    async fn test_list_all_projects() {
+        let pool = test_pool().await;
+        create(&pool, "Project A").await.unwrap();
+        create(&pool, "Project B").await.unwrap();
+        create(&pool, "Project C").await.unwrap();
 
-        let projects = list_all(&pool).unwrap();
+        let projects = list_all(&pool).await.unwrap();
 
         assert_eq!(projects.len(), 3);
     }
 
-    #[test]
-    fn test_delete_project() {
-        let pool = test_pool();
-        let created = create(&pool, "Delete Me").unwrap();
+    #[tokio::test]
+    async fn test_delete_project() {
+        let pool = test_pool().await;
+        let created = create(&pool, "Delete Me").await.unwrap();
 
-        delete(&pool, created.id).unwrap();
+        delete(&pool, created.id).await.unwrap();
 
-        let found = find(&pool, created.id).unwrap();
+        let found = find(&pool, created.id).await.unwrap();
         assert!(found.is_none());
     }
 
-    #[test]
-    fn test_regenerate_api_key() {
-        let pool = test_pool();
-        let created = create(&pool, "Regen Test").unwrap();
+    #[tokio::test]
+    async fn test_regenerate_api_key() {
+        let pool = test_pool().await;
+        let created = create(&pool, "Regen Test").await.unwrap();
         let old_key = created.api_key.clone();
 
-        let new_key = regenerate_api_key(&pool, created.id).unwrap();
+        let new_key = regenerate_api_key(&pool, created.id).await.unwrap();
 
         assert_ne!(old_key, new_key);
         assert!(new_key.starts_with("proj_"));
 
-        let found = find(&pool, created.id).unwrap().unwrap();
+        let found = find(&pool, created.id).await.unwrap().unwrap();
         assert_eq!(found.api_key, new_key);
     }
 
-    #[test]
-    fn test_count_projects() {
-        let pool = test_pool();
+    #[tokio::test]
+    async fn test_count_projects() {
+        let pool = test_pool().await;
 
-        assert_eq!(count(&pool).unwrap(), 0);
+        assert_eq!(count(&pool).await.unwrap(), 0);
 
-        create(&pool, "One").unwrap();
-        assert_eq!(count(&pool).unwrap(), 1);
+        create(&pool, "One").await.unwrap();
+        assert_eq!(count(&pool).await.unwrap(), 1);
 
-        create(&pool, "Two").unwrap();
-        assert_eq!(count(&pool).unwrap(), 2);
+        create(&pool, "Two").await.unwrap();
+        assert_eq!(count(&pool).await.unwrap(), 2);
     }
 }
