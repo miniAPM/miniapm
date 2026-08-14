@@ -1,6 +1,6 @@
 use crate::config::Config;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
@@ -11,9 +11,7 @@ pub async fn init(config: &Config) -> anyhow::Result<DbPool> {
     let is_memory = config.sqlite_path == ":memory:";
 
     // Ensure data directory exists
-    if !is_memory
-        && let Some(parent) = Path::new(&config.sqlite_path).parent()
-    {
+    if !is_memory && let Some(parent) = Path::new(&config.sqlite_path).parent() {
         fs::create_dir_all(parent)?;
     }
 
@@ -94,13 +92,12 @@ mod tests {
         ];
 
         for table in tables {
-            let exists: Option<i64> = sqlx::query_scalar(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1",
-            )
-            .bind(table)
-            .fetch_optional(&pool)
-            .await
-            .unwrap();
+            let exists: Option<i64> =
+                sqlx::query_scalar("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1")
+                    .bind(table)
+                    .fetch_optional(&pool)
+                    .await
+                    .unwrap();
             assert!(exists.is_some(), "Table {} should exist", table);
         }
     }
@@ -118,13 +115,12 @@ mod tests {
         ];
 
         for index in indexes {
-            let exists: Option<i64> = sqlx::query_scalar(
-                "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1",
-            )
-            .bind(index)
-            .fetch_optional(&pool)
-            .await
-            .unwrap();
+            let exists: Option<i64> =
+                sqlx::query_scalar("SELECT 1 FROM sqlite_master WHERE type='index' AND name=?1")
+                    .bind(index)
+                    .fetch_optional(&pool)
+                    .await
+                    .unwrap();
             assert!(exists.is_some(), "Index {} should exist", index);
         }
     }

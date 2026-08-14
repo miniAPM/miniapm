@@ -351,7 +351,16 @@ pub async fn occurrences(
     let occs = rows
         .into_iter()
         .map(
-            |(id, error_id, request_id, user_id, backtrace_str, params_str, happened_at, source_context_str)| {
+            |(
+                id,
+                error_id,
+                request_id,
+                user_id,
+                backtrace_str,
+                params_str,
+                happened_at,
+                source_context_str,
+            )| {
                 ErrorOccurrence {
                     id,
                     error_id,
@@ -369,7 +378,11 @@ pub async fn occurrences(
     Ok(occs)
 }
 
-pub async fn count_since(pool: &DbPool, project_id: Option<i64>, since: &str) -> anyhow::Result<i64> {
+pub async fn count_since(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: &str,
+) -> anyhow::Result<i64> {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM error_occurrences eo
          JOIN errors e ON e.id = eo.error_id

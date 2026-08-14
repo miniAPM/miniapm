@@ -13,7 +13,8 @@ pub async fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
 
     // Delete old error occurrences
     let errors_cutoff = (Utc::now() - Duration::days(config.retention_days_errors)).to_rfc3339();
-    let deleted_occurrences = models::error::delete_occurrences_before(pool, &errors_cutoff).await?;
+    let deleted_occurrences =
+        models::error::delete_occurrences_before(pool, &errors_cutoff).await?;
     tracing::info!("Deleted {} old error occurrences", deleted_occurrences);
 
     // Delete old hourly rollups
@@ -50,7 +51,9 @@ mod tests {
 
     async fn test_pool() -> DbPool {
         let config = Config::default();
-        db::init(&config).await.expect("Failed to create test database")
+        db::init(&config)
+            .await
+            .expect("Failed to create test database")
     }
 
     fn test_config() -> Config {

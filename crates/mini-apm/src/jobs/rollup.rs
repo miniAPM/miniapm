@@ -143,7 +143,9 @@ mod tests {
 
     async fn test_pool() -> DbPool {
         let config = Config::default();
-        db::init(&config).await.expect("Failed to create test database")
+        db::init(&config)
+            .await
+            .expect("Failed to create test database")
     }
 
     #[tokio::test]

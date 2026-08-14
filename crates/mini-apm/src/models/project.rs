@@ -186,7 +186,9 @@ mod tests {
             sqlite_path: ":memory:".to_string(),
             ..Default::default()
         };
-        db::init(&config).await.expect("Failed to create test database")
+        db::init(&config)
+            .await
+            .expect("Failed to create test database")
     }
 
     #[test]

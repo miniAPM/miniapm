@@ -34,7 +34,9 @@ pub async fn index(State(pool): State<DbPool>) -> HtmlTemplate<DashboardTemplate
     let project_id = ctx.project_id();
     let since = (Utc::now() - Duration::hours(24)).to_rfc3339();
 
-    let requests_24h = span::count_since(&pool, project_id, &since).await.unwrap_or(0);
+    let requests_24h = span::count_since(&pool, project_id, &since)
+        .await
+        .unwrap_or(0);
     let errors_24h = models::error::count_since(&pool, project_id, &since)
         .await
         .unwrap_or(0);

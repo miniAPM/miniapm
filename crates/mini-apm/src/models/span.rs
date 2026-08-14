@@ -446,8 +446,7 @@ pub async fn backfill_errors_from_spans(pool: &DbPool) -> anyhow::Result<usize> 
     for (project_id, trace_id, events_json, happened_at) in rows {
         if let Ok(events) = serde_json::from_str::<Vec<SpanEvent>>(&events_json) {
             let events_opt = Some(events);
-            extract_and_insert_errors(pool, &events_opt, &trace_id, &happened_at, project_id)
-                .await;
+            extract_and_insert_errors(pool, &events_opt, &trace_id, &happened_at, project_id).await;
             count += 1;
         }
     }
@@ -926,7 +925,11 @@ pub async fn delete_before(pool: &DbPool, before: &str) -> anyhow::Result<usize>
     Ok(result.rows_affected() as usize)
 }
 
-pub async fn count_since(pool: &DbPool, project_id: Option<i64>, since: &str) -> anyhow::Result<i64> {
+pub async fn count_since(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: &str,
+) -> anyhow::Result<i64> {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM spans WHERE parent_span_id IS NULL AND (?1 IS NULL OR project_id = ?1) AND happened_at >= ?2",
     )

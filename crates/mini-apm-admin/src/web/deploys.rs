@@ -30,7 +30,9 @@ pub async fn index(State(pool): State<DbPool>, request: Request) -> HtmlTemplate
         projects_enabled: false,
     };
     let project_id = ctx.project_id();
-    let deploys = deploy::list(&pool, project_id, 50).await.unwrap_or_default();
+    let deploys = deploy::list(&pool, project_id, 50)
+        .await
+        .unwrap_or_default();
 
     let api_key = project::ensure_default_project(&pool)
         .await

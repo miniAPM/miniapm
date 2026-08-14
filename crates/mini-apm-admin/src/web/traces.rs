@@ -121,7 +121,9 @@ pub async fn show(
         projects: vec![],
         projects_enabled: false,
     };
-    let trace = models::span::get_trace(&pool, &trace_id).await.unwrap_or(None);
+    let trace = models::span::get_trace(&pool, &trace_id)
+        .await
+        .unwrap_or(None);
 
     // Detect N+1 issues
     let n_plus_1_issues = if let Some(ref t) = trace {

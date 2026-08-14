@@ -397,8 +397,9 @@ pub async fn create_with_invite(
 /// Find user by invite token
 pub async fn find_by_invite_token(pool: &DbPool, token: &str) -> anyhow::Result<Option<User>> {
     let now = Utc::now().to_rfc3339();
-    let sql =
-        format!("SELECT {USER_COLUMNS} FROM users WHERE invite_token = ?1 AND invite_expires_at > ?2");
+    let sql = format!(
+        "SELECT {USER_COLUMNS} FROM users WHERE invite_token = ?1 AND invite_expires_at > ?2"
+    );
 
     let user: Option<User> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(token)
@@ -446,7 +447,9 @@ mod tests {
 
     async fn test_pool() -> DbPool {
         let config = Config::default();
-        db::init(&config).await.expect("Failed to create test database")
+        db::init(&config)
+            .await
+            .expect("Failed to create test database")
     }
 
     #[test]
@@ -576,7 +579,9 @@ mod tests {
     async fn test_create_user() {
         let pool = test_pool().await;
 
-        let id = create(&pool, "testuser", "password123", false).await.unwrap();
+        let id = create(&pool, "testuser", "password123", false)
+            .await
+            .unwrap();
 
         let user = find(&pool, id).await.unwrap().unwrap();
         assert_eq!(user.username, "testuser");
@@ -687,7 +692,9 @@ mod tests {
     #[tokio::test]
     async fn test_verify_password_for_user_success() {
         let pool = test_pool().await;
-        let user_id = create(&pool, "verifyuser", "mypassword", false).await.unwrap();
+        let user_id = create(&pool, "verifyuser", "mypassword", false)
+            .await
+            .unwrap();
 
         let result = verify_password_for_user(&pool, user_id, "mypassword")
             .await
@@ -699,7 +706,9 @@ mod tests {
     #[tokio::test]
     async fn test_verify_password_for_user_wrong_password() {
         let pool = test_pool().await;
-        let user_id = create(&pool, "verifyuser2", "mypassword", false).await.unwrap();
+        let user_id = create(&pool, "verifyuser2", "mypassword", false)
+            .await
+            .unwrap();
 
         let result = verify_password_for_user(&pool, user_id, "wrongpassword")
             .await
