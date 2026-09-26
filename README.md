@@ -118,6 +118,7 @@ curl -X POST http://localhost:3000/ingest/errors \
     "exception_class": "RuntimeError",
     "message": "Something went wrong",
     "backtrace": ["app/models/user.rb:42:in `validate'"],
+    "fingerprint": "RuntimeError:app/models/user.rb:42",
     "context": {"user_id": 123}
   }'
 ```
