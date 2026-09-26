@@ -46,7 +46,7 @@ usage-lib = { version = "6.11", default-features = false, features = ["cli-help"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Utils
-jiff = "0.2"
+jiff = { version = "0.2", features = ["serde"] }
 sha2 = "0.10"
 hex = "0.4"
 rand = "0.8"

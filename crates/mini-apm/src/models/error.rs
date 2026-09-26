@@ -1,5 +1,6 @@
 use crate::DbPool;
 use crate::time;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -66,7 +67,7 @@ pub struct IncomingError {
     pub request_id: Option<String>,
     pub user_id: Option<String>,
     pub params: Option<serde_json::Value>,
-    pub timestamp: Option<String>,
+    pub timestamp: Option<Timestamp>,
     pub source_context: Option<IncomingSourceContext>,
 }
 
@@ -87,8 +88,7 @@ pub async fn insert(
     error: &IncomingError,
     project_id: Option<i64>,
 ) -> anyhow::Result<i64> {
-    let now = time::now_rfc3339();
-    let timestamp = error.timestamp.as_deref().unwrap_or(&now);
+    let timestamp = time::rfc3339(error.timestamp.unwrap_or_else(Timestamp::now));
 
     // Generate location-based fingerprint for smart grouping
     let location_fingerprint =
@@ -110,7 +110,7 @@ pub async fn insert(
         sqlx::query(
             "UPDATE errors SET last_seen_at = ?1, occurrence_count = occurrence_count + 1 WHERE id = ?2",
         )
-        .bind(timestamp)
+        .bind(&timestamp)
         .bind(id)
         .execute(pool)
         .await?;
@@ -125,7 +125,7 @@ pub async fn insert(
             sqlx::query(
                 "UPDATE errors SET last_seen_at = ?1, occurrence_count = occurrence_count + 1 WHERE id = ?2",
             )
-            .bind(timestamp)
+            .bind(&timestamp)
             .bind(id)
             .execute(pool)
             .await?;
@@ -148,8 +148,8 @@ pub async fn insert(
             .bind(&location_fingerprint)
             .bind(&error.exception_class)
             .bind(&error.message)
-            .bind(timestamp)
-            .bind(timestamp)
+            .bind(&timestamp)
+            .bind(&timestamp)
             .fetch_one(pool)
             .await?
         }
@@ -179,7 +179,7 @@ pub async fn insert(
     .bind(error.user_id.as_deref())
     .bind(serde_json::to_string(&error.backtrace)?)
     .bind(error.params.as_ref().and_then(|p| serde_json::to_string(p).ok()))
-    .bind(timestamp)
+    .bind(&timestamp)
     .bind(source_context_json)
     .execute(pool)
     .await?;

@@ -2,7 +2,7 @@ use crate::DbPool;
 use crate::time;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use jiff::Timestamp;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::Row;
 use std::collections::HashMap;
 
@@ -49,8 +49,10 @@ pub struct OtlpSpan {
     pub parent_span_id: Option<String>,
     pub name: String,
     pub kind: Option<i32>,
-    pub start_time_unix_nano: String,
-    pub end_time_unix_nano: String,
+    #[serde(deserialize_with = "int64")]
+    pub start_time_unix_nano: i64,
+    #[serde(deserialize_with = "int64")]
+    pub end_time_unix_nano: i64,
     pub attributes: Option<Vec<KeyValue>>,
     pub events: Option<Vec<SpanEvent>>,
     pub status: Option<SpanStatus>,
@@ -66,6 +68,7 @@ pub struct KeyValue {
 #[serde(rename_all = "camelCase")]
 pub struct AttributeValue {
     pub string_value: Option<String>,
+    #[serde(default, deserialize_with = "int64_string")]
     pub int_value: Option<String>,
     pub double_value: Option<f64>,
     pub bool_value: Option<bool>,
@@ -81,8 +84,35 @@ pub struct ArrayValue {
 #[serde(rename_all = "camelCase")]
 pub struct SpanEvent {
     pub name: String,
+    #[serde(default, deserialize_with = "int64_string")]
     pub time_unix_nano: Option<String>,
     pub attributes: Option<Vec<KeyValue>>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum Int64 {
+    Number(i64),
+    String(String),
+}
+
+impl Int64 {
+    fn into_i64<E: serde::de::Error>(self) -> Result<i64, E> {
+        match self {
+            Int64::Number(n) => Ok(n),
+            Int64::String(s) => s.parse().map_err(E::custom),
+        }
+    }
+}
+
+fn int64<'de, D: Deserializer<'de>>(d: D) -> Result<i64, D::Error> {
+    Int64::deserialize(d)?.into_i64()
+}
+
+fn int64_string<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Option::<Int64>::deserialize(d)?
+        .map(|v| v.into_i64().map(|n| n.to_string()))
+        .transpose()
 }
 
 #[derive(Debug, Deserialize)]
@@ -499,7 +529,7 @@ async fn extract_and_insert_errors(
             request_id: Some(trace_id.to_string()),
             user_id: None,
             params: None,
-            timestamp: Some(happened_at.to_string()),
+            timestamp: happened_at.parse().ok(),
             source_context: None,
         };
 
@@ -557,8 +587,8 @@ pub async fn insert_otlp_batch(
                     .filter(|s| !s.is_empty())
                     .map(|s| decode_id(s));
 
-                let start_nano: i64 = otlp_span.start_time_unix_nano.parse()?;
-                let end_nano: i64 = otlp_span.end_time_unix_nano.parse()?;
+                let start_nano = otlp_span.start_time_unix_nano;
+                let end_nano = otlp_span.end_time_unix_nano;
                 let duration_ms = (end_nano - start_nano) as f64 / 1_000_000.0;
 
                 let happened_at = Timestamp::from_nanosecond(start_nano.into())?

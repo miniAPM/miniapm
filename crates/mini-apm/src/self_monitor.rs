@@ -84,8 +84,8 @@ impl SelfMonitor {
             parent_span_id: None,
             name: format!("{method} {}", route_of(path)),
             kind: Some(2),
-            start_time_unix_nano: start.as_nanosecond().to_string(),
-            end_time_unix_nano: end.as_nanosecond().to_string(),
+            start_time_unix_nano: start.as_nanosecond() as i64,
+            end_time_unix_nano: end.as_nanosecond() as i64,
             attributes: Some(vec![
                 attribute("http.method", method),
                 attribute("http.target", path),

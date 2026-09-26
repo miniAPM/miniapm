@@ -1,5 +1,6 @@
 use crate::DbPool;
 use crate::time;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -31,7 +32,7 @@ pub struct IncomingDeploy {
     pub env: Option<String>,
     pub description: Option<String>,
     pub deployer: Option<String>,
-    pub timestamp: Option<String>,
+    pub timestamp: Option<Timestamp>,
 }
 
 pub async fn insert(
@@ -39,8 +40,7 @@ pub async fn insert(
     deploy: &IncomingDeploy,
     project_id: Option<i64>,
 ) -> anyhow::Result<i64> {
-    let now = time::now_rfc3339();
-    let timestamp = deploy.timestamp.as_deref().unwrap_or(&now);
+    let timestamp = time::rfc3339(deploy.timestamp.unwrap_or_else(Timestamp::now));
 
     let result = sqlx::query(
         r#"
@@ -269,7 +269,7 @@ mod tests {
             env: None,
             description: None,
             deployer: None,
-            timestamp: Some("2024-01-01T00:00:00Z".to_string()),
+            timestamp: Some("2024-01-01T00:00:00Z".parse().unwrap()),
         };
         insert(&pool, &incoming1, None).await.unwrap();
 
@@ -279,7 +279,7 @@ mod tests {
             env: None,
             description: None,
             deployer: None,
-            timestamp: Some("2024-01-02T00:00:00Z".to_string()),
+            timestamp: Some("2024-01-02T00:00:00Z".parse().unwrap()),
         };
         insert(&pool, &incoming2, None).await.unwrap();
 
@@ -304,7 +304,7 @@ mod tests {
             env: None,
             description: None,
             deployer: None,
-            timestamp: Some("2020-01-01T00:00:00Z".to_string()),
+            timestamp: Some("2020-01-01T00:00:00Z".parse().unwrap()),
         };
         insert(&pool, &old, None).await.unwrap();
 
@@ -314,7 +314,7 @@ mod tests {
             env: None,
             description: None,
             deployer: None,
-            timestamp: Some("2024-01-01T00:00:00Z".to_string()),
+            timestamp: Some("2024-01-01T00:00:00Z".parse().unwrap()),
         };
         insert(&pool, &recent, None).await.unwrap();
 

@@ -125,3 +125,56 @@ async fn test_routes_summary_for_route_without_db_spans() {
             .unwrap();
     assert_eq!(routes.len(), 1);
 }
+
+#[tokio::test]
+async fn test_ingest_validates_payloads() {
+    let (app, pool, project) = setup().await;
+    let span = |id: u8, start: &str| {
+        format!(
+            r#"{{"resourceSpans":[{{"scopeSpans":[{{"spans":[{{"traceId":"0af7651916cd43dd8448eb211c80319c","spanId":"b7ad6b716920333{id}","name":"x","startTimeUnixNano":{start},"endTimeUnixNano":"2000000000"}}]}}]}}]}}"#
+        )
+    };
+
+    for (uri, body, expected) in [
+        (
+            "/ingest/v1/traces",
+            span(1, "1000000000"),
+            StatusCode::ACCEPTED,
+        ),
+        (
+            "/ingest/v1/traces",
+            span(2, r#""1000000000""#),
+            StatusCode::ACCEPTED,
+        ),
+        (
+            "/ingest/v1/traces",
+            span(3, r#""soon""#),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "/ingest/deploys",
+            r#"{"git_sha":"a","timestamp":"2026-09-26T10:49:01Z"}"#.into(),
+            StatusCode::ACCEPTED,
+        ),
+        (
+            "/ingest/deploys",
+            r#"{"git_sha":"b","timestamp":"yesterday"}"#.into(),
+            StatusCode::BAD_REQUEST,
+        ),
+    ] {
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", project.api_key))
+            .body(Body::from(body.clone()))
+            .unwrap();
+        assert_eq!(app.serve(req).await.unwrap().status(), expected, "{body}");
+    }
+
+    let deployed_at: String = sqlx::query_scalar("SELECT deployed_at FROM deploys")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(deployed_at, "2026-09-26T10:49:01+00:00");
+}
