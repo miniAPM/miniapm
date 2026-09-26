@@ -31,6 +31,7 @@ pub async fn index(
     let project_id = ctx.project_id();
     let deploys = deploy::list(&pool, project_id, 50)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load deploys: {e:#}"))
         .unwrap_or_default();
 
     let api_key = ctx

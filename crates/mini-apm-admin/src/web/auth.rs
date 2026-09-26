@@ -76,6 +76,7 @@ pub async fn get_current_user(pool: &DbPool, req: &rama::http::Request) -> Optio
     let token = get_cookie(req, SESSION_COOKIE)?;
     models::user::get_user_from_session(pool, &token)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load session user: {e:#}"))
         .ok()
         .flatten()
 }
@@ -87,10 +88,16 @@ pub async fn login_page() -> Response {
 }
 
 pub async fn login_submit(State(pool): State<DbPool>, Form(form): Form<LoginForm>) -> Response {
-    match models::user::authenticate(&pool, &form.username, &form.password).await {
+    match models::user::authenticate(&pool, &form.username, &form.password)
+        .await
+        .inspect_err(|e| tracing::error!("Failed to authenticate: {e:#}"))
+    {
         Ok(Some(user)) => {
             // Create session
-            match models::user::create_session(&pool, user.id).await {
+            match models::user::create_session(&pool, user.id)
+                .await
+                .inspect_err(|e| tracing::error!("Failed to create session: {e:#}"))
+            {
                 Ok(token) => {
                     let cookie_header = set_cookie_header(SESSION_COOKIE, &token, 7 * 86400);
 
@@ -174,6 +181,7 @@ pub async fn change_password_submit(
     if !current_user.must_change_password && !form.current_password.is_empty() {
         match models::user::verify_password_for_user(&pool, current_user.id, &form.current_password)
             .await
+            .inspect_err(|e| tracing::error!("Failed to verify password: {e:#}"))
         {
             Ok(true) => {} // Password verified, continue
             Ok(false) => {
@@ -201,7 +209,10 @@ pub async fn change_password_submit(
     }
 
     // Change password
-    match models::user::change_password(&pool, current_user.id, &form.new_password).await {
+    match models::user::change_password(&pool, current_user.id, &form.new_password)
+        .await
+        .inspect_err(|e| tracing::error!("Failed to change password: {e:#}"))
+    {
         Ok(_) => Redirect::to("/").into_response(),
         Err(_) => HtmlTemplate(ChangePasswordTemplate {
             error: Some("Failed to change password".to_string()),
@@ -231,7 +242,10 @@ async fn render_users_page(
     success: Option<String>,
     invite_url: Option<String>,
 ) -> Response {
-    let users = models::user::list_all(pool).await.unwrap_or_default();
+    let users = models::user::list_all(pool)
+        .await
+        .inspect_err(|e| tracing::error!("Failed to load users: {e:#}"))
+        .unwrap_or_default();
     let ctx = WebProjectContext {
         current_project: None,
         projects: vec![],
@@ -283,7 +297,10 @@ pub async fn create_user(
 
     let is_admin = form.is_admin.as_deref() == Some("on");
 
-    match models::user::create_with_invite(&pool, &form.username, is_admin).await {
+    match models::user::create_with_invite(&pool, &form.username, is_admin)
+        .await
+        .inspect_err(|e| tracing::warn!("Failed to create user: {e:#}"))
+    {
         Ok(invite_token) => {
             let base_url = std::env::var("MINI_APM_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".to_string());
@@ -339,7 +356,10 @@ pub async fn delete_user(
         .await;
     }
 
-    match models::user::delete(&pool, form.user_id).await {
+    match models::user::delete(&pool, form.user_id)
+        .await
+        .inspect_err(|e| tracing::error!("Failed to delete user: {e:#}"))
+    {
         Ok(_) => {
             render_users_page(
                 &pool,
@@ -383,7 +403,10 @@ fn invalid_invite_response() -> Response {
 }
 
 pub async fn invite_page(State(pool): State<DbPool>, Path(token): Path<String>) -> Response {
-    match models::user::find_by_invite_token(&pool, &token).await {
+    match models::user::find_by_invite_token(&pool, &token)
+        .await
+        .inspect_err(|e| tracing::error!("Failed to look up invite: {e:#}"))
+    {
         Ok(Some(user)) => HtmlTemplate(InviteTemplate {
             username: user.username,
             error: None,
@@ -398,7 +421,10 @@ pub async fn invite_submit(
     Path(token): Path<String>,
     Form(form): Form<InviteForm>,
 ) -> Response {
-    let user = match models::user::find_by_invite_token(&pool, &token).await {
+    let user = match models::user::find_by_invite_token(&pool, &token)
+        .await
+        .inspect_err(|e| tracing::error!("Failed to look up invite: {e:#}"))
+    {
         Ok(Some(u)) => u,
         _ => return invalid_invite_response(),
     };
@@ -422,6 +448,7 @@ pub async fn invite_submit(
     // Accept the invite and set password
     if models::user::accept_invite(&pool, user.id, &form.password)
         .await
+        .inspect_err(|e| tracing::error!("Failed to accept invite: {e:#}"))
         .is_err()
     {
         return HtmlTemplate(InviteTemplate {
@@ -432,7 +459,10 @@ pub async fn invite_submit(
     }
 
     // Create session and log them in
-    match models::user::create_session(&pool, user.id).await {
+    match models::user::create_session(&pool, user.id)
+        .await
+        .inspect_err(|e| tracing::error!("Failed to create session: {e:#}"))
+    {
         Ok(session_token) => {
             let cookie_header = set_cookie_header(SESSION_COOKIE, &session_token, 7 * 86400);
             rama::http::Response::builder()

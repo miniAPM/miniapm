@@ -49,10 +49,12 @@ pub async fn index(
 
     let routes = span::routes_summary(&pool, project_id, &since_str, search.as_deref(), &sort, 100)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load routes: {e:#}"))
         .unwrap_or_default();
 
     let total_count = span::routes_count(&pool, project_id, &since_str, search.as_deref())
         .await
+        .inspect_err(|e| tracing::error!("Failed to load total count: {e:#}"))
         .unwrap_or(0);
 
     let max_requests = routes.iter().map(|r| r.request_count).max().unwrap_or(1);

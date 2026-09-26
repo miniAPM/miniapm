@@ -67,6 +67,7 @@ pub async fn index(
         min_duration_ms,
     )
     .await
+    .inspect_err(|e| tracing::error!("Failed to load total count: {e:#}"))
     .unwrap_or(0);
 
     let total_pages = (total_count + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -84,6 +85,7 @@ pub async fn index(
         offset,
     )
     .await
+    .inspect_err(|e| tracing::error!("Failed to load traces: {e:#}"))
     .unwrap_or_default();
 
     HtmlTemplate(TracesIndexTemplate {
@@ -115,6 +117,7 @@ pub async fn show(
 ) -> HtmlTemplate<TraceShowTemplate> {
     let trace = models::span::get_trace(&pool, &trace_id)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load trace: {e:#}"))
         .unwrap_or(None);
 
     // Detect N+1 issues

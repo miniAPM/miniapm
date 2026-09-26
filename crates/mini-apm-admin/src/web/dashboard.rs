@@ -34,12 +34,15 @@ pub async fn index(
 
     let requests_24h = span::count_since(&pool, project_id, &since)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load requests 24h: {e:#}"))
         .unwrap_or(0);
     let errors_24h = models::error::count_since(&pool, project_id, &since)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load errors 24h: {e:#}"))
         .unwrap_or(0);
     let latency_stats = span::latency_stats_since(&pool, project_id, &since)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load latency stats: {e:#}"))
         .unwrap_or(span::LatencyStats {
             avg_ms: 0,
             p95_ms: 0,
@@ -47,15 +50,19 @@ pub async fn index(
         });
     let recent_errors = models::error::list(&pool, project_id, Some("open"), 5)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load recent errors: {e:#}"))
         .unwrap_or_default();
     let slow_requests = span::slow_traces(&pool, project_id, 500.0, 5)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load slow requests: {e:#}"))
         .unwrap_or_default();
     let hourly_stats = span::hourly_stats(&pool, project_id, 24)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load hourly stats: {e:#}"))
         .unwrap_or_default();
     let deploys = models::deploy::list_since(&pool, project_id, &since)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load deploys: {e:#}"))
         .unwrap_or_default();
 
     HtmlTemplate(DashboardTemplate {

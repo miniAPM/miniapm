@@ -58,6 +58,7 @@ pub async fn index(
         since_str.as_deref(),
     )
     .await
+    .inspect_err(|e| tracing::error!("Failed to load total count: {e:#}"))
     .unwrap_or(0);
 
     let total_pages = (total_count + PAGE_SIZE - 1) / PAGE_SIZE;
@@ -74,10 +75,12 @@ pub async fn index(
         offset,
     )
     .await
+    .inspect_err(|e| tracing::error!("Failed to load errors: {e:#}"))
     .unwrap_or_default();
 
     let hourly_errors = models::error::hourly_error_stats(&pool, project_id, 24)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load hourly errors: {e:#}"))
         .unwrap_or_default();
 
     HtmlTemplate(ErrorsIndexTemplate {
@@ -108,16 +111,21 @@ pub async fn show(
     ctx: WebProjectContext,
     Path(id): Path<i64>,
 ) -> HtmlTemplate<ErrorShowTemplate> {
-    let error = models::error::find(&pool, id).await.unwrap_or(None);
+    let error = models::error::find(&pool, id)
+        .await
+        .inspect_err(|e| tracing::error!("Failed to load error: {e:#}"))
+        .unwrap_or(None);
     let occurrences = if error.is_some() {
         models::error::occurrences(&pool, id, 10)
             .await
+            .inspect_err(|e| tracing::error!("Failed to load occurrences: {e:#}"))
             .unwrap_or_default()
     } else {
         vec![]
     };
     let trend_24h = models::error::error_trend_24h(&pool, id)
         .await
+        .inspect_err(|e| tracing::error!("Failed to load trend 24h: {e:#}"))
         .unwrap_or_default();
 
     HtmlTemplate(ErrorShowTemplate {
@@ -141,7 +149,9 @@ pub async fn update_status(
     // Validate status
     let valid_statuses = ["open", "resolved", "ignored"];
     if valid_statuses.contains(&form.status.as_str()) {
-        let _ = models::error::update_status(&pool, id, &form.status).await;
+        if let Err(e) = models::error::update_status(&pool, id, &form.status).await {
+            tracing::error!("Failed to update error status: {e:#}");
+        }
     }
     Redirect::to("/errors")
 }

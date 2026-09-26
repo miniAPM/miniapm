@@ -27,7 +27,10 @@ pub async fn index(
     ctx: WebProjectContext,
     Query(query): Query<ProjectsQuery>,
 ) -> HtmlTemplate<ProjectsTemplate> {
-    let projects = project::list_all(&pool).await.unwrap_or_default();
+    let projects = project::list_all(&pool)
+        .await
+        .inspect_err(|e| tracing::error!("Failed to load projects: {e:#}"))
+        .unwrap_or_default();
 
     HtmlTemplate(ProjectsTemplate {
         projects,
@@ -61,7 +64,9 @@ pub async fn create(State(pool): State<DbPool>, Form(form): Form<CreateForm>) ->
         return Redirect::to("/projects");
     }
 
-    let _ = project::create(&pool, form.name.trim()).await;
+    if let Err(e) = project::create(&pool, form.name.trim()).await {
+        tracing::error!("Failed to create project: {e:#}");
+    }
     Redirect::to("/projects")
 }
 
@@ -71,7 +76,9 @@ pub struct DeleteForm {
 }
 
 pub async fn delete(State(pool): State<DbPool>, Form(form): Form<DeleteForm>) -> impl IntoResponse {
-    let _ = project::delete(&pool, form.id).await;
+    if let Err(e) = project::delete(&pool, form.id).await {
+        tracing::error!("Failed to delete project: {e:#}");
+    }
     Redirect::to("/projects")
 }
 
@@ -84,6 +91,8 @@ pub async fn regenerate_key(
     State(pool): State<DbPool>,
     Form(form): Form<RegenerateKeyForm>,
 ) -> impl IntoResponse {
-    let _ = project::regenerate_api_key(&pool, form.id).await;
+    if let Err(e) = project::regenerate_api_key(&pool, form.id).await {
+        tracing::error!("Failed to regenerate API key: {e:#}");
+    }
     Redirect::to("/projects")
 }

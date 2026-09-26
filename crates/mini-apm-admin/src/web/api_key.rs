@@ -29,7 +29,9 @@ pub async fn index(ctx: WebProjectContext) -> HtmlTemplate<ApiKeyTemplate> {
 
 pub async fn regenerate(State(pool): State<DbPool>, ctx: WebProjectContext) -> impl IntoResponse {
     if let Some(project) = ctx.current_project {
-        let _ = project::regenerate_api_key(&pool, project.id).await;
+        if let Err(e) = project::regenerate_api_key(&pool, project.id).await {
+            tracing::error!("Failed to regenerate API key: {e:#}");
+        }
     }
     Redirect::to("/api-key")
 }
