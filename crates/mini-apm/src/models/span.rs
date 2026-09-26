@@ -1049,7 +1049,7 @@ pub async fn hourly_stats(
         SELECT
             strftime('%Y-%m-%d %H:00', happened_at) as hour,
             COUNT(*) as count,
-            COALESCE(AVG(duration_ms), 0) as avg_ms,
+            COALESCE(AVG(duration_ms), 0.0) as avg_ms,
             SUM(CASE WHEN status_code = 2 OR http_status_code >= 500 THEN 1 ELSE 0 END) as error_count
         FROM spans
         WHERE parent_span_id IS NULL
@@ -1284,8 +1284,8 @@ async fn calculate_route_db_stats(
     let sql = format!(
         r#"
         SELECT
-            COALESCE(AVG(db_total_ms), 0) as avg_db_ms,
-            COALESCE(AVG(db_count), 0) as avg_db_count
+            COALESCE(AVG(db_total_ms), 0.0) as avg_db_ms,
+            COALESCE(AVG(db_count), 0.0) as avg_db_count
         FROM (
             SELECT
                 trace_id,

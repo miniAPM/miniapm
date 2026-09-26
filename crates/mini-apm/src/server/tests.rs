@@ -98,3 +98,30 @@ async fn test_errors_from_one_location_share_a_group() {
             .unwrap();
     assert_eq!((groups, occurrences), (1, 2));
 }
+
+#[tokio::test]
+async fn test_routes_summary_for_route_without_db_spans() {
+    let (app, pool, project) = setup().await;
+    let start = jiff::Timestamp::now().as_nanosecond();
+    let span = format!(
+        r#"{{"traceId":"0af7651916cd43dd8448eb211c80319c","spanId":"b7ad6b7169203331","name":"GET /users","kind":2,"startTimeUnixNano":"{start}","endTimeUnixNano":"{}","attributes":[{{"key":"http.method","value":{{"stringValue":"GET"}}}}]}}"#,
+        start + 1_000_000
+    );
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/ingest/v1/traces")
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", project.api_key))
+        .body(Body::from(format!(
+            r#"{{"resourceSpans":[{{"scopeSpans":[{{"spans":[{span}]}}]}}]}}"#
+        )))
+        .unwrap();
+    assert_eq!(app.serve(req).await.unwrap().status(), StatusCode::ACCEPTED);
+
+    let since = crate::time::rfc3339(crate::time::hours_ago(1));
+    let routes =
+        models::span::routes_summary(&pool, Some(project.id), &since, None, "requests", 10)
+            .await
+            .unwrap();
+    assert_eq!(routes.len(), 1);
+}
