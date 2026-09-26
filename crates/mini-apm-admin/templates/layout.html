@@ -57,7 +57,9 @@
                     </svg>
                 </button>
                 <div class="nav-menu-dropdown" id="navMenuDropdown">
+                    {% if ctx.accounts_enabled %}
                     <a href="/auth/users">Users</a>
+                    {% endif %}
                     {% if ctx.projects_enabled %}
                     <a href="/projects">Projects</a>
                     {% else %}
@@ -68,10 +70,12 @@
                         <span>Theme</span>
                         <span class="theme-icon"></span>
                     </button>
+                    {% if ctx.accounts_enabled %}
                     <div class="nav-menu-divider"></div>
                     <form method="POST" action="/auth/logout" class="nav-menu-form">
                         <button type="submit">Logout</button>
                     </form>
+                    {% endif %}
                 </div>
             </div>
         </div>

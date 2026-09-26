@@ -4,7 +4,7 @@ use rama::Layer;
 use rama::extensions::ExtensionsRef;
 use rama::http::service::web::response::IntoResponse;
 use rama::http::service::web::response::Redirect;
-use rama::http::{Request, Response};
+use rama::http::{Request, Response, StatusCode};
 use rama::service::Service;
 
 use crate::AppState;
@@ -68,9 +68,7 @@ where
         req: Request,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send + '_ {
         let pool = self.state.pool.clone();
-        let enable_user_accounts = std::env::var("ENABLE_USER_ACCOUNTS")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
+        let enable_user_accounts = super::env_flag("ENABLE_USER_ACCOUNTS");
 
         async move {
             let path = req
@@ -80,6 +78,12 @@ where
                 .as_encoded_str()
                 .into_owned();
             let path = path.as_str();
+
+            if !enable_user_accounts
+                && (path.starts_with("/auth/users") || path.starts_with("/auth/change-password"))
+            {
+                return Ok(StatusCode::NOT_FOUND.into_response());
+            }
 
             // Skip protection for unprotected routes
             let is_unprotected = path == "/health"

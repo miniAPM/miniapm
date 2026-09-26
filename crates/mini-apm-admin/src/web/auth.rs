@@ -250,6 +250,7 @@ async fn render_users_page(
         current_project: None,
         projects: vec![],
         projects_enabled: false,
+        accounts_enabled: true,
     };
 
     HtmlTemplate(UsersTemplate {

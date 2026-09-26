@@ -14,6 +14,7 @@ pub struct WebProjectContext {
     pub current_project: Option<Project>,
     pub projects: Vec<Project>,
     pub projects_enabled: bool,
+    pub accounts_enabled: bool,
 }
 
 impl WebProjectContext {
@@ -53,14 +54,11 @@ impl FromPartsStateRefPair<AppState> for WebProjectContext {
             .or(projects.first())
             .cloned();
 
-        let projects_enabled = std::env::var("ENABLE_PROJECTS")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
-
         Ok(Self {
             current_project,
             projects,
-            projects_enabled,
+            projects_enabled: super::env_flag("ENABLE_PROJECTS"),
+            accounts_enabled: super::env_flag("ENABLE_USER_ACCOUNTS"),
         })
     }
 }

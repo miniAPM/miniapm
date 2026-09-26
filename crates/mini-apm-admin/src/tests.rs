@@ -26,6 +26,8 @@ async fn test_health_and_not_found() {
     for (uri, expected) in [
         ("/health", StatusCode::OK),
         ("/nope", StatusCode::NOT_FOUND),
+        ("/auth/users", StatusCode::NOT_FOUND),
+        ("/auth/change-password", StatusCode::NOT_FOUND),
     ] {
         let res = app.serve(request(uri, "203.0.113.1", None)).await.unwrap();
         assert_eq!(res.status(), expected, "{uri}");
@@ -105,6 +107,7 @@ async fn test_pages_follow_selected_project() {
         let api_page = page("/api-key", cookie).await;
         assert!(api_page.contains(api_key.as_str()), "{cookie:?}");
         assert!(api_page.contains("project-selector"), "{cookie:?}");
+        assert!(!api_page.contains("/auth/users"), "{cookie:?}");
         let errors_page = page("/errors", cookie).await;
         assert_eq!(
             errors_page.contains("OnlyInOtherError"),
