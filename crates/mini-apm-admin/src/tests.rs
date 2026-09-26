@@ -62,3 +62,54 @@ async fn test_rate_limits_per_client_ip() {
         assert_eq!(got, limited, "{peer} {forwarded:?}");
     }
 }
+
+#[tokio::test]
+async fn test_pages_follow_selected_project() {
+    use mini_apm::models::{error, project};
+    use rama::http::body::util::BodyExt;
+
+    let config = mini_apm::config::Config::default();
+    let pool = mini_apm::db::init(&config).await.unwrap();
+    let default = project::ensure_default_project(&pool).await.unwrap();
+    let other = project::create(&pool, "Other").await.unwrap();
+    let only_in_other = error::IncomingError {
+        exception_class: "OnlyInOtherError".into(),
+        message: "boom".into(),
+        backtrace: vec![],
+        fingerprint: "fp".into(),
+        request_id: None,
+        user_id: None,
+        params: None,
+        timestamp: None,
+        source_context: None,
+    };
+    error::insert(&pool, &only_in_other, Some(other.id))
+        .await
+        .unwrap();
+    let app = make_app(pool);
+
+    let page = async |uri: &str, cookie: Option<&str>| {
+        let mut req = request(uri, "203.0.113.1", None);
+        if let Some(slug) = cookie {
+            let value = format!("miniapm_project={slug}").parse().unwrap();
+            req.headers_mut().insert("cookie", value);
+        }
+        let body = app.serve(req).await.unwrap().into_body();
+        String::from_utf8(body.collect().await.unwrap().to_bytes().to_vec()).unwrap()
+    };
+
+    for (cookie, api_key, sees_error) in [
+        (None, &default.api_key, false),
+        (Some("other"), &other.api_key, true),
+    ] {
+        let api_page = page("/api-key", cookie).await;
+        assert!(api_page.contains(api_key.as_str()), "{cookie:?}");
+        assert!(api_page.contains("project-selector"), "{cookie:?}");
+        let errors_page = page("/errors", cookie).await;
+        assert_eq!(
+            errors_page.contains("OnlyInOtherError"),
+            sees_error,
+            "{cookie:?}"
+        );
+    }
+}

@@ -3,11 +3,16 @@
 //! Rama doesn't have built-in cookie middleware, so we provide
 //! simple helpers for parsing and setting cookies manually.
 
-use rama::http::Request;
+use rama::http::{HeaderMap, Request};
 
 /// Extract a cookie value from a request by name
 pub fn get_cookie<B>(req: &Request<B>, name: &str) -> Option<String> {
-    req.headers()
+    get_cookie_from_headers(req.headers(), name)
+}
+
+/// Extract a cookie value from request headers by name
+pub fn get_cookie_from_headers(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
         .get("cookie")
         .and_then(|h| h.to_str().ok())
         .and_then(|cookies| {

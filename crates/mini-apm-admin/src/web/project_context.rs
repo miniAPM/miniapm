@@ -1,4 +1,10 @@
-use mini_apm::models::project::Project;
+use mini_apm::models::project::{self, Project};
+use rama::http::StatusCode;
+use rama::http::request::Parts;
+use rama::http::service::web::extract::FromPartsStateRefPair;
+
+use crate::AppState;
+use crate::cookies::get_cookie_from_headers;
 
 pub const PROJECT_COOKIE: &str = "miniapm_project";
 
@@ -22,6 +28,39 @@ impl WebProjectContext {
 
     /// Returns true if project selector should be shown (more than 1 project)
     pub fn show_selector(&self) -> bool {
-        self.projects_enabled && self.projects.len() > 1
+        self.projects.len() > 1
+    }
+}
+
+/// The project picked with the project cookie, else the default project
+impl FromPartsStateRefPair<AppState> for WebProjectContext {
+    type Rejection = StatusCode;
+
+    async fn from_parts_state_ref_pair(
+        parts: &Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let projects = project::list_all(&state.pool).await.map_err(|e| {
+            tracing::error!("Failed to load projects: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+        let wanted = get_cookie_from_headers(&parts.headers, PROJECT_COOKIE);
+        let current_project = projects
+            .iter()
+            .find(|p| wanted.as_deref() == Some(p.slug.as_str()))
+            .or_else(|| projects.iter().find(|p| p.slug == "default"))
+            .or(projects.first())
+            .cloned();
+
+        let projects_enabled = std::env::var("ENABLE_PROJECTS")
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false);
+
+        Ok(Self {
+            current_project,
+            projects,
+            projects_enabled,
+        })
     }
 }

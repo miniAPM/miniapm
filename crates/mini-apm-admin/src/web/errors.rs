@@ -36,13 +36,9 @@ pub struct ErrorsQuery {
 
 pub async fn index(
     State(pool): State<DbPool>,
+    ctx: WebProjectContext,
     Query(query): Query<ErrorsQuery>,
 ) -> HtmlTemplate<ErrorsIndexTemplate> {
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
     let project_id = ctx.project_id();
 
     let period = query.period.unwrap_or_else(|| "all".to_string());
@@ -109,13 +105,9 @@ pub struct ErrorShowTemplate {
 
 pub async fn show(
     State(pool): State<DbPool>,
+    ctx: WebProjectContext,
     Path(id): Path<i64>,
 ) -> HtmlTemplate<ErrorShowTemplate> {
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
     let error = models::error::find(&pool, id).await.unwrap_or(None);
     let occurrences = if error.is_some() {
         models::error::occurrences(&pool, id, 10)

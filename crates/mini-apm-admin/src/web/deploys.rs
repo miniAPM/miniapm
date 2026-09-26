@@ -6,10 +6,7 @@ use rama::http::service::web::extract::State;
 use crate::template::HtmlTemplate;
 use mini_apm::{
     DbPool,
-    models::{
-        deploy::{self, Deploy},
-        project,
-    },
+    models::deploy::{self, Deploy},
 };
 
 use super::project_context::WebProjectContext;
@@ -23,21 +20,21 @@ pub struct DeploysTemplate {
     pub ctx: WebProjectContext,
 }
 
-pub async fn index(State(pool): State<DbPool>, request: Request) -> HtmlTemplate<DeploysTemplate> {
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
+pub async fn index(
+    State(pool): State<DbPool>,
+    ctx: WebProjectContext,
+    request: Request,
+) -> HtmlTemplate<DeploysTemplate> {
     let project_id = ctx.project_id();
     let deploys = deploy::list(&pool, project_id, 50)
         .await
         .unwrap_or_default();
 
-    let api_key = project::ensure_default_project(&pool)
-        .await
-        .map(|p| p.api_key)
-        .unwrap_or_else(|_| "YOUR_API_KEY".to_string());
+    let api_key = ctx
+        .current_project
+        .as_ref()
+        .map(|p| p.api_key.clone())
+        .unwrap_or_else(|| "YOUR_API_KEY".to_string());
 
     // Extract base URL from request
     let host = request

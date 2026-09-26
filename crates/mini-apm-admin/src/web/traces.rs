@@ -37,13 +37,9 @@ pub struct TracesQuery {
 
 pub async fn index(
     State(pool): State<DbPool>,
+    ctx: WebProjectContext,
     Query(query): Query<TracesQuery>,
 ) -> HtmlTemplate<TracesIndexTemplate> {
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
     let project_id = ctx.project_id();
 
     let root_type_filter = query
@@ -114,13 +110,9 @@ pub struct TraceShowTemplate {
 
 pub async fn show(
     State(pool): State<DbPool>,
+    ctx: WebProjectContext,
     Path(trace_id): Path<String>,
 ) -> HtmlTemplate<TraceShowTemplate> {
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
     let trace = models::span::get_trace(&pool, &trace_id)
         .await
         .unwrap_or(None);

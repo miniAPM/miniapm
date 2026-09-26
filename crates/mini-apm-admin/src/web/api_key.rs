@@ -14,25 +14,18 @@ pub struct ApiKeyTemplate {
     pub ctx: WebProjectContext,
 }
 
-pub async fn index(State(pool): State<DbPool>) -> HtmlTemplate<ApiKeyTemplate> {
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
-
-    // Get the default project's API key
-    let api_key = project::ensure_default_project(&pool)
-        .await
-        .map(|p| p.api_key)
-        .unwrap_or_else(|_| "Error loading API key".to_string());
+pub async fn index(ctx: WebProjectContext) -> HtmlTemplate<ApiKeyTemplate> {
+    let api_key = ctx
+        .current_project
+        .as_ref()
+        .map(|p| p.api_key.clone())
+        .unwrap_or_else(|| "Error loading API key".to_string());
 
     HtmlTemplate(ApiKeyTemplate { api_key, ctx })
 }
 
-pub async fn regenerate(State(pool): State<DbPool>) -> impl IntoResponse {
-    // Get the default project and regenerate its key
-    if let Ok(project) = project::ensure_default_project(&pool).await {
+pub async fn regenerate(State(pool): State<DbPool>, ctx: WebProjectContext) -> impl IntoResponse {
+    if let Some(project) = ctx.current_project {
         let _ = project::regenerate_api_key(&pool, project.id).await;
     }
     Redirect::to("/api-key")

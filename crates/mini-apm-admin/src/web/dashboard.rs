@@ -25,12 +25,10 @@ pub struct DashboardTemplate {
     pub ctx: WebProjectContext,
 }
 
-pub async fn index(State(pool): State<DbPool>) -> HtmlTemplate<DashboardTemplate> {
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
+pub async fn index(
+    State(pool): State<DbPool>,
+    ctx: WebProjectContext,
+) -> HtmlTemplate<DashboardTemplate> {
     let project_id = ctx.project_id();
     let since = time::rfc3339(time::hours_ago(24));
 

@@ -29,13 +29,9 @@ pub struct RoutesQuery {
 
 pub async fn index(
     State(pool): State<DbPool>,
+    ctx: WebProjectContext,
     Query(query): Query<RoutesQuery>,
 ) -> HtmlTemplate<RoutesTemplate> {
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
     let project_id = ctx.project_id();
 
     let period = query.period.unwrap_or_else(|| "24h".to_string());

@@ -27,7 +27,19 @@
                 </svg>
                 <span class="nav-logo-text">mini<span>APM</span></span>
             </a>
-            {% block project_selector %}{% endblock %}
+            {% block project_selector %}
+            {% if ctx.show_selector() %}
+            <form method="POST" action="/projects/switch" class="project-selector">
+                <select name="slug" onchange="this.form.submit()">
+                    {% for project in ctx.projects %}
+                    <option value="{{ project.slug }}" {% if ctx.is_current_project(project.id) %}selected{% endif %}>
+                        {{ project.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </form>
+            {% endif %}
+            {% endblock %}
         </div>
         <ul class="nav-links">
             <li><a href="/">Dashboard</a></li>

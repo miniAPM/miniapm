@@ -7,9 +7,7 @@ use crate::cookies::set_cookie_header;
 use crate::template::HtmlTemplate;
 use mini_apm::{DbPool, models::project};
 
-use super::project_context::WebProjectContext;
-
-const PROJECT_COOKIE: &str = "miniapm_project";
+use super::project_context::{PROJECT_COOKIE, WebProjectContext};
 
 #[derive(Template)]
 #[template(path = "projects/index.html")]
@@ -26,13 +24,9 @@ pub struct ProjectsQuery {
 
 pub async fn index(
     State(pool): State<DbPool>,
+    ctx: WebProjectContext,
     Query(query): Query<ProjectsQuery>,
 ) -> HtmlTemplate<ProjectsTemplate> {
-    let ctx = WebProjectContext {
-        current_project: None,
-        projects: vec![],
-        projects_enabled: false,
-    };
     let projects = project::list_all(&pool).await.unwrap_or_default();
 
     HtmlTemplate(ProjectsTemplate {
