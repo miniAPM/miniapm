@@ -24,6 +24,12 @@ where
             .get_ref::<T>()
             .cloned()
             .map(Self)
-            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)
+            .ok_or_else(|| {
+                tracing::error!(
+                    "Missing request extension {} (is its middleware applied?)",
+                    std::any::type_name::<T>()
+                );
+                StatusCode::INTERNAL_SERVER_ERROR
+            })
     }
 }

@@ -4,7 +4,7 @@ pub mod health;
 pub mod ingest;
 pub mod rate_limit;
 
-pub use auth::{ApiKeyAuthMiddleware, ProjectContext};
+pub use auth::{ProjectContext, ProjectKeyAuthorizer};
 pub use health::health_handler;
 pub use ingest::{ingest_deploys, ingest_errors, ingest_errors_batch, ingest_spans};
 pub use rate_limit::{RateLimitConfig, RateLimitMiddleware};

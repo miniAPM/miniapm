@@ -6,11 +6,11 @@ use rama::Layer;
 use rama::Service;
 use rama::conversion::FromRef;
 use rama::graceful::Shutdown;
-use rama::http::Request;
 use rama::http::layer::error_handling::ErrorHandlerLayer;
 use rama::http::server::HttpServer;
 use rama::http::service::web::response::IntoResponse;
 use rama::http::service::web::{Router, response::Html};
+use rama::http::{Request, Response};
 use rama::rt::Executor;
 
 use crate::{DbPool, api, config::Config, jobs, models};
@@ -54,31 +54,34 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
     // Start background jobs
     jobs::start(pool.clone(), config.clone());
 
-    let state = AppState {
-        pool: pool.clone(),
-        config: config.clone(),
-    };
-
-    // Build router with API routes only
-    let app = Router::new_with_state(state.clone())
-        // Health check (no auth)
-        .with_get("/health", api::health_handler)
-        // Ingestion API (API key auth required)
-        .with_sub_router_make_fn("/ingest", |router| {
-            router
-                .with_post("/deploys", api::ingest_deploys)
-                .with_post("/v1/traces", api::ingest_spans)
-                .with_post("/errors", api::ingest_errors)
-                .with_post("/errors/batch", api::ingest_errors_batch)
-        })
-        // 404 handler
-        .with_not_found(Html("<h1>404 - Collector API Only</h1>".to_owned()));
+    let app = make_app(AppState { pool, config });
 
     let addr = format!("0.0.0.0:{}", port);
     tracing::info!("MiniAPM collector listening on http://{} (API only)", addr);
 
-    let app = Arc::new(ErrorHandlerLayer::new().into_layer(app));
     serve_with_graceful_shutdown(addr, app).await
+}
+
+pub fn make_app(
+    state: AppState,
+) -> impl Service<Request, Output = Response, Error = Infallible> + Clone {
+    // Ingestion API (API key auth required)
+    let ingest = Router::new_with_state(state.clone())
+        .with_post("/deploys", api::ingest_deploys)
+        .with_post("/v1/traces", api::ingest_spans)
+        .with_post("/errors", api::ingest_errors)
+        .with_post("/errors/batch", api::ingest_errors_batch);
+    let ingest = api::ProjectKeyAuthorizer::layer(state.pool.clone()).into_layer(ingest);
+
+    // Build router with API routes only
+    let app = Router::new_with_state(state)
+        // Health check (no auth)
+        .with_get("/health", api::health_handler)
+        .with_sub_service("/ingest", ingest)
+        // 404 handler
+        .with_not_found(Html("<h1>404 - Collector API Only</h1>".to_owned()));
+
+    Arc::new(ErrorHandlerLayer::new().into_layer(app))
 }
 
 /// Run an HTTP server on `addr` until Ctrl+C/SIGTERM, then drain in-flight
@@ -128,3 +131,6 @@ where
     tracing::info!("Server shutdown complete");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;
