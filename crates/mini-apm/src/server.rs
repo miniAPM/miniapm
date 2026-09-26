@@ -6,6 +6,7 @@ use rama::Layer;
 use rama::Service;
 use rama::conversion::FromRef;
 use rama::graceful::Shutdown;
+use rama::http::layer::body_limit::BodyLimitLayer;
 use rama::http::layer::error_handling::ErrorHandlerLayer;
 use rama::http::server::HttpServer;
 use rama::http::service::web::response::IntoResponse;
@@ -37,7 +38,6 @@ impl FromRef<AppState> for Config {
 }
 
 /// Maximum request body size (10 MB)
-#[allow(dead_code)]
 const MAX_BODY_SIZE: usize = 10 * 1024 * 1024;
 
 pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> {
@@ -71,6 +71,7 @@ pub fn make_app(
         .with_post("/v1/traces", api::ingest_spans)
         .with_post("/errors", api::ingest_errors)
         .with_post("/errors/batch", api::ingest_errors_batch);
+    let ingest = BodyLimitLayer::new(MAX_BODY_SIZE).into_layer(ingest);
     let ingest = api::ProjectKeyAuthorizer::layer(state.pool.clone()).into_layer(ingest);
 
     // Build router with API routes only
