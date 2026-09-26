@@ -8,10 +8,6 @@ use std::collections::HashMap;
 
 mod proto;
 
-// ============================================================================
-// OTLP/HTTP JSON Ingestion Types (matching OTLP protobuf JSON mapping)
-// ============================================================================
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OtlpTraceRequest {
@@ -122,10 +118,6 @@ pub struct SpanStatus {
     pub code: Option<i32>,
     pub message: Option<String>,
 }
-
-// ============================================================================
-// Internal Types
-// ============================================================================
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -279,10 +271,6 @@ impl RootSpanType {
     }
 }
 
-// ============================================================================
-// Display Types for UI
-// ============================================================================
-
 #[derive(Debug, Clone, Serialize)]
 pub struct TraceSummary {
     pub trace_id: String,
@@ -418,10 +406,6 @@ pub struct SpanDisplay {
     pub db_statement: Option<String>,
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
 fn parse_attributes(attrs: &Option<Vec<KeyValue>>) -> HashMap<String, String> {
     let mut map = HashMap::new();
     if let Some(attrs) = attrs {
@@ -452,10 +436,6 @@ fn decode_id(s: &str) -> String {
         s.to_string()
     }
 }
-
-// ============================================================================
-// Database Operations
-// ============================================================================
 
 use crate::models::error as app_error;
 use sha2::{Digest, Sha256};
@@ -973,10 +953,6 @@ pub async fn count_since(
     Ok(count)
 }
 
-// ============================================================================
-// Dashboard Stats (from root spans)
-// ============================================================================
-
 /// Nearest-rank percentile (0.0-1.0) over `sorted` (ascending), rounded to the
 /// nearest ms. `sorted` must be non-empty.
 fn percentile_ms(sorted: &[f64], p: f64) -> i64 {
@@ -1130,10 +1106,6 @@ pub async fn hourly_stats(
 
     Ok(points)
 }
-
-// ============================================================================
-// Routes Stats (aggregated by endpoint)
-// ============================================================================
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RouteSummary {
@@ -1340,10 +1312,6 @@ async fn calculate_route_db_stats(
 
     Ok((result.0.round() as i64, result.1.round() as i64))
 }
-
-// ============================================================================
-// N+1 Query Detection
-// ============================================================================
 
 const N_PLUS_1_THRESHOLD: usize = 5;
 
