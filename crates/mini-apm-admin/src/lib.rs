@@ -45,6 +45,8 @@ pub fn make_app(
     let state = AppState { pool };
 
     let app = Router::new_with_state(state.clone())
+        // Health check (no auth)
+        .with_get("/health", mini_apm::api::health_handler)
         // Auth routes (no auth middleware needed)
         .with_get("/auth/login", web::auth::login_page)
         .with_post("/auth/login", web::auth::login_submit)
@@ -78,7 +80,10 @@ pub fn make_app(
             rama::http::service::fs::ServeDir::new("./static"),
         )
         // 404 handler
-        .with_not_found(Html("<h1>404 Not Found</h1>".to_owned()));
+        .with_not_found((
+            StatusCode::NOT_FOUND,
+            Html("<h1>404 Not Found</h1>".to_owned()),
+        ));
 
     // Apply middleware layers (outermost first)
     // Router errors (e.g. bad path params) become responses so the

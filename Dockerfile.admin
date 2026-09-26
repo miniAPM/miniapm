@@ -32,8 +32,7 @@ ENV SQLITE_PATH=/data/miniapm.db
 
 EXPOSE 3001
 
-# Check root path since /health doesn't exist
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s \
-  CMD curl -sf http://localhost:3001/ || exit 1
+  CMD curl -sf http://localhost:3001/health || exit 1
 
 CMD ["miniapm-admin"]

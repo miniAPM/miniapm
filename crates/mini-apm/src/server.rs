@@ -10,7 +10,7 @@ use rama::http::layer::error_handling::ErrorHandlerLayer;
 use rama::http::server::HttpServer;
 use rama::http::service::web::response::IntoResponse;
 use rama::http::service::web::{Router, response::Html};
-use rama::http::{Request, Response};
+use rama::http::{Request, Response, StatusCode};
 use rama::rt::Executor;
 
 use crate::{DbPool, api, config::Config, jobs, models};
@@ -79,7 +79,10 @@ pub fn make_app(
         .with_get("/health", api::health_handler)
         .with_sub_service("/ingest", ingest)
         // 404 handler
-        .with_not_found(Html("<h1>404 - Collector API Only</h1>".to_owned()));
+        .with_not_found((
+            StatusCode::NOT_FOUND,
+            Html("<h1>404 - Collector API Only</h1>".to_owned()),
+        ));
 
     Arc::new(ErrorHandlerLayer::new().into_layer(app))
 }

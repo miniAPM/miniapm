@@ -33,6 +33,11 @@ async fn test_ingest_requires_project_api_key() {
         .body(Body::empty())
         .unwrap();
     assert_eq!(app.serve(health).await.unwrap().status(), StatusCode::OK);
+    let unknown = Request::builder().uri("/nope").body(Body::empty()).unwrap();
+    assert_eq!(
+        app.serve(unknown).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
 
     let valid = format!("Bearer {}", project.api_key);
     for (auth, expected) in [

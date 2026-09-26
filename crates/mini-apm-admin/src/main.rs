@@ -10,6 +10,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or(3001);
 
     init_tracing("mini_apm_admin=info");
+    mini_apm::api::health::init_start_time();
 
     let config = Config::from_env()?;
 
