@@ -6,12 +6,14 @@ use rama::Layer;
 use rama::Service;
 use rama::conversion::FromRef;
 use rama::graceful::Shutdown;
+use rama::http::header::CONTENT_TYPE;
 use rama::http::layer::body_limit::BodyLimitLayer;
 use rama::http::layer::error_handling::ErrorHandlerLayer;
+use rama::http::matcher::HttpMatcher;
 use rama::http::server::HttpServer;
 use rama::http::service::web::response::IntoResponse;
 use rama::http::service::web::{Router, response::Html};
-use rama::http::{Request, Response, StatusCode};
+use rama::http::{HeaderValue, Request, Response, StatusCode};
 use rama::rt::Executor;
 
 use crate::self_monitor::{SelfMonitor, SelfMonitorLayer};
@@ -73,6 +75,14 @@ pub fn make_app(
     // Ingestion API (API key auth required)
     let ingest = Router::new_with_state(state.clone())
         .with_post("/deploys", api::ingest_deploys)
+        .with_match_route(
+            "/v1/traces",
+            HttpMatcher::method_post().and_header(
+                CONTENT_TYPE,
+                HeaderValue::from_static("application/x-protobuf"),
+            ),
+            api::ingest_spans_protobuf,
+        )
         .with_post("/v1/traces", api::ingest_spans)
         .with_post("/errors", api::ingest_errors)
         .with_post("/errors/batch", api::ingest_errors_batch);

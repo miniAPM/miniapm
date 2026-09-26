@@ -3,7 +3,9 @@
 //! Handles incoming telemetry data: spans, deploys, errors.
 
 use rama::http::StatusCode;
-use rama::http::service::web::extract::{Json, State};
+use rama::http::grpc::protobuf::prost::Message;
+use rama::http::grpc::service::opentelemetry::proto::collector::trace::v1::ExportTraceServiceRequest;
+use rama::http::service::web::extract::{Bytes, Json, State};
 use serde::Deserialize;
 
 use crate::api::auth::ProjectContext;
@@ -31,6 +33,20 @@ pub async fn ingest_spans(
         Err(e) => {
             tracing::error!("Failed to ingest spans: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
+        }
+    }
+}
+
+pub async fn ingest_spans_protobuf(
+    State(pool): State<DbPool>,
+    Extension(ctx): Extension<ProjectContext>,
+    Bytes(body): Bytes,
+) -> StatusCode {
+    match ExportTraceServiceRequest::decode(body) {
+        Ok(request) => ingest_spans(State(pool), Extension(ctx), Json(request.into())).await,
+        Err(e) => {
+            tracing::warn!("Invalid OTLP protobuf payload: {}", e);
+            StatusCode::BAD_REQUEST
         }
     }
 }

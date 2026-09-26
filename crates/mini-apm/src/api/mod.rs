@@ -5,4 +5,6 @@ pub mod ingest;
 
 pub use auth::{ProjectContext, ProjectKeyAuthorizer};
 pub use health::health_handler;
-pub use ingest::{ingest_deploys, ingest_errors, ingest_errors_batch, ingest_spans};
+pub use ingest::{
+    ingest_deploys, ingest_errors, ingest_errors_batch, ingest_spans, ingest_spans_protobuf,
+};

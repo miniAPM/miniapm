@@ -184,3 +184,66 @@ async fn test_ingest_validates_payloads() {
         .unwrap();
     assert_eq!(deployed_at, "2026-09-26T10:49:01+00:00");
 }
+
+#[tokio::test]
+async fn test_ingest_protobuf_traces() {
+    use rama::http::grpc::protobuf::prost::Message;
+    use rama::http::grpc::service::opentelemetry::proto::collector::trace::v1::ExportTraceServiceRequest;
+    use rama::http::grpc::service::opentelemetry::proto::common::v1::{
+        AnyValue, KeyValue, any_value,
+    };
+    use rama::http::grpc::service::opentelemetry::proto::trace::v1::{
+        ResourceSpans, ScopeSpans, Span,
+    };
+
+    let (app, pool, project) = setup().await;
+    let span = Span {
+        trace_id: vec![0xab; 16],
+        span_id: vec![0xcd; 8],
+        name: "GET /proto".into(),
+        kind: 2,
+        start_time_unix_nano: 1_000_000_000,
+        end_time_unix_nano: 2_000_000_000,
+        attributes: vec![KeyValue {
+            key: "http.method".into(),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::StringValue("GET".into())),
+            }),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let request = ExportTraceServiceRequest {
+        resource_spans: vec![ResourceSpans {
+            scope_spans: vec![ScopeSpans {
+                spans: vec![span],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    };
+
+    for (body, expected) in [
+        (request.encode_to_vec(), StatusCode::ACCEPTED),
+        (b"not protobuf".to_vec(), StatusCode::BAD_REQUEST),
+    ] {
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/ingest/v1/traces")
+            .header("Content-Type", "application/x-protobuf")
+            .header("Authorization", format!("Bearer {}", project.api_key))
+            .body(Body::from(body))
+            .unwrap();
+        assert_eq!(app.serve(req).await.unwrap().status(), expected);
+    }
+
+    let stored: (String, String, Option<String>) =
+        sqlx::query_as("SELECT trace_id, name, http_method FROM spans")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        stored,
+        ("ab".repeat(16), "GET /proto".into(), Some("GET".into()))
+    );
+}

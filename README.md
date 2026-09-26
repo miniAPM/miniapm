@@ -102,9 +102,10 @@ end
 
 ### Any OpenTelemetry SDK
 
-Configure your OTLP exporter:
+Configure your OTLP exporter for HTTP (protobuf or JSON):
 ```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3000/ingest
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer proj_abc123...
 ```
 

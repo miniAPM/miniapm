@@ -6,6 +6,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::Row;
 use std::collections::HashMap;
 
+mod proto;
+
 // ============================================================================
 // OTLP/HTTP JSON Ingestion Types (matching OTLP protobuf JSON mapping)
 // ============================================================================
