@@ -1,5 +1,5 @@
 use crate::DbPool;
-use chrono::Utc;
+use crate::time;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -87,7 +87,7 @@ pub async fn insert(
     error: &IncomingError,
     project_id: Option<i64>,
 ) -> anyhow::Result<i64> {
-    let now = Utc::now().to_rfc3339();
+    let now = time::now_rfc3339();
     let timestamp = error.timestamp.as_deref().unwrap_or(&now);
 
     // Generate location-based fingerprint for smart grouping
@@ -486,8 +486,7 @@ pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec
     // Generate 24 hours of data, filling in zeros where no occurrences
     let mut counts = Vec::with_capacity(24);
     for i in (0..24).rev() {
-        let hour = chrono::Utc::now() - chrono::Duration::hours(i);
-        let hour_key = hour.format("%Y-%m-%d %H").to_string();
+        let hour_key = time::hours_ago(i).strftime("%Y-%m-%d %H").to_string();
         counts.push(*hour_counts.get(&hour_key).unwrap_or(&0));
     }
 
@@ -522,8 +521,7 @@ pub async fn hourly_error_stats(
     // Fill in all hours with zeros for missing data
     let mut points = Vec::with_capacity(hours as usize);
     for i in (0..hours).rev() {
-        let hour = chrono::Utc::now() - chrono::Duration::hours(i);
-        let hour_key = hour.format("%Y-%m-%d %H:00").to_string();
+        let hour_key = time::hours_ago(i).strftime("%Y-%m-%d %H:00").to_string();
         points.push(ErrorTrendPoint {
             hour: hour_key.clone(),
             count: *data_points.get(&hour_key).unwrap_or(&0),

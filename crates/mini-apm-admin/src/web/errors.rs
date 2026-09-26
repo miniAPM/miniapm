@@ -52,7 +52,7 @@ pub async fn index(
 
     let since = super::period_start(&period);
 
-    let since_str = since.map(|s| s.to_rfc3339());
+    let since_str = since.map(mini_apm::time::rfc3339);
 
     let total_count = models::error::count_filtered(
         &pool,

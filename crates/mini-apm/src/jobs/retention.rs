@@ -1,30 +1,30 @@
+use crate::time;
 use crate::{
     DbPool,
     config::Config,
     models::{self, deploy, user},
 };
-use chrono::{Duration, Utc};
+use jiff::Timestamp;
 
 pub async fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
     // Delete old spans
-    let spans_cutoff = (Utc::now() - Duration::days(config.retention_days_spans)).to_rfc3339();
+    let spans_cutoff = time::rfc3339(time::days_ago(config.retention_days_spans));
     let deleted_spans = models::span::delete_before(pool, &spans_cutoff).await?;
     tracing::info!("Deleted {} old spans", deleted_spans);
 
     // Delete old error occurrences
-    let errors_cutoff = (Utc::now() - Duration::days(config.retention_days_errors)).to_rfc3339();
+    let errors_cutoff = time::rfc3339(time::days_ago(config.retention_days_errors));
     let deleted_occurrences =
         models::error::delete_occurrences_before(pool, &errors_cutoff).await?;
     tracing::info!("Deleted {} old error occurrences", deleted_occurrences);
 
     // Delete old hourly rollups
-    let hourly_cutoff =
-        (Utc::now() - Duration::days(config.retention_days_hourly_rollups)).to_rfc3339();
+    let hourly_cutoff = time::rfc3339(time::days_ago(config.retention_days_hourly_rollups));
     let deleted_hourly = models::rollup::delete_hourly_before(pool, &hourly_cutoff).await?;
     tracing::info!("Deleted {} old hourly rollups", deleted_hourly);
 
     // Delete old deploys (keep for 90 days)
-    let deploys_cutoff = (Utc::now() - Duration::days(90)).to_rfc3339();
+    let deploys_cutoff = time::rfc3339(time::days_ago(90));
     let deleted_deploys = deploy::delete_before(pool, &deploys_cutoff).await?;
     tracing::info!("Deleted {} old deploys", deleted_deploys);
 
@@ -35,7 +35,7 @@ pub async fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
     }
 
     // Vacuum on Sundays
-    if Utc::now().format("%u").to_string() == "7" {
+    if Timestamp::now().strftime("%u").to_string() == "7" {
         sqlx::query("VACUUM").execute(pool).await?;
         tracing::info!("Database vacuumed");
     }
@@ -70,8 +70,8 @@ mod tests {
         let pool = test_pool().await;
         let config = test_config();
 
-        let old_time = (Utc::now() - Duration::days(10)).to_rfc3339();
-        let recent_time = Utc::now().to_rfc3339();
+        let old_time = time::rfc3339(time::days_ago(10));
+        let recent_time = time::now_rfc3339();
 
         // Insert an old span (project_id can be NULL)
         sqlx::query(
@@ -107,8 +107,8 @@ mod tests {
         let pool = test_pool().await;
         let config = test_config();
 
-        let old_time = (Utc::now() - Duration::days(40)).to_rfc3339();
-        let recent_time = Utc::now().to_rfc3339();
+        let old_time = time::rfc3339(time::days_ago(40));
+        let recent_time = time::now_rfc3339();
 
         // First insert the parent error record (project_id can be NULL)
         let result = sqlx::query(
@@ -157,8 +157,8 @@ mod tests {
         let config = test_config();
 
         // Insert old hourly rollup (100 days ago)
-        let old_time = (Utc::now() - Duration::days(100))
-            .format("%Y-%m-%dT%H:00:00Z")
+        let old_time = time::days_ago(100)
+            .strftime("%Y-%m-%dT%H:00:00Z")
             .to_string();
         sqlx::query(
             "INSERT INTO rollups_hourly (hour, path, method, request_count, error_count, total_ms_sum, db_ms_sum, db_count_sum) VALUES (?1, '/test', 'GET', 10, 0, 100.0, 10.0, 5)",
@@ -169,7 +169,7 @@ mod tests {
         .unwrap();
 
         // Insert recent hourly rollup
-        let recent_time = Utc::now().format("%Y-%m-%dT%H:00:00Z").to_string();
+        let recent_time = Timestamp::now().strftime("%Y-%m-%dT%H:00:00Z").to_string();
         sqlx::query(
             "INSERT INTO rollups_hourly (hour, path, method, request_count, error_count, total_ms_sum, db_ms_sum, db_count_sum) VALUES (?1, '/test', 'GET', 10, 0, 100.0, 10.0, 5)",
         )
@@ -195,7 +195,7 @@ mod tests {
         let config = test_config();
 
         // Insert old deploy (100 days ago - deploys keep for 90 days, project_id can be NULL)
-        let old_time = (Utc::now() - Duration::days(100)).to_rfc3339();
+        let old_time = time::rfc3339(time::days_ago(100));
         sqlx::query("INSERT INTO deploys (git_sha, deployed_at) VALUES ('old-sha', ?1)")
             .bind(&old_time)
             .execute(&pool)
@@ -203,7 +203,7 @@ mod tests {
             .unwrap();
 
         // Insert recent deploy
-        let recent_time = Utc::now().to_rfc3339();
+        let recent_time = time::now_rfc3339();
         sqlx::query("INSERT INTO deploys (git_sha, deployed_at) VALUES ('new-sha', ?1)")
             .bind(&recent_time)
             .execute(&pool)
@@ -226,7 +226,7 @@ mod tests {
         let pool = test_pool().await;
         let config = test_config();
 
-        let recent_time = Utc::now().to_rfc3339();
+        let recent_time = time::now_rfc3339();
 
         // Insert recent span
         sqlx::query(
@@ -264,8 +264,8 @@ mod tests {
         let config = test_config();
 
         // Create an expired invite
-        let expired_time = (Utc::now() - Duration::days(1)).to_rfc3339();
-        let now = Utc::now().to_rfc3339();
+        let expired_time = time::rfc3339(time::days_ago(1));
+        let now = time::now_rfc3339();
         sqlx::query(
             "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at) VALUES (?1, 0, 'expired-token', ?2, ?3)",
         )
@@ -277,7 +277,7 @@ mod tests {
         .unwrap();
 
         // Create a valid invite
-        let future_time = (Utc::now() + Duration::days(1)).to_rfc3339();
+        let future_time = time::rfc3339(time::days_ago(-1));
         sqlx::query(
             "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at) VALUES (?1, 0, 'valid-token', ?2, ?3)",
         )

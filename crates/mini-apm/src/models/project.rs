@@ -1,5 +1,5 @@
 use crate::DbPool;
-use chrono::Utc;
+use crate::time;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -39,7 +39,7 @@ pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
         .await?;
 
     if count == 0 {
-        let now = Utc::now().to_rfc3339();
+        let now = time::now_rfc3339();
         let api_key = generate_api_key();
 
         let result = sqlx::query(
@@ -122,7 +122,7 @@ pub async fn find_by_api_key(pool: &DbPool, api_key: &str) -> anyhow::Result<Opt
 
 /// Create a new project
 pub async fn create(pool: &DbPool, name: &str) -> anyhow::Result<Project> {
-    let now = Utc::now().to_rfc3339();
+    let now = time::now_rfc3339();
     let slug = slugify(name);
     let api_key = generate_api_key();
 

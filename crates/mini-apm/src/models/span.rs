@@ -1,6 +1,7 @@
 use crate::DbPool;
+use crate::time;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use chrono::DateTime;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::collections::HashMap;
@@ -560,8 +561,8 @@ pub async fn insert_otlp_batch(
                 let end_nano: i64 = otlp_span.end_time_unix_nano.parse()?;
                 let duration_ms = (end_nano - start_nano) as f64 / 1_000_000.0;
 
-                let happened_at = DateTime::from_timestamp_nanos(start_nano)
-                    .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+                let happened_at = Timestamp::from_nanosecond(start_nano.into())?
+                    .strftime("%Y-%m-%dT%H:%M:%S%.3fZ")
                     .to_string();
 
                 let status_code = otlp_span.status.as_ref().and_then(|s| s.code).unwrap_or(0);
@@ -1081,8 +1082,7 @@ pub async fn hourly_stats(
     // Fill in all hours with zeros for missing data
     let mut points = Vec::with_capacity(hours as usize);
     for i in (0..hours).rev() {
-        let hour = chrono::Utc::now() - chrono::Duration::hours(i);
-        let hour_key = hour.format("%Y-%m-%d %H:00").to_string();
+        let hour_key = time::hours_ago(i).strftime("%Y-%m-%d %H:00").to_string();
         points.push(
             data_points
                 .get(&hour_key)

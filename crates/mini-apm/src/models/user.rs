@@ -1,9 +1,10 @@
 use crate::DbPool;
+use crate::time;
 use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
-use chrono::{Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -135,7 +136,7 @@ pub async fn ensure_default_admin(pool: &DbPool) -> anyhow::Result<()> {
     if count == 0 {
         let password = generate_random_password();
         let password_hash = hash_password(&password)?;
-        let now = Utc::now().to_rfc3339();
+        let now = time::now_rfc3339();
 
         sqlx::query(
             "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES (?1, ?2, 1, 1, ?3)",
@@ -176,7 +177,7 @@ pub async fn authenticate(
                 .is_some_and(|h| verify_password(password, h)) =>
         {
             // Update last login time
-            let now = Utc::now().to_rfc3339();
+            let now = time::now_rfc3339();
             let _ = sqlx::query("UPDATE users SET last_login_at = ?1 WHERE id = ?2")
                 .bind(&now)
                 .bind(u.id)
@@ -191,16 +192,16 @@ pub async fn authenticate(
 /// Create a new session for a user
 pub async fn create_session(pool: &DbPool, user_id: i64) -> anyhow::Result<String> {
     let token = generate_token();
-    let now = Utc::now();
-    let expires = now + Duration::days(7);
+    let now = Timestamp::now();
+    let expires = now + SignedDuration::from_hours(7 * 24);
 
     sqlx::query(
         "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
     )
     .bind(&token)
     .bind(user_id)
-    .bind(now.to_rfc3339())
-    .bind(expires.to_rfc3339())
+    .bind(time::rfc3339(now))
+    .bind(time::rfc3339(expires))
     .execute(pool)
     .await?;
 
@@ -209,7 +210,7 @@ pub async fn create_session(pool: &DbPool, user_id: i64) -> anyhow::Result<Strin
 
 /// Get user from session token
 pub async fn get_user_from_session(pool: &DbPool, token: &str) -> anyhow::Result<Option<User>> {
-    let now = Utc::now().to_rfc3339();
+    let now = time::now_rfc3339();
 
     let user: Option<User> = sqlx::query_as(
         r#"
@@ -239,7 +240,7 @@ pub async fn delete_session(pool: &DbPool, token: &str) -> anyhow::Result<()> {
 
 /// Delete expired sessions (cleanup)
 pub async fn delete_expired_sessions(pool: &DbPool) -> anyhow::Result<usize> {
-    let now = Utc::now().to_rfc3339();
+    let now = time::now_rfc3339();
     let result = sqlx::query("DELETE FROM sessions WHERE expires_at < ?1")
         .bind(&now)
         .execute(pool)
@@ -269,7 +270,7 @@ pub async fn create(
     is_admin: bool,
 ) -> anyhow::Result<i64> {
     let password_hash = hash_password(password)?;
-    let now = Utc::now().to_rfc3339();
+    let now = time::now_rfc3339();
 
     let result = sqlx::query(
         "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES (?1, ?2, ?3, 0, ?4)",
@@ -377,8 +378,8 @@ pub async fn create_with_invite(
     is_admin: bool,
 ) -> anyhow::Result<String> {
     let invite_token = generate_invite_token();
-    let now = Utc::now();
-    let expires = now + Duration::days(7);
+    let now = Timestamp::now();
+    let expires = now + SignedDuration::from_hours(7 * 24);
 
     sqlx::query(
         "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -386,8 +387,8 @@ pub async fn create_with_invite(
     .bind(username)
     .bind(is_admin)
     .bind(&invite_token)
-    .bind(expires.to_rfc3339())
-    .bind(now.to_rfc3339())
+    .bind(time::rfc3339(expires))
+    .bind(time::rfc3339(now))
     .execute(pool)
     .await?;
 
@@ -396,7 +397,7 @@ pub async fn create_with_invite(
 
 /// Find user by invite token
 pub async fn find_by_invite_token(pool: &DbPool, token: &str) -> anyhow::Result<Option<User>> {
-    let now = Utc::now().to_rfc3339();
+    let now = time::now_rfc3339();
     let sql = format!(
         "SELECT {USER_COLUMNS} FROM users WHERE invite_token = ?1 AND invite_expires_at > ?2"
     );
@@ -427,7 +428,7 @@ pub async fn accept_invite(pool: &DbPool, user_id: i64, password: &str) -> anyho
 
 /// Delete users with expired invite tokens who never activated their account
 pub async fn delete_expired_invites(pool: &DbPool) -> anyhow::Result<usize> {
-    let now = Utc::now().to_rfc3339();
+    let now = time::now_rfc3339();
 
     let result = sqlx::query(
         "DELETE FROM users WHERE invite_token IS NOT NULL AND invite_expires_at < ?1 AND password_hash IS NULL",
@@ -759,8 +760,8 @@ mod tests {
         let pool = test_pool().await;
 
         // Create an expired invite (invite_expires_at in the past, no password)
-        let expired_time = (Utc::now() - Duration::days(1)).to_rfc3339();
-        let now = Utc::now().to_rfc3339();
+        let expired_time = time::rfc3339(time::days_ago(1));
+        let now = time::now_rfc3339();
         sqlx::query(
             "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at) VALUES (?1, 0, 'expired-token', ?2, ?3)",
         )
@@ -772,7 +773,7 @@ mod tests {
         .unwrap();
 
         // Create a valid (non-expired) invite
-        let future_time = (Utc::now() + Duration::days(1)).to_rfc3339();
+        let future_time = time::rfc3339(time::days_ago(-1));
         sqlx::query(
             "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at) VALUES (?1, 0, 'valid-token', ?2, ?3)",
         )

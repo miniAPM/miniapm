@@ -1,5 +1,5 @@
 use askama::Template;
-use chrono::{Duration, Utc};
+use mini_apm::time;
 use rama::http::service::web::extract::State;
 
 use crate::template::HtmlTemplate;
@@ -32,7 +32,7 @@ pub async fn index(State(pool): State<DbPool>) -> HtmlTemplate<DashboardTemplate
         projects_enabled: false,
     };
     let project_id = ctx.project_id();
-    let since = (Utc::now() - Duration::hours(24)).to_rfc3339();
+    let since = time::rfc3339(time::hours_ago(24));
 
     let requests_24h = span::count_since(&pool, project_id, &since)
         .await

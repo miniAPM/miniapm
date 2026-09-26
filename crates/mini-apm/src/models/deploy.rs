@@ -1,5 +1,5 @@
 use crate::DbPool;
-use chrono::Utc;
+use crate::time;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -39,7 +39,7 @@ pub async fn insert(
     deploy: &IncomingDeploy,
     project_id: Option<i64>,
 ) -> anyhow::Result<i64> {
-    let now = Utc::now().to_rfc3339();
+    let now = time::now_rfc3339();
     let timestamp = deploy.timestamp.as_deref().unwrap_or(&now);
 
     let result = sqlx::query(

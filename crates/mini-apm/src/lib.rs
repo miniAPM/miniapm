@@ -5,6 +5,7 @@ pub mod jobs;
 pub mod models;
 pub mod server;
 pub mod telemetry;
+pub mod time;
 
 pub use db::DbPool;
 pub use telemetry::init_tracing;

@@ -1,5 +1,5 @@
 use askama::Template;
-use chrono::{Duration, Utc};
+use mini_apm::time;
 use rama::http::service::web::extract::{Query, State};
 use serde::Deserialize;
 
@@ -43,13 +43,13 @@ pub async fn index(
     let search = query.search.clone().filter(|s| !s.is_empty());
 
     let since = match period.as_str() {
-        "1h" => Utc::now() - Duration::hours(1),
-        "7d" => Utc::now() - Duration::days(7),
-        "30d" => Utc::now() - Duration::days(30),
-        _ => Utc::now() - Duration::hours(24),
+        "1h" => time::hours_ago(1),
+        "7d" => time::days_ago(7),
+        "30d" => time::days_ago(30),
+        _ => time::hours_ago(24),
     };
 
-    let since_str = since.to_rfc3339();
+    let since_str = time::rfc3339(since);
 
     let routes = span::routes_summary(&pool, project_id, &since_str, search.as_deref(), &sort, 100)
         .await

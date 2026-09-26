@@ -1,5 +1,5 @@
 use crate::DbPool;
-use chrono::Utc;
+use crate::time;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 
@@ -22,7 +22,7 @@ pub async fn create(pool: &DbPool, name: &str) -> anyhow::Result<String> {
     sqlx::query("INSERT INTO api_keys (name, key_hash, created_at) VALUES (?1, ?2, ?3)")
         .bind(name)
         .bind(&key_hash)
-        .bind(Utc::now().to_rfc3339())
+        .bind(time::now_rfc3339())
         .execute(pool)
         .await?;
 
@@ -46,7 +46,7 @@ pub async fn verify(pool: &DbPool, raw_key: &str) -> anyhow::Result<bool> {
     if exists {
         // Update last_used_at
         let _ = sqlx::query("UPDATE api_keys SET last_used_at = ?1 WHERE key_hash = ?2")
-            .bind(Utc::now().to_rfc3339())
+            .bind(time::now_rfc3339())
             .bind(&key_hash)
             .execute(pool)
             .await;

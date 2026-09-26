@@ -1,13 +1,12 @@
+use crate::time;
 use crate::{DbPool, models::rollup};
-use chrono::{Duration, Utc};
+use jiff::Timestamp;
 
 pub async fn hourly(pool: &DbPool) -> anyhow::Result<()> {
     // Get previous hour boundaries
     // Use SQLite-compatible format (space separator) for datetime() function compatibility
-    let prev_hour_start = (Utc::now() - Duration::hours(1))
-        .format("%Y-%m-%d %H:00:00")
-        .to_string();
-    let prev_hour_end = Utc::now().format("%Y-%m-%d %H:00:00").to_string();
+    let prev_hour_start = time::hours_ago(1).strftime("%Y-%m-%d %H:00:00").to_string();
+    let prev_hour_end = Timestamp::now().strftime("%Y-%m-%d %H:00:00").to_string();
 
     // Aggregate requests for the hour
     // Use explicit start/end times to avoid datetime() format issues
@@ -61,9 +60,7 @@ pub async fn hourly(pool: &DbPool) -> anyhow::Result<()> {
 
 pub async fn daily(pool: &DbPool) -> anyhow::Result<()> {
     // Get previous day
-    let prev_day = (Utc::now() - Duration::days(1))
-        .format("%Y-%m-%d")
-        .to_string();
+    let prev_day = time::days_ago(1).strftime("%Y-%m-%d").to_string();
 
     // Aggregate hourly rollups for the day
     #[allow(clippy::type_complexity)]
@@ -153,9 +150,7 @@ mod tests {
         let pool = test_pool().await;
 
         // Insert requests in the previous hour using SQLite-compatible format
-        let prev_hour_mid = (Utc::now() - Duration::hours(1))
-            .format("%Y-%m-%d %H:30:00")
-            .to_string();
+        let prev_hour_mid = time::hours_ago(1).strftime("%Y-%m-%d %H:30:00").to_string();
 
         for (id, method, ms, db_ms, db_count) in [
             ("req1", "GET", 100.0, 10.0, 2),
@@ -222,9 +217,7 @@ mod tests {
         let pool = test_pool().await;
 
         // Insert hourly rollups for the previous day
-        let prev_day = (Utc::now() - Duration::days(1))
-            .format("%Y-%m-%d")
-            .to_string();
+        let prev_day = time::days_ago(1).strftime("%Y-%m-%d").to_string();
         let hour1 = format!("{}T10:00:00Z", prev_day);
         let hour2 = format!("{}T14:00:00Z", prev_day);
 
@@ -288,8 +281,8 @@ mod tests {
         // NOTE: Full grouping verification skipped due to date format bug (see test above)
         let pool = test_pool().await;
 
-        let prev_hour = (Utc::now() - Duration::hours(1))
-            .format("%Y-%m-%dT%H:30:00Z")
+        let prev_hour = time::hours_ago(1)
+            .strftime("%Y-%m-%dT%H:30:00Z")
             .to_string();
 
         // Insert requests with different methods
