@@ -101,7 +101,7 @@ pub async fn login_submit(State(pool): State<DbPool>, Form(form): Form<LoginForm
                         "/"
                     };
 
-                    let mut response = Redirect::temporary(redirect_url).into_response();
+                    let mut response = Redirect::to(redirect_url).into_response();
                     response
                         .headers_mut()
                         .insert("set-cookie", cookie_header.parse().unwrap());
@@ -126,7 +126,7 @@ pub async fn login_submit(State(pool): State<DbPool>, Form(form): Form<LoginForm
 
 pub async fn logout() -> Response {
     let delete_header = delete_cookie_header(SESSION_COOKIE);
-    let mut response = Redirect::temporary("/auth/login").into_response();
+    let mut response = Redirect::to("/auth/login").into_response();
     response
         .headers_mut()
         .insert("set-cookie", delete_header.parse().unwrap());
@@ -138,7 +138,7 @@ pub async fn change_password_page(
     req: rama::http::Request,
 ) -> Response {
     let Some(user) = get_current_user(&pool, &req).await else {
-        return Redirect::temporary("/auth/login").into_response();
+        return Redirect::to("/auth/login").into_response();
     };
 
     HtmlTemplate(ChangePasswordTemplate {
@@ -202,7 +202,7 @@ pub async fn change_password_submit(
 
     // Change password
     match models::user::change_password(&pool, current_user.id, &form.new_password).await {
-        Ok(_) => Redirect::temporary("/").into_response(),
+        Ok(_) => Redirect::to("/").into_response(),
         Err(_) => HtmlTemplate(ChangePasswordTemplate {
             error: Some("Failed to change password".to_string()),
             username: current_user.username.clone(),
@@ -436,7 +436,7 @@ pub async fn invite_submit(
         Ok(session_token) => {
             let cookie_header = set_cookie_header(SESSION_COOKIE, &session_token, 7 * 86400);
             rama::http::Response::builder()
-                .status(StatusCode::TEMPORARY_REDIRECT)
+                .status(StatusCode::SEE_OTHER)
                 .header("set-cookie", cookie_header)
                 .header("location", "/")
                 .body(rama::http::Body::empty())

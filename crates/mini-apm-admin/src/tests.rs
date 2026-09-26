@@ -113,3 +113,23 @@ async fn test_pages_follow_selected_project() {
         );
     }
 }
+
+#[tokio::test]
+async fn test_form_posts_redirect_with_see_other() {
+    let app = app().await;
+    for (uri, form) in [
+        ("/projects/switch", "slug=default"),
+        ("/errors/1/status", "status=resolved"),
+        ("/auth/logout", ""),
+    ] {
+        let mut req = request(uri, "203.0.113.1", None);
+        *req.method_mut() = rama::http::Method::POST;
+        req.headers_mut().insert(
+            "content-type",
+            "application/x-www-form-urlencoded".parse().unwrap(),
+        );
+        *req.body_mut() = Body::from(form);
+        let res = app.serve(req).await.unwrap();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER, "{uri}");
+    }
+}

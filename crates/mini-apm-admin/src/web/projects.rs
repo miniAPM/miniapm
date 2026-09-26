@@ -44,7 +44,7 @@ pub struct SwitchForm {
 pub async fn switch_project(Form(form): Form<SwitchForm>) -> impl IntoResponse {
     let cookie_header = set_cookie_header(PROJECT_COOKIE, &form.slug, 365 * 86400);
     rama::http::Response::builder()
-        .status(rama::http::StatusCode::TEMPORARY_REDIRECT)
+        .status(rama::http::StatusCode::SEE_OTHER)
         .header("set-cookie", cookie_header)
         .header("location", "/")
         .body(rama::http::Body::empty())

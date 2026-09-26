@@ -98,7 +98,7 @@ where
             // Get session token from cookie
             let token = match get_cookie(&req, SESSION_COOKIE) {
                 Some(token) => token,
-                None => return Ok(Redirect::temporary("/auth/login").into_response()),
+                None => return Ok(Redirect::to("/auth/login").into_response()),
             };
 
             // Validate session
@@ -115,7 +115,7 @@ where
                     if user.must_change_password {
                         // Only allow the change-password page and static files
                         if path != "/auth/change-password" && !path.starts_with("/static") {
-                            return Ok(Redirect::temporary("/auth/change-password").into_response());
+                            return Ok(Redirect::to("/auth/change-password").into_response());
                         }
                     }
 
@@ -123,7 +123,7 @@ where
                     req.extensions().insert(current_user);
                     self.inner.serve(req).await
                 }
-                _ => Ok(Redirect::temporary("/auth/login").into_response()),
+                _ => Ok(Redirect::to("/auth/login").into_response()),
             }
         }
     }

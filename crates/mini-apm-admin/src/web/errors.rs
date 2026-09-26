@@ -143,5 +143,5 @@ pub async fn update_status(
     if valid_statuses.contains(&form.status.as_str()) {
         let _ = models::error::update_status(&pool, id, &form.status).await;
     }
-    Redirect::temporary("/errors")
+    Redirect::to("/errors")
 }
