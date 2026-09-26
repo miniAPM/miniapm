@@ -1,0 +1,3 @@
+bin "miniapm"
+about "MiniAPM Server"
+flag "-p --port <port>" help="Port to listen on" default="3000"

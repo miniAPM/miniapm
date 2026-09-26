@@ -1,0 +1,12 @@
+bin "miniapm-cli"
+about "MiniAPM CLI"
+subcommand_required #true
+cmd "create-key" help="Create a new API key" {
+    arg "<name>" help="Name for the API key"
+}
+cmd "list-keys" help="List all API keys"
+cmd "reset-password" help="Reset a user's password" {
+    arg "<username>" help="Username to reset password for"
+    arg "<password>" help="New password"
+}
+cmd "list-users" help="List all users"

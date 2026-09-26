@@ -40,7 +40,7 @@ serde_json = "1"
 askama = "0.12"
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+usage-lib = { version = "6.11", default-features = false, features = ["cli-help"] }
 
 # HTTP client - using rustls to avoid OpenSSL dependency
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

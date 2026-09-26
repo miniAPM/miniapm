@@ -1,19 +1,17 @@
-use clap::Parser;
-use mini_apm::{config::Config, db, init_tracing, server};
+use anyhow::Context;
+use mini_apm::{cli, config::Config, db, init_tracing, server};
 
-#[derive(Parser)]
-#[command(name = "miniapm")]
-#[command(about = "MiniAPM Server", version)]
-struct Cli {
-    #[arg(short, long, default_value = "3000")]
-    port: u16,
-}
+const USAGE: &str = include_str!("miniapm.usage.kdl");
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     init_tracing("mini_apm=info");
 
-    let cli = Cli::parse();
+    let args = cli::parse_env(USAGE);
+    let port: u16 = cli::value(&args, "port")
+        .context("missing --port")?
+        .parse()
+        .context("--port must be a number from 0 to 65535")?;
     let config = Config::from_env()?;
 
     // Validate configuration before starting
@@ -22,7 +20,7 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::init(&config).await?;
 
-    server::run(pool, config, cli.port).await?;
+    server::run(pool, config, port).await?;
 
     Ok(())
 }

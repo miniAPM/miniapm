@@ -17,7 +17,7 @@ rama = { workspace = true }
 sqlx = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-clap = { workspace = true }
+usage-lib = { workspace = true }
 jiff = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
