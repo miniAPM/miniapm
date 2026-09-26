@@ -172,6 +172,12 @@ async fn test_ingest_validates_payloads() {
         assert_eq!(app.serve(req).await.unwrap().status(), expected, "{body}");
     }
 
+    let trace_ids: Vec<String> = sqlx::query_scalar("SELECT DISTINCT trace_id FROM spans")
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+    assert_eq!(trace_ids, ["0af7651916cd43dd8448eb211c80319c"]);
+
     let deployed_at: String = sqlx::query_scalar("SELECT deployed_at FROM deploys")
         .fetch_one(&pool)
         .await

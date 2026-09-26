@@ -442,11 +442,11 @@ fn parse_attributes(attrs: &Option<Vec<KeyValue>>) -> HashMap<String, String> {
 }
 
 fn decode_id(s: &str) -> String {
-    // OTLP can send IDs as base64 - try to decode
-    if let Ok(bytes) = STANDARD.decode(s) {
+    if s.len().is_multiple_of(2) && s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        s.to_ascii_lowercase()
+    } else if let Ok(bytes) = STANDARD.decode(s) {
         hex::encode(bytes)
     } else {
-        // Already hex or some other format
         s.to_string()
     }
 }
