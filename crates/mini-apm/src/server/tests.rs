@@ -20,8 +20,11 @@ fn get(uri: &str) -> Request {
     Request::builder().uri(uri).body(Body::empty()).unwrap()
 }
 
-#[tokio::test]
-async fn test_collector_routes() {
+async fn setup() -> (
+    impl Service<Request, Output = Response, Error = Infallible>,
+    DbPool,
+    models::project::Project,
+) {
     let config = Config::default();
     let pool = db::init(&config).await.unwrap();
     let project = models::project::ensure_default_project(&pool)
@@ -31,6 +34,12 @@ async fn test_collector_routes() {
         pool: pool.clone(),
         config,
     });
+    (app, pool, project)
+}
+
+#[tokio::test]
+async fn test_collector_routes() {
+    let (app, pool, project) = setup().await;
 
     assert_eq!(
         app.serve(get("/health")).await.unwrap().status(),
@@ -66,4 +75,23 @@ async fn test_collector_routes() {
         stored, 1,
         "only the authenticated, in-limit request is stored"
     );
+}
+
+#[tokio::test]
+async fn test_errors_from_one_location_share_a_group() {
+    let (app, pool, project) = setup().await;
+    let auth = format!("Bearer {}", project.api_key);
+
+    for message in ["boom", "completely unrelated failure"] {
+        let res = app.serve(post_error(Some(&auth), message)).await.unwrap();
+        assert_eq!(res.status(), StatusCode::ACCEPTED, "{message}");
+    }
+
+    let (groups, occurrences): (i64, i64) =
+        sqlx::query_as("SELECT COUNT(*), SUM(occurrence_count) FROM errors WHERE project_id = ?1")
+            .bind(project.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((groups, occurrences), (1, 2));
 }

@@ -131,11 +131,17 @@ pub async fn insert(
             .await?;
             id
         } else {
-            // No similar error found - create new one with location fingerprint
-            let result = sqlx::query(
+            // No similar error found - create new one with location fingerprint.
+            // The fingerprint is unique per project, so a dissimilar message
+            // from an already known location counts towards that group.
+            sqlx::query_scalar(
                 r#"
                 INSERT INTO errors (project_id, fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status)
                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'open')
+                ON CONFLICT (project_id, fingerprint) DO UPDATE SET
+                    last_seen_at = excluded.last_seen_at,
+                    occurrence_count = occurrence_count + 1
+                RETURNING id
                 "#,
             )
             .bind(project_id)
@@ -144,9 +150,8 @@ pub async fn insert(
             .bind(&error.message)
             .bind(timestamp)
             .bind(timestamp)
-            .execute(pool)
-            .await?;
-            result.last_insert_rowid()
+            .fetch_one(pool)
+            .await?
         }
     };
 
