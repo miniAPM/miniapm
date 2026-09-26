@@ -9,7 +9,6 @@ services:
       - miniapm_data:/data
     environment:
       - SQLITE_PATH=/data/miniapm.db
-      - RUST_LOG=miniapm=info
     restart: unless-stopped
 
   miniapm-admin:
@@ -22,7 +21,6 @@ services:
       - miniapm_data:/data
     environment:
       - SQLITE_PATH=/data/miniapm.db
-      - RUST_LOG=miniapm-admin=info
       - ENABLE_USER_ACCOUNTS=true
       - SESSION_SECRET=change-me
       - MINI_APM_URL=http://localhost:3001

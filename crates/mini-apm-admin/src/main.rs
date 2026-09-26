@@ -9,7 +9,8 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|p| p.parse().ok())
         .unwrap_or(3001);
 
-    init_tracing("mini_apm_admin=info");
+    // Binary, admin library, and shared collector library targets
+    init_tracing("miniapm_admin=info,mini_apm_admin=info,mini_apm=info");
     mini_apm::api::health::init_start_time();
 
     let config = Config::from_env()?;

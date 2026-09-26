@@ -47,7 +47,7 @@ services:
     volumes:
       - miniapm_data:/data
     environment:
-      - RUST_LOG=mini_apm_admin=info
+      - RUST_LOG=miniapm_admin=info,mini_apm_admin=info,mini_apm=info
       - ENABLE_USER_ACCOUNTS=true
       - SESSION_SECRET=change-me-to-random-string
     depends_on:

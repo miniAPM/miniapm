@@ -11,7 +11,7 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    init_tracing("mini_apm=info,tower_http=info");
+    init_tracing("mini_apm=info");
 
     let cli = Cli::parse();
     let config = Config::from_env()?;
