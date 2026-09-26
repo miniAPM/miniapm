@@ -3,15 +3,26 @@ pub mod web;
 mod cookies;
 mod template;
 
+#[cfg(test)]
+mod tests;
+
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 
 use rama::Layer;
 use rama::conversion::FromRef;
+use rama::error::BoxError;
 use rama::http::layer::error_handling::ErrorHandlerLayer;
+use rama::http::layer::forwarded::GetForwardedHeaderLayer;
+use rama::http::service::web::response::IntoResponse;
 use rama::http::service::web::{Router, response::Html};
-use rama::http::{Request, Response};
+use rama::http::{Request, Response, StatusCode};
+use rama::layer::LimitLayer;
+use rama::layer::limit::policy::RateLimitReached;
+use rama::net::rate::{ClientIpRateKey, KeyedRatePolicy};
 use rama::service::Service;
+use rama::utils::rate::Rate;
 
 use mini_apm::DbPool;
 
@@ -82,7 +93,22 @@ pub fn make_app(
     let security_layer = web::security_headers::SecurityHeadersMiddleware::new();
     let with_security = security_layer.layer(with_auth);
 
-    // Rate limiting middleware (100 requests per minute per IP)
-    let rate_limit = mini_apm::api::RateLimitMiddleware::with_defaults();
-    Arc::new(rate_limit.layer(with_security))
+    // Rate limiting (100 requests per minute per client IP)
+    let rate_limit = LimitLayer::new(Arc::new(KeyedRatePolicy::abort(
+        ClientIpRateKey::new(),
+        Rate::new(100, Duration::from_secs(60)),
+    )))
+    .with_error_into_response_fn(|err: BoxError| {
+        Ok::<_, Infallible>(match err.downcast::<RateLimitReached>() {
+            Ok(reached) => reached.into_response(),
+            Err(err) => {
+                tracing::warn!("Rate limiter rejected request: {}", err);
+                StatusCode::SERVICE_UNAVAILABLE.into_response()
+            }
+        })
+    });
+    let with_rate_limit = rate_limit.into_layer(with_security);
+
+    // Client IP from X-Forwarded-For when behind a proxy, else the socket peer
+    Arc::new(GetForwardedHeaderLayer::x_forwarded_for().into_layer(with_rate_limit))
 }
