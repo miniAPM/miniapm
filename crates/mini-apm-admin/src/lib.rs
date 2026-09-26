@@ -7,6 +7,7 @@ mod template;
 mod tests;
 
 use std::convert::Infallible;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -77,7 +78,7 @@ pub fn make_app(
         // Static files
         .with_endpoint_service(
             "/static",
-            rama::http::service::fs::ServeDir::new("./static"),
+            rama::http::service::fs::ServeDir::new(static_dir()),
         )
         // 404 handler
         .with_not_found((
@@ -116,4 +117,15 @@ pub fn make_app(
 
     // Client IP from X-Forwarded-For when behind a proxy, else the socket peer
     Arc::new(GetForwardedHeaderLayer::x_forwarded_for().into_layer(with_rate_limit))
+}
+
+/// Admin UI assets: `./static` when deployed (see Dockerfile), else the
+/// crate's own copy so running from source works from any directory
+fn static_dir() -> PathBuf {
+    let deployed = Path::new("./static");
+    if deployed.is_dir() {
+        deployed.to_path_buf()
+    } else {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("static")
+    }
 }
