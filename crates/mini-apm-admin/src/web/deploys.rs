@@ -6,7 +6,10 @@ use rama::http::service::web::extract::State;
 use crate::template::HtmlTemplate;
 use mini_apm::{
     DbPool,
-    models::deploy::{self, Deploy},
+    models::{
+        deploy::{self, Deploy},
+        project,
+    },
 };
 
 use super::project_context::WebProjectContext;
@@ -33,7 +36,10 @@ pub async fn index(
     let api_key = ctx
         .current_project
         .as_ref()
-        .map(|p| p.api_key.clone())
+        .map(|p| match p.slug.as_str() {
+            project::SELF_SLUG => "Not used: MiniAPM records itself in-process".to_string(),
+            _ => p.api_key.clone(),
+        })
         .unwrap_or_else(|| "YOUR_API_KEY".to_string());
 
     // Extract base URL from request

@@ -12,6 +12,7 @@ use rama::net::user::Bearer;
 use rama::net::user::authority::{AuthorizeResult, Authorizer, Unauthorized};
 
 use crate::DbPool;
+use crate::models::project::SELF_SLUG;
 
 /// Holds project information extracted from API key authentication
 #[derive(Clone, Debug)]
@@ -44,14 +45,15 @@ impl Authorizer<Bearer> for ProjectKeyAuthorizer {
     async fn authorize(&self, credentials: Bearer) -> AuthorizeResult<Bearer, Self::Error> {
         let result =
             match crate::models::project::find_by_api_key(&self.pool, credentials.token()).await {
-                Ok(Some(project)) => {
+                Ok(Some(project)) if project.slug != SELF_SLUG => {
                     let extensions = Extensions::new();
                     extensions.insert(ProjectContext {
                         project_id: Some(project.id),
                     });
                     Ok(Some(extensions))
                 }
-                Ok(None) => Err(Unauthorized::new()),
+                // Unknown key, or the `self` project that only records in-process
+                Ok(_) => Err(Unauthorized::new()),
                 Err(e) => {
                     tracing::error!("Database error validating API key: {}", e);
                     Err(Unauthorized::new())

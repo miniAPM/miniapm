@@ -32,9 +32,13 @@ fn slugify(name: &str) -> String {
 }
 
 /// Ensure default project exists when projects are enabled
+/// Slug of the project MiniAPM records its own requests and errors into
+pub const SELF_SLUG: &str = "self";
+
 pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
-    // Check if any project exists
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects")
+    // Check if any project other than `self` exists
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE slug != ?1")
+        .bind(SELF_SLUG)
         .fetch_one(pool)
         .await?;
 
@@ -65,12 +69,31 @@ pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
 
     // Return first project
     let project = sqlx::query_as::<_, Project>(
-        "SELECT id, name, slug, api_key, created_at FROM projects ORDER BY id LIMIT 1",
+        "SELECT id, name, slug, api_key, created_at FROM projects WHERE slug != ?1 ORDER BY id LIMIT 1",
     )
+    .bind(SELF_SLUG)
     .fetch_one(pool)
     .await?;
 
     Ok(project)
+}
+
+/// The project MiniAPM records itself into. It cannot be deleted and its
+/// API key is refused by the collector: data only arrives in-process.
+pub async fn ensure_self_project(pool: &DbPool) -> anyhow::Result<Project> {
+    sqlx::query(
+        "INSERT OR IGNORE INTO projects (name, slug, api_key, created_at) VALUES (?1, ?2, ?3, ?4)",
+    )
+    .bind("MiniAPM")
+    .bind(SELF_SLUG)
+    .bind(generate_api_key())
+    .bind(time::now_rfc3339())
+    .execute(pool)
+    .await?;
+
+    find_by_slug(pool, SELF_SLUG)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("project name `MiniAPM` is taken, cannot create `self`"))
 }
 
 /// List all projects
@@ -147,8 +170,9 @@ pub async fn create(pool: &DbPool, name: &str) -> anyhow::Result<Project> {
 
 /// Delete a project
 pub async fn delete(pool: &DbPool, id: i64) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM projects WHERE id = ?1")
+    sqlx::query("DELETE FROM projects WHERE id = ?1 AND slug != ?2")
         .bind(id)
+        .bind(SELF_SLUG)
         .execute(pool)
         .await?;
     Ok(())

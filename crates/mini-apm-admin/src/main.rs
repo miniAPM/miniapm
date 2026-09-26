@@ -1,3 +1,4 @@
+use mini_apm::self_monitor::SelfMonitor;
 use mini_apm::server::serve_with_graceful_shutdown;
 use mini_apm::{DbPool, config::Config, db, init_tracing, models};
 use mini_apm_admin::make_app;
@@ -21,6 +22,11 @@ async fn main() -> anyhow::Result<()> {
 
     let pool = db::init(&config).await?;
     models::user::ensure_default_admin(&pool).await?;
+    models::project::ensure_default_project(&pool).await?;
+
+    // MiniAPM records its own requests and errors into the `self` project
+    let self_project = models::project::ensure_self_project(&pool).await?;
+    SelfMonitor::start(pool.clone(), self_project.id, "miniapm-admin").install();
 
     run(pool, port).await
 }

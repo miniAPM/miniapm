@@ -51,10 +51,13 @@ async fn test_collector_routes() {
     );
 
     let valid = format!("Bearer {}", project.api_key);
+    let self_project = models::project::ensure_self_project(&pool).await.unwrap();
+    let self_key = format!("Bearer {}", self_project.api_key);
     let oversized = "x".repeat(MAX_BODY_SIZE);
     for (auth, message, expected) in [
         (None, "boom", StatusCode::UNAUTHORIZED),
         (Some("Bearer proj_nope"), "boom", StatusCode::UNAUTHORIZED),
+        (Some(self_key.as_str()), "boom", StatusCode::UNAUTHORIZED),
         (Some(valid.as_str()), "boom", StatusCode::ACCEPTED),
         (
             Some(valid.as_str()),

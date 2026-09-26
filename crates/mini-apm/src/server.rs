@@ -14,6 +14,7 @@ use rama::http::service::web::{Router, response::Html};
 use rama::http::{Request, Response, StatusCode};
 use rama::rt::Executor;
 
+use crate::self_monitor::{SelfMonitor, SelfMonitorLayer};
 use crate::{DbPool, api, config::Config, jobs, models};
 
 /// Combined state for routes that need both pool and config
@@ -51,6 +52,10 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
         tracing::info!("Single-project mode - API key: {}", default_project.api_key);
     }
 
+    // MiniAPM records its own requests and errors into the `self` project
+    let self_project = models::project::ensure_self_project(&pool).await?;
+    SelfMonitor::start(pool.clone(), self_project.id, "miniapm").install();
+
     // Start background jobs
     jobs::start(pool.clone(), config.clone());
 
@@ -85,7 +90,8 @@ pub fn make_app(
             Html("<h1>404 - Collector API Only</h1>".to_owned()),
         ));
 
-    Arc::new(ErrorHandlerLayer::new().into_layer(app))
+    let app = ErrorHandlerLayer::new().into_layer(app);
+    Arc::new(SelfMonitorLayer::global().into_layer(app))
 }
 
 /// Run an HTTP server on `addr` until Ctrl+C/SIGTERM, then drain in-flight

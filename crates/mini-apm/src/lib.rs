@@ -4,6 +4,7 @@ pub mod config;
 pub mod db;
 pub mod jobs;
 pub mod models;
+pub mod self_monitor;
 pub mod server;
 pub mod telemetry;
 pub mod time;

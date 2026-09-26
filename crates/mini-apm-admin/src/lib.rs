@@ -30,6 +30,7 @@ use rama::service::Service;
 use rama::utils::rate::Rate;
 
 use mini_apm::DbPool;
+use mini_apm::self_monitor::SelfMonitorLayer;
 
 /// Combined state for routes that need pool
 #[derive(Clone)]
@@ -117,7 +118,9 @@ pub fn make_app(
             }
         })
     });
-    Arc::new(rate_limit.into_layer(with_security))
+    let with_rate_limit = rate_limit.into_layer(with_security);
+
+    Arc::new(SelfMonitorLayer::global().into_layer(with_rate_limit))
 }
 
 /// Admin UI assets: `./static` when deployed (see Dockerfile), else the
