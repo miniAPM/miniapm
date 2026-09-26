@@ -110,8 +110,12 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
 
 /// Generate a random session token
 fn generate_token() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 32] = rng.r#gen();
+    random_hex::<32>()
+}
+
+fn random_hex<const N: usize>() -> String {
+    let mut bytes = [0u8; N];
+    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
     hex::encode(bytes)
 }
 
@@ -366,9 +370,7 @@ pub async fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<User>> {
 
 /// Generate an invite token (12 bytes = 24 hex chars, short but secure)
 pub fn generate_invite_token() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 12] = rng.r#gen();
-    hex::encode(bytes)
+    random_hex::<12>()
 }
 
 /// Create a new user with an invite token (no password yet)

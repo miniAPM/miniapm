@@ -68,7 +68,7 @@ where
         req: Request,
     ) -> impl Future<Output = Result<Self::Output, Self::Error>> + Send + '_ {
         let pool = self.state.pool.clone();
-        let enable_user_accounts = super::env_flag("ENABLE_USER_ACCOUNTS");
+        let enable_user_accounts = mini_apm::config::env_flag("ENABLE_USER_ACCOUNTS");
 
         async move {
             let path = req

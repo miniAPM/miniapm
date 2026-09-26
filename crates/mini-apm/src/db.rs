@@ -40,6 +40,20 @@ pub async fn init(config: &Config) -> anyhow::Result<DbPool> {
     Ok(pool)
 }
 
+pub async fn delete_before(
+    pool: &DbPool,
+    table: &'static str,
+    column: &'static str,
+    before: &str,
+) -> anyhow::Result<u64> {
+    let sql = format!("DELETE FROM {table} WHERE {column} < ?1");
+    let result = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(before)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected())
+}
+
 pub async fn get_db_size(pool: &DbPool) -> anyhow::Result<f64> {
     let size: i64 = sqlx::query_scalar(
         "SELECT page_count * page_size FROM pragma_page_count(), pragma_page_size()",

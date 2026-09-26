@@ -104,14 +104,6 @@ pub async fn daily_for_range(
     Ok(rollups)
 }
 
-pub async fn delete_hourly_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
-    let result = sqlx::query("DELETE FROM rollups_hourly WHERE hour < ?1")
-        .bind(before)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() as usize)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,9 +321,10 @@ mod tests {
         .await
         .unwrap();
 
-        let deleted = delete_hourly_before(&pool, "2024-01-10T00:00:00Z")
-            .await
-            .unwrap();
+        let deleted =
+            crate::db::delete_before(&pool, "rollups_hourly", "hour", "2024-01-10T00:00:00Z")
+                .await
+                .unwrap();
 
         assert_eq!(deleted, 1);
 
@@ -351,9 +344,10 @@ mod tests {
         .await
         .unwrap();
 
-        let deleted = delete_hourly_before(&pool, "2024-01-01T00:00:00Z")
-            .await
-            .unwrap();
+        let deleted =
+            crate::db::delete_before(&pool, "rollups_hourly", "hour", "2024-01-01T00:00:00Z")
+                .await
+                .unwrap();
 
         assert_eq!(deleted, 0);
     }

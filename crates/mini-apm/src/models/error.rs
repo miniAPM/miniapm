@@ -97,16 +97,19 @@ pub async fn insert(
     // Try to find existing error by:
     // 1. First check exact fingerprint match (backward compatibility)
     // 2. Then check location fingerprint + message similarity >= 50%
-    let existing: Option<i64> = sqlx::query_scalar(
+    let exact: Option<i64> = sqlx::query_scalar(
         "SELECT id FROM errors WHERE fingerprint = ?1 AND ((?2 IS NULL AND project_id IS NULL) OR project_id = ?2)",
     )
     .bind(&error.fingerprint)
     .bind(project_id)
     .fetch_optional(pool)
     .await?;
+    let existing = match exact {
+        Some(id) => Some(id),
+        None => find_similar_error(pool, project_id, &location_fingerprint, &error.message).await?,
+    };
 
     let error_id = if let Some(id) = existing {
-        // Exact fingerprint match - update existing error
         sqlx::query(
             "UPDATE errors SET last_seen_at = ?1, occurrence_count = occurrence_count + 1 WHERE id = ?2",
         )
@@ -116,43 +119,24 @@ pub async fn insert(
         .await?;
         id
     } else {
-        // Try to find similar error by location + message similarity
-        let similar_error =
-            find_similar_error(pool, project_id, &location_fingerprint, &error.message).await?;
-
-        if let Some(id) = similar_error {
-            // Found similar error - group with it
-            sqlx::query(
-                "UPDATE errors SET last_seen_at = ?1, occurrence_count = occurrence_count + 1 WHERE id = ?2",
-            )
-            .bind(&timestamp)
-            .bind(id)
-            .execute(pool)
-            .await?;
-            id
-        } else {
-            // No similar error found - create new one with location fingerprint.
-            // The fingerprint is unique per project, so a dissimilar message
-            // from an already known location counts towards that group.
-            sqlx::query_scalar(
-                r#"
-                INSERT INTO errors (project_id, fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'open')
-                ON CONFLICT (project_id, fingerprint) DO UPDATE SET
-                    last_seen_at = excluded.last_seen_at,
-                    occurrence_count = occurrence_count + 1
-                RETURNING id
-                "#,
-            )
-            .bind(project_id)
-            .bind(&location_fingerprint)
-            .bind(&error.exception_class)
-            .bind(&error.message)
-            .bind(&timestamp)
-            .bind(&timestamp)
-            .fetch_one(pool)
-            .await?
-        }
+        sqlx::query_scalar(
+            r#"
+            INSERT INTO errors (project_id, fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'open')
+            ON CONFLICT (project_id, fingerprint) DO UPDATE SET
+                last_seen_at = excluded.last_seen_at,
+                occurrence_count = occurrence_count + 1
+            RETURNING id
+            "#,
+        )
+        .bind(project_id)
+        .bind(&location_fingerprint)
+        .bind(&error.exception_class)
+        .bind(&error.message)
+        .bind(&timestamp)
+        .bind(&timestamp)
+        .fetch_one(pool)
+        .await?
     };
 
     // Convert IncomingSourceContext to SourceContext for storage
@@ -407,14 +391,6 @@ pub async fn update_status(pool: &DbPool, id: i64, status: &str) -> anyhow::Resu
         .execute(pool)
         .await?;
     Ok(())
-}
-
-pub async fn delete_occurrences_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
-    let result = sqlx::query("DELETE FROM error_occurrences WHERE happened_at < ?1")
-        .bind(before)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() as usize)
 }
 
 /// Error trend point for charting

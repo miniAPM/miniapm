@@ -1,3 +1,4 @@
+use mini_apm::config::env_flag;
 use mini_apm::models::project::{self, Project};
 use rama::http::StatusCode;
 use rama::http::request::Parts;
@@ -25,6 +26,16 @@ impl WebProjectContext {
     /// Check if the given project ID is the current project (for template use)
     pub fn is_current_project(&self, id: &i64) -> bool {
         self.current_project.as_ref().map(|p| p.id) == Some(*id)
+    }
+
+    pub fn api_key(&self, fallback: &str) -> String {
+        match &self.current_project {
+            Some(p) if p.slug == project::SELF_SLUG => {
+                "Not used: MiniAPM records itself in-process".to_string()
+            }
+            Some(p) => p.api_key.clone(),
+            None => fallback.to_string(),
+        }
     }
 
     /// Returns true if project selector should be shown (more than 1 project)
@@ -57,8 +68,8 @@ impl FromPartsStateRefPair<AppState> for WebProjectContext {
         Ok(Self {
             current_project,
             projects,
-            projects_enabled: super::env_flag("ENABLE_PROJECTS"),
-            accounts_enabled: super::env_flag("ENABLE_USER_ACCOUNTS"),
+            projects_enabled: env_flag("ENABLE_PROJECTS"),
+            accounts_enabled: env_flag("ENABLE_USER_ACCOUNTS"),
         })
     }
 }

@@ -107,40 +107,32 @@ pub async fn list_all(pool: &DbPool) -> anyhow::Result<Vec<Project>> {
     Ok(projects)
 }
 
-/// Find project by ID
 pub async fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<Project>> {
-    let project = sqlx::query_as::<_, Project>(
-        "SELECT id, name, slug, api_key, created_at FROM projects WHERE id = ?1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(project)
+    find_by(pool, "id", id).await
 }
 
-/// Find project by slug
 pub async fn find_by_slug(pool: &DbPool, slug: &str) -> anyhow::Result<Option<Project>> {
-    let project = sqlx::query_as::<_, Project>(
-        "SELECT id, name, slug, api_key, created_at FROM projects WHERE slug = ?1",
-    )
-    .bind(slug)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(project)
+    find_by(pool, "slug", slug).await
 }
 
-/// Find project by API key
 pub async fn find_by_api_key(pool: &DbPool, api_key: &str) -> anyhow::Result<Option<Project>> {
-    let project = sqlx::query_as::<_, Project>(
-        "SELECT id, name, slug, api_key, created_at FROM projects WHERE api_key = ?1",
-    )
-    .bind(api_key)
-    .fetch_optional(pool)
-    .await?;
+    find_by(pool, "api_key", api_key).await
+}
 
-    Ok(project)
+async fn find_by<'q, T>(
+    pool: &DbPool,
+    column: &'static str,
+    value: T,
+) -> anyhow::Result<Option<Project>>
+where
+    T: 'q + Send + sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite>,
+{
+    let sql =
+        format!("SELECT id, name, slug, api_key, created_at FROM projects WHERE {column} = ?1");
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(value)
+        .fetch_optional(pool)
+        .await?)
 }
 
 /// Create a new project

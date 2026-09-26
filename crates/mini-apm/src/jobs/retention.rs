@@ -1,32 +1,26 @@
 use crate::time;
-use crate::{
-    DbPool,
-    config::Config,
-    models::{self, deploy, user},
-};
+use crate::{DbPool, config::Config, db, models::user};
 use jiff::Timestamp;
 
 pub async fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
-    // Delete old spans
-    let spans_cutoff = time::rfc3339(time::days_ago(config.retention_days_spans));
-    let deleted_spans = models::span::delete_before(pool, &spans_cutoff).await?;
-    tracing::info!("Deleted {} old spans", deleted_spans);
-
-    // Delete old error occurrences
-    let errors_cutoff = time::rfc3339(time::days_ago(config.retention_days_errors));
-    let deleted_occurrences =
-        models::error::delete_occurrences_before(pool, &errors_cutoff).await?;
-    tracing::info!("Deleted {} old error occurrences", deleted_occurrences);
-
-    // Delete old hourly rollups
-    let hourly_cutoff = time::rfc3339(time::days_ago(config.retention_days_hourly_rollups));
-    let deleted_hourly = models::rollup::delete_hourly_before(pool, &hourly_cutoff).await?;
-    tracing::info!("Deleted {} old hourly rollups", deleted_hourly);
-
-    // Delete old deploys (keep for 90 days)
-    let deploys_cutoff = time::rfc3339(time::days_ago(90));
-    let deleted_deploys = deploy::delete_before(pool, &deploys_cutoff).await?;
-    tracing::info!("Deleted {} old deploys", deleted_deploys);
+    for (table, column, days) in [
+        ("spans", "happened_at", config.retention_days_spans),
+        (
+            "error_occurrences",
+            "happened_at",
+            config.retention_days_errors,
+        ),
+        (
+            "rollups_hourly",
+            "hour",
+            config.retention_days_hourly_rollups,
+        ),
+        ("deploys", "deployed_at", 90),
+    ] {
+        let cutoff = time::rfc3339(time::days_ago(days));
+        let deleted = db::delete_before(pool, table, column, &cutoff).await?;
+        tracing::info!("Deleted {} old rows from {}", deleted, table);
+    }
 
     // Delete expired invite tokens (users who never activated)
     let deleted_invites = user::delete_expired_invites(pool).await?;

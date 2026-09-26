@@ -160,65 +160,42 @@ pub async fn change_password_submit(
     Extension(current_user): Extension<CurrentUser>,
     Form(form): Form<ChangePasswordForm>,
 ) -> Response {
-    // Validate password confirmation
-    if form.new_password != form.confirm_password {
-        return HtmlTemplate(ChangePasswordTemplate {
-            error: Some("Passwords do not match".to_string()),
+    let fail = |error: &str| {
+        HtmlTemplate(ChangePasswordTemplate {
+            error: Some(error.to_string()),
             username: current_user.username.clone(),
         })
-        .into_response();
-    }
+        .into_response()
+    };
 
+    if form.new_password != form.confirm_password {
+        return fail("Passwords do not match");
+    }
     if form.new_password.len() < 8 {
-        return HtmlTemplate(ChangePasswordTemplate {
-            error: Some("Password must be at least 8 characters".to_string()),
-            username: current_user.username.clone(),
-        })
-        .into_response();
+        return fail("Password must be at least 8 characters");
     }
 
     // Verify current password (skip only if must_change_password is set, allowing first-time change)
-    if !current_user.must_change_password && !form.current_password.is_empty() {
+    if !current_user.must_change_password {
+        if form.current_password.is_empty() {
+            return fail("Current password is required");
+        }
         match models::user::verify_password_for_user(&pool, current_user.id, &form.current_password)
             .await
             .inspect_err(|e| tracing::error!("Failed to verify password: {e:#}"))
         {
-            Ok(true) => {} // Password verified, continue
-            Ok(false) => {
-                return HtmlTemplate(ChangePasswordTemplate {
-                    error: Some("Current password is incorrect".to_string()),
-                    username: current_user.username.clone(),
-                })
-                .into_response();
-            }
-            Err(_) => {
-                return HtmlTemplate(ChangePasswordTemplate {
-                    error: Some("Failed to verify current password".to_string()),
-                    username: current_user.username.clone(),
-                })
-                .into_response();
-            }
+            Ok(true) => {}
+            Ok(false) => return fail("Current password is incorrect"),
+            Err(_) => return fail("Failed to verify current password"),
         }
-    } else if !current_user.must_change_password && form.current_password.is_empty() {
-        // Require current password for non-forced changes
-        return HtmlTemplate(ChangePasswordTemplate {
-            error: Some("Current password is required".to_string()),
-            username: current_user.username.clone(),
-        })
-        .into_response();
     }
 
-    // Change password
     match models::user::change_password(&pool, current_user.id, &form.new_password)
         .await
         .inspect_err(|e| tracing::error!("Failed to change password: {e:#}"))
     {
         Ok(_) => Redirect::to("/").into_response(),
-        Err(_) => HtmlTemplate(ChangePasswordTemplate {
-            error: Some("Failed to change password".to_string()),
-            username: current_user.username.clone(),
-        })
-        .into_response(),
+        Err(_) => fail("Failed to change password"),
     }
 }
 
@@ -430,33 +407,26 @@ pub async fn invite_submit(
         _ => return invalid_invite_response(),
     };
 
+    let fail = |error: &str| {
+        HtmlTemplate(InviteTemplate {
+            username: user.username.clone(),
+            error: Some(error.to_string()),
+        })
+        .into_response()
+    };
+
     if form.password != form.confirm_password {
-        return HtmlTemplate(InviteTemplate {
-            username: user.username,
-            error: Some("Passwords do not match".to_string()),
-        })
-        .into_response();
+        return fail("Passwords do not match");
     }
-
     if form.password.len() < 8 {
-        return HtmlTemplate(InviteTemplate {
-            username: user.username,
-            error: Some("Password must be at least 8 characters".to_string()),
-        })
-        .into_response();
+        return fail("Password must be at least 8 characters");
     }
-
-    // Accept the invite and set password
     if models::user::accept_invite(&pool, user.id, &form.password)
         .await
         .inspect_err(|e| tracing::error!("Failed to accept invite: {e:#}"))
         .is_err()
     {
-        return HtmlTemplate(InviteTemplate {
-            username: user.username,
-            error: Some("Failed to set password".to_string()),
-        })
-        .into_response();
+        return fail("Failed to set password");
     }
 
     // Create session and log them in

@@ -10,12 +10,6 @@ pub mod projects;
 pub mod security_headers;
 pub mod traces;
 
-pub(crate) fn env_flag(name: &str) -> bool {
-    std::env::var(name)
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-}
-
 pub use auth_middleware::WebAuthMiddleware;
 pub use project_context::WebProjectContext;
 pub use security_headers::SecurityHeadersMiddleware;

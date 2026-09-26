@@ -930,14 +930,6 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
     }))
 }
 
-pub async fn delete_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
-    let result = sqlx::query("DELETE FROM spans WHERE happened_at < ?1")
-        .bind(before)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() as usize)
-}
-
 pub async fn count_since(
     pool: &DbPool,
     project_id: Option<i64>,

@@ -15,12 +15,24 @@ pub struct Config {
     pub session_secret: String,
 }
 
+pub fn env_flag(name: &str) -> bool {
+    env::var(name)
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+fn env_positive<T: std::str::FromStr + PartialOrd + Default>(name: &str, default: T) -> T {
+    env::var(name)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|v| *v > T::default())
+        .unwrap_or(default)
+}
+
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         // SESSION_SECRET is required when user accounts are enabled
-        let enable_user_accounts = env::var("ENABLE_USER_ACCOUNTS")
-            .map(|v| v == "1" || v.to_lowercase() == "true")
-            .unwrap_or(false);
+        let enable_user_accounts = env_flag("ENABLE_USER_ACCOUNTS");
 
         let session_secret = env::var("SESSION_SECRET").ok();
 
@@ -47,32 +59,14 @@ impl Config {
             sqlite_path: env::var("SQLITE_PATH")
                 .unwrap_or_else(|_| "./data/miniapm.db".to_string()),
             api_key: env::var("MINI_APM_API_KEY").ok(),
-            retention_days_errors: env::var("RETENTION_DAYS_ERRORS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .filter(|&v| v > 0)
-                .unwrap_or(30),
-            retention_days_hourly_rollups: env::var("RETENTION_DAYS_HOURLY_ROLLUPS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .filter(|&v| v > 0)
-                .unwrap_or(90),
-            retention_days_spans: env::var("RETENTION_DAYS_SPANS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .filter(|&v| v > 0)
-                .unwrap_or(7),
-            slow_request_threshold_ms: env::var("SLOW_REQUEST_THRESHOLD_MS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .filter(|&v| v > 0.0)
-                .unwrap_or(500.0),
+            retention_days_errors: env_positive("RETENTION_DAYS_ERRORS", 30),
+            retention_days_hourly_rollups: env_positive("RETENTION_DAYS_HOURLY_ROLLUPS", 90),
+            retention_days_spans: env_positive("RETENTION_DAYS_SPANS", 7),
+            slow_request_threshold_ms: env_positive("SLOW_REQUEST_THRESHOLD_MS", 500.0),
             mini_apm_url: env::var("MINI_APM_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".to_string()),
             enable_user_accounts,
-            enable_projects: env::var("ENABLE_PROJECTS")
-                .map(|v| v == "1" || v.to_lowercase() == "true")
-                .unwrap_or(false),
+            enable_projects: env_flag("ENABLE_PROJECTS"),
             session_secret,
         })
     }

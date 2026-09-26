@@ -129,14 +129,6 @@ pub async fn latest(pool: &DbPool, project_id: Option<i64>) -> anyhow::Result<Op
     Ok(deploy)
 }
 
-pub async fn delete_before(pool: &DbPool, before: &str) -> anyhow::Result<usize> {
-    let result = sqlx::query("DELETE FROM deploys WHERE deployed_at < ?1")
-        .bind(before)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected() as usize)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,7 +310,9 @@ mod tests {
         };
         insert(&pool, &recent, None).await.unwrap();
 
-        let deleted = delete_before(&pool, "2023-01-01").await.unwrap();
+        let deleted = crate::db::delete_before(&pool, "deploys", "deployed_at", "2023-01-01")
+            .await
+            .unwrap();
         assert_eq!(deleted, 1);
 
         let remaining = list(&pool, None, 10).await.unwrap();

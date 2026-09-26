@@ -15,14 +15,7 @@ pub struct ApiKeyTemplate {
 }
 
 pub async fn index(ctx: WebProjectContext) -> HtmlTemplate<ApiKeyTemplate> {
-    let api_key = ctx
-        .current_project
-        .as_ref()
-        .map(|p| match p.slug.as_str() {
-            project::SELF_SLUG => "Not used: MiniAPM records itself in-process".to_string(),
-            _ => p.api_key.clone(),
-        })
-        .unwrap_or_else(|| "Error loading API key".to_string());
+    let api_key = ctx.api_key("Error loading API key");
 
     HtmlTemplate(ApiKeyTemplate { api_key, ctx })
 }
