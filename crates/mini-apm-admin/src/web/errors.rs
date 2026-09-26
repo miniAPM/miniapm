@@ -148,10 +148,10 @@ pub async fn update_status(
 ) -> Redirect {
     // Validate status
     let valid_statuses = ["open", "resolved", "ignored"];
-    if valid_statuses.contains(&form.status.as_str()) {
-        if let Err(e) = models::error::update_status(&pool, id, &form.status).await {
-            tracing::error!("Failed to update error status: {e:#}");
-        }
+    if valid_statuses.contains(&form.status.as_str())
+        && let Err(e) = models::error::update_status(&pool, id, &form.status).await
+    {
+        tracing::error!("Failed to update error status: {e:#}");
     }
     Redirect::to("/errors")
 }
