@@ -7,6 +7,7 @@ mod template;
 mod tests;
 
 use std::convert::Infallible;
+use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -14,14 +15,17 @@ use std::time::Duration;
 use rama::Layer;
 use rama::conversion::FromRef;
 use rama::error::BoxError;
+use rama::extensions::ExtensionsRef;
+use rama::http::headers::HeaderMapExt;
+use rama::http::headers::forwarded::XForwardedFor;
 use rama::http::layer::error_handling::ErrorHandlerLayer;
-use rama::http::layer::forwarded::GetForwardedHeaderLayer;
 use rama::http::service::web::response::IntoResponse;
 use rama::http::service::web::{Router, response::Html};
 use rama::http::{Request, Response, StatusCode};
 use rama::layer::LimitLayer;
 use rama::layer::limit::policy::RateLimitReached;
-use rama::net::rate::{ClientIpRateKey, KeyedRatePolicy};
+use rama::net::rate::KeyedRatePolicy;
+use rama::net::stream::SocketInfo;
 use rama::service::Service;
 use rama::utils::rate::Rate;
 
@@ -101,7 +105,7 @@ pub fn make_app(
 
     // Rate limiting (100 requests per minute per client IP)
     let rate_limit = LimitLayer::new(Arc::new(KeyedRatePolicy::abort(
-        ClientIpRateKey::new(),
+        client_rate_key,
         Rate::new(100, Duration::from_secs(60)),
     )))
     .with_error_into_response_fn(|err: BoxError| {
@@ -113,10 +117,7 @@ pub fn make_app(
             }
         })
     });
-    let with_rate_limit = rate_limit.into_layer(with_security);
-
-    // Client IP from X-Forwarded-For when behind a proxy, else the socket peer
-    Arc::new(GetForwardedHeaderLayer::x_forwarded_for().into_layer(with_rate_limit))
+    Arc::new(rate_limit.into_layer(with_security))
 }
 
 /// Admin UI assets: `./static` when deployed (see Dockerfile), else the
@@ -127,5 +128,40 @@ fn static_dir() -> PathBuf {
         deployed.to_path_buf()
     } else {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("static")
+    }
+}
+
+/// Rate limit key: the socket peer, unless that peer is a reverse proxy on
+/// the local network, then the client address the proxy appended to
+/// X-Forwarded-For. Earlier entries are client-supplied and ignored.
+/// IPv6 clients share a bucket per /64 so they cannot rotate addresses.
+fn client_rate_key(req: &Request) -> Result<Option<IpAddr>, BoxError> {
+    let Some(peer) = req
+        .extensions()
+        .get_ref::<SocketInfo>()
+        .map(|info| info.peer_addr().ip_addr.to_canonical())
+    else {
+        return Ok(None);
+    };
+
+    let forwarded = req
+        .headers()
+        .typed_get::<XForwardedFor>()
+        .and_then(|xff| xff.iter().last().copied());
+    let client = match forwarded {
+        Some(ip) if is_local(peer) => ip.to_canonical(),
+        _ => peer,
+    };
+
+    Ok(Some(match client {
+        IpAddr::V6(v6) => IpAddr::V6(Ipv6Addr::from_bits(v6.to_bits() & !(u64::MAX as u128))),
+        v4 => v4,
+    }))
+}
+
+fn is_local(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => v4.is_loopback() || v4.is_private(),
+        IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local(),
     }
 }

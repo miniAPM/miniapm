@@ -1,10 +1,7 @@
 use super::*;
-use rama::extensions::ExtensionsRef;
 use rama::http::Body;
 use rama::http::header::RETRY_AFTER;
 use rama::net::address::SocketAddress;
-use rama::net::stream::SocketInfo;
-use std::net::IpAddr;
 
 fn request(uri: &str, peer: &str, forwarded_for: Option<&str>) -> Request {
     let mut req = Request::builder().uri(uri);
@@ -53,13 +50,15 @@ async fn test_rate_limits_per_client_ip() {
     assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
     assert!(res.headers().contains_key(RETRY_AFTER));
 
-    // Other clients keep their own budget, by socket peer or forwarded IP
-    for (peer, forwarded) in [("203.0.113.2", None), ("203.0.113.1", Some("198.51.100.7"))] {
+    // X-Forwarded-For only counts from a local proxy, and only its last hop
+    for (peer, forwarded, limited) in [
+        ("203.0.113.2", None, false),
+        ("203.0.113.1", Some("198.51.100.7"), true),
+        ("10.0.0.2", Some("198.51.100.7, 203.0.113.1"), true),
+        ("10.0.0.2", Some("203.0.113.1, 198.51.100.7"), false),
+    ] {
         let res = app.serve(request("/nope", peer, forwarded)).await.unwrap();
-        assert_ne!(
-            res.status(),
-            StatusCode::TOO_MANY_REQUESTS,
-            "{peer} {forwarded:?}"
-        );
+        let got = res.status() == StatusCode::TOO_MANY_REQUESTS;
+        assert_eq!(got, limited, "{peer} {forwarded:?}");
     }
 }
