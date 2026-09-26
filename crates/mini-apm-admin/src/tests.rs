@@ -28,6 +28,7 @@ async fn test_health_and_not_found() {
         ("/nope", StatusCode::NOT_FOUND),
         ("/auth/users", StatusCode::NOT_FOUND),
         ("/auth/change-password", StatusCode::NOT_FOUND),
+        ("/auth/invite/bogus", StatusCode::NOT_FOUND),
     ] {
         let res = app.serve(request(uri, "203.0.113.1", None)).await.unwrap();
         assert_eq!(res.status(), expected, "{uri}");

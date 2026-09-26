@@ -395,7 +395,7 @@ pub struct InviteForm {
 /// Rendered when an invite token is missing, unknown, or expired.
 fn invalid_invite_response() -> Response {
     rama::http::Response::builder()
-        .status(StatusCode::OK)
+        .status(StatusCode::NOT_FOUND)
         .header("content-type", "text/html; charset=utf-8")
         .body(rama::http::Body::from(
             "<h1>Invalid or expired invite link</h1><p><a href=\"/auth/login\">Go to login</a></p>",
