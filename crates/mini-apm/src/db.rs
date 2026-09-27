@@ -40,6 +40,13 @@ pub async fn init(config: &Config) -> anyhow::Result<DbPool> {
     Ok(pool)
 }
 
+#[cfg(test)]
+pub async fn test_pool() -> DbPool {
+    init(&Config::default())
+        .await
+        .expect("Failed to create test database")
+}
+
 pub async fn delete_before(
     pool: &DbPool,
     table: &'static str,

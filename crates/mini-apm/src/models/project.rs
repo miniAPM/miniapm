@@ -194,18 +194,8 @@ pub async fn count(pool: &DbPool) -> anyhow::Result<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-    use crate::db;
 
-    async fn test_pool() -> DbPool {
-        let config = Config {
-            sqlite_path: ":memory:".to_string(),
-            ..Default::default()
-        };
-        db::init(&config)
-            .await
-            .expect("Failed to create test database")
-    }
+    use crate::db::test_pool;
 
     #[test]
     fn test_generate_api_key_format() {

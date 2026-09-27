@@ -107,15 +107,8 @@ pub async fn daily_for_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-    use crate::db;
 
-    async fn test_pool() -> DbPool {
-        let config = Config::default();
-        db::init(&config)
-            .await
-            .expect("Failed to create test database")
-    }
+    use crate::db::test_pool;
 
     async fn count_rows(pool: &DbPool, table: &str) -> i64 {
         let sql = format!("SELECT COUNT(*) FROM {table}");

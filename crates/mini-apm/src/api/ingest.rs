@@ -29,14 +29,26 @@ pub async fn ingest_spans(
     Extension(ctx): Extension<ProjectContext>,
     Json(otlp_request): Json<span::OtlpTraceRequest>,
 ) -> StatusCode {
-    match span::insert_otlp_batch(&pool, &otlp_request, ctx.project_id).await {
+    if store_spans(&pool, &otlp_request, ctx.project_id).await {
+        StatusCode::ACCEPTED
+    } else {
+        StatusCode::INTERNAL_SERVER_ERROR
+    }
+}
+
+async fn store_spans(
+    pool: &DbPool,
+    request: &span::OtlpTraceRequest,
+    project_id: Option<i64>,
+) -> bool {
+    match span::insert_otlp_batch(pool, request, project_id).await {
         Ok(count) => {
-            tracing::debug!("Ingested {} spans (project_id={:?})", count, ctx.project_id);
-            StatusCode::ACCEPTED
+            tracing::debug!("Ingested {} spans (project_id={:?})", count, project_id);
+            true
         }
         Err(e) => {
             tracing::error!("Failed to ingest spans: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            false
         }
     }
 }
@@ -59,9 +71,7 @@ impl TraceService for OtlpTraceService {
         let Some(ctx) = request.extensions().get_ref::<ProjectContext>().cloned() else {
             return Err(grpc::Status::unauthenticated("missing project"));
         };
-        let otlp_request = request.into_inner().into();
-        if let Err(e) = span::insert_otlp_batch(&self.pool, &otlp_request, ctx.project_id).await {
-            tracing::error!("Failed to ingest spans: {}", e);
+        if !store_spans(&self.pool, &request.into_inner().into(), ctx.project_id).await {
             return Err(grpc::Status::internal("failed to ingest spans"));
         }
         Ok(grpc::Response::new(ExportTraceServiceResponse::default()))
@@ -161,16 +171,10 @@ pub async fn ingest_errors_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-    use crate::db;
+
     use crate::models::project;
 
-    async fn test_pool() -> DbPool {
-        let config = Config::default();
-        db::init(&config)
-            .await
-            .expect("Failed to create test database")
-    }
+    use crate::db::test_pool;
 
     fn project_context(project_id: Option<i64>) -> ProjectContext {
         ProjectContext { project_id }

@@ -135,15 +135,8 @@ pub async fn daily(pool: &DbPool) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-    use crate::db;
 
-    async fn test_pool() -> DbPool {
-        let config = Config::default();
-        db::init(&config)
-            .await
-            .expect("Failed to create test database")
-    }
+    use crate::db::test_pool;
 
     #[tokio::test]
     async fn test_hourly_rollup_aggregates_requests() {

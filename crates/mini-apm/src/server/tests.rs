@@ -25,14 +25,13 @@ async fn setup() -> (
     DbPool,
     models::project::Project,
 ) {
-    let config = Config::default();
-    let pool = db::init(&config).await.unwrap();
+    let pool = db::test_pool().await;
     let project = models::project::ensure_default_project(&pool)
         .await
         .unwrap();
     let app = make_app(AppState {
         pool: pool.clone(),
-        config,
+        config: Config::default(),
     });
     (app, pool, project)
 }

@@ -1,5 +1,5 @@
 use super::*;
-use crate::{config::Config, db, models::project::Project};
+use crate::{db, models::project::Project};
 use rama::Layer;
 use rama::extensions::ExtensionsRef;
 use rama::http::body::util::BodyExt;
@@ -9,7 +9,7 @@ use std::convert::Infallible;
 
 /// Serves one request through the auth layer to a handler echoing the project id
 async fn serve(authorization: impl FnOnce(&Project) -> Option<String>) -> (Response, Project) {
-    let pool = db::init(&Config::default()).await.unwrap();
+    let pool = db::test_pool().await;
     let project = crate::models::project::ensure_default_project(&pool)
         .await
         .unwrap();

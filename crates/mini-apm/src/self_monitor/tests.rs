@@ -1,5 +1,5 @@
 use super::*;
-use crate::{config::Config, db, models::project};
+use crate::{db, models::project};
 use rama::http::Body;
 use rama::service::service_fn;
 use std::time::Duration;
@@ -19,7 +19,7 @@ fn test_route_of_collapses_ids() {
 
 #[tokio::test]
 async fn test_records_requests_and_errors_into_self_project() {
-    let pool = db::init(&Config::default()).await.unwrap();
+    let pool = db::test_pool().await;
     let project = project::ensure_self_project(&pool).await.unwrap();
     let monitor = SelfMonitor::start(pool.clone(), project.id, "test");
 

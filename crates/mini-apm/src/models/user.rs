@@ -445,15 +445,8 @@ pub async fn delete_expired_invites(pool: &DbPool) -> anyhow::Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
-    use crate::db;
 
-    async fn test_pool() -> DbPool {
-        let config = Config::default();
-        db::init(&config)
-            .await
-            .expect("Failed to create test database")
-    }
+    use crate::db::test_pool;
 
     #[test]
     fn test_validate_username_valid() {
