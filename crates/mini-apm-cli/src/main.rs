@@ -15,31 +15,24 @@ async fn main() -> anyhow::Result<()> {
     let config = Config::from_env()?;
 
     match args.cmd.name.as_str() {
-        "create-key" => {
-            let name = arg("name")?;
+        "list-projects" => {
             let pool = db::init(&config).await?;
-            let key = mini_apm::models::api_key::create(&pool, name).await?;
-            println!("API Key created successfully!\n");
-            println!("Name: {}", name);
-            println!("Key:  {}", key);
-            println!("\nStore this key securely - it cannot be retrieved later.");
-        }
-        "list-keys" => {
-            let pool = db::init(&config).await?;
-            let keys = mini_apm::models::api_key::list(&pool).await?;
-            if keys.is_empty() {
-                println!("No API keys found.");
-            } else {
-                println!("API Keys:");
-                for k in keys {
-                    println!(
-                        "  - {} (created: {}, last used: {})",
-                        k.name,
-                        k.created_at,
-                        k.last_used_at.as_deref().unwrap_or("never")
-                    );
+            println!("Projects:");
+            for p in models::project::list_all(&pool).await? {
+                if p.slug != models::project::SELF_SLUG {
+                    println!("  - {} ({}): {}", p.name, p.slug, p.api_key);
                 }
             }
+        }
+        "regenerate-key" => {
+            let slug = arg("project")?;
+            let pool = db::init(&config).await?;
+            let project = models::project::find_by_slug(&pool, slug)
+                .await?
+                .filter(|p| p.slug != models::project::SELF_SLUG)
+                .with_context(|| format!("no project with slug `{slug}`"))?;
+            let key = models::project::regenerate_api_key(&pool, project.id).await?;
+            println!("New API key for {}: {}", project.name, key);
         }
         "reset-password" => {
             let (username, password) = (arg("username")?, arg("password")?);

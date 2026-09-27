@@ -4,7 +4,6 @@ use std::path::Path;
 #[derive(Clone, Debug)]
 pub struct Config {
     pub sqlite_path: String,
-    pub api_key: Option<String>,
     pub retention_days_errors: i64,
     pub retention_days_hourly_rollups: i64,
     pub retention_days_spans: i64,
@@ -58,7 +57,6 @@ impl Config {
         Ok(Self {
             sqlite_path: env::var("SQLITE_PATH")
                 .unwrap_or_else(|_| "./data/miniapm.db".to_string()),
-            api_key: env::var("MINI_APM_API_KEY").ok(),
             retention_days_errors: env_positive("RETENTION_DAYS_ERRORS", 30),
             retention_days_hourly_rollups: env_positive("RETENTION_DAYS_HOURLY_ROLLUPS", 90),
             retention_days_spans: env_positive("RETENTION_DAYS_SPANS", 7),
@@ -69,10 +67,6 @@ impl Config {
             enable_projects: env_flag("ENABLE_PROJECTS"),
             session_secret,
         })
-    }
-
-    pub fn api_key_configured(&self) -> bool {
-        self.api_key.as_ref().is_some_and(|k| !k.is_empty())
     }
 
     /// Validates configuration and returns a list of errors.
@@ -165,7 +159,6 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             sqlite_path: ":memory:".to_string(),
-            api_key: None,
             retention_days_errors: 30,
             retention_days_hourly_rollups: 90,
             retention_days_spans: 7,
@@ -295,28 +288,6 @@ mod tests {
         assert!(error.contains("MINI_APM_URL"));
         assert!(error.contains("RETENTION_DAYS_ERRORS"));
         assert!(error.contains("RETENTION_DAYS_SPANS"));
-    }
-
-    #[test]
-    fn test_api_key_configured_with_key() {
-        let mut config = Config::default();
-        config.api_key = Some("my-api-key".to_string());
-
-        assert!(config.api_key_configured());
-    }
-
-    #[test]
-    fn test_api_key_configured_without_key() {
-        let config = Config::default();
-        assert!(!config.api_key_configured());
-    }
-
-    #[test]
-    fn test_api_key_configured_empty_key() {
-        let mut config = Config::default();
-        config.api_key = Some("".to_string());
-
-        assert!(!config.api_key_configured());
     }
 
     #[test]

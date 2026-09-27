@@ -191,8 +191,8 @@ miniapm -p 8080                 # Start on custom port
 miniapm-admin                   # Start dashboard (default port 3001)
 
 # CLI tools
-miniapm-cli create-key <name>   # Create a new API key
-miniapm-cli list-keys           # List all API keys
+miniapm-cli list-projects             # List projects and their API keys
+miniapm-cli regenerate-key <project>  # Regenerate a project's API key
 ```
 
 ## Health Checks
@@ -220,7 +220,7 @@ cargo run -p mini-apm
 cargo run -p mini-apm-admin
 
 # Run CLI
-cargo run -p mini-apm-cli -- create-key mykey
+cargo run -p mini-apm-cli -- list-projects
 
 # Check formatting
 cargo fmt --all --check

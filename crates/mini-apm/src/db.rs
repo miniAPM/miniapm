@@ -101,7 +101,6 @@ mod tests {
             "requests",
             "rollups_hourly",
             "rollups_daily",
-            "api_keys",
             "settings",
         ];
 

@@ -6,7 +6,7 @@ fn parse(args: &[&str]) -> Result<(String, Vec<Option<String>>), cli::Exit> {
         .map(String::from)
         .collect();
     let out = cli::parse(USAGE, &argv)?;
-    let values = ["name", "username", "password"]
+    let values = ["project", "username", "password"]
         .map(|n| cli::value(&out, n).map(String::from))
         .to_vec();
     Ok((out.cmd.name.clone(), values))
@@ -17,11 +17,11 @@ fn test_commands_parse() {
     let some = |s: &str| Some(s.to_string());
     for (args, cmd, values) in [
         (
-            &["create-key", "ci"][..],
-            "create-key",
-            [some("ci"), None, None],
+            &["regenerate-key", "default"][..],
+            "regenerate-key",
+            [some("default"), None, None],
         ),
-        (&["list-keys"][..], "list-keys", [None, None, None]),
+        (&["list-projects"][..], "list-projects", [None, None, None]),
         (
             &["reset-password", "bob", "hunter2"][..],
             "reset-password",
@@ -44,7 +44,7 @@ fn test_help_and_errors_exit() {
         (&["--help"][..], 0),
         (&["--version"][..], 0),
         (&[][..], 2),
-        (&["create-key"][..], 2),
+        (&["regenerate-key"][..], 2),
         (&["bogus"][..], 2),
     ] {
         assert_eq!(parse(args).unwrap_err().code, code, "{args:?}");
