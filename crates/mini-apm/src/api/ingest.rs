@@ -2,9 +2,13 @@
 //!
 //! Handles incoming telemetry data: spans, deploys, errors.
 
+use rama::extensions::ExtensionsRef;
 use rama::http::StatusCode;
+use rama::http::grpc;
 use rama::http::grpc::protobuf::prost::Message;
-use rama::http::grpc::service::opentelemetry::proto::collector::trace::v1::ExportTraceServiceRequest;
+use rama::http::grpc::service::opentelemetry::proto::collector::trace::v1::{
+    ExportTraceServiceRequest, ExportTraceServiceResponse, trace_service_server::TraceService,
+};
 use rama::http::service::web::extract::{Bytes, Json, State};
 use serde::Deserialize;
 
@@ -34,6 +38,33 @@ pub async fn ingest_spans(
             tracing::error!("Failed to ingest spans: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR
         }
+    }
+}
+
+pub struct OtlpTraceService {
+    pool: DbPool,
+}
+
+impl OtlpTraceService {
+    pub fn new(pool: DbPool) -> Self {
+        Self { pool }
+    }
+}
+
+impl TraceService for OtlpTraceService {
+    async fn export(
+        &self,
+        request: grpc::Request<ExportTraceServiceRequest>,
+    ) -> Result<grpc::Response<ExportTraceServiceResponse>, grpc::Status> {
+        let Some(ctx) = request.extensions().get_ref::<ProjectContext>().cloned() else {
+            return Err(grpc::Status::unauthenticated("missing project"));
+        };
+        let otlp_request = request.into_inner().into();
+        if let Err(e) = span::insert_otlp_batch(&self.pool, &otlp_request, ctx.project_id).await {
+            tracing::error!("Failed to ingest spans: {}", e);
+            return Err(grpc::Status::internal("failed to ingest spans"));
+        }
+        Ok(grpc::Response::new(ExportTraceServiceResponse::default()))
     }
 }
 

@@ -6,6 +6,7 @@ use rama::Layer;
 use rama::Service;
 use rama::conversion::FromRef;
 use rama::graceful::Shutdown;
+use rama::http::grpc::service::opentelemetry::proto::collector::trace::v1::trace_service_server::TraceServiceServer;
 use rama::http::header::CONTENT_TYPE;
 use rama::http::layer::body_limit::BodyLimitLayer;
 use rama::http::layer::error_handling::ErrorHandlerLayer;
@@ -89,11 +90,20 @@ pub fn make_app(
     let ingest = BodyLimitLayer::new(MAX_BODY_SIZE).into_layer(ingest);
     let ingest = api::ProjectKeyAuthorizer::layer(state.pool.clone()).into_layer(ingest);
 
+    let otlp_grpc = TraceServiceServer::new(api::OtlpTraceService::new(state.pool.clone()))
+        .with_max_decoding_message_size(MAX_BODY_SIZE);
+    let otlp_grpc = api::ProjectKeyAuthorizer::layer(state.pool.clone()).into_layer(otlp_grpc);
+
     // Build router with API routes only
     let app = Router::new_with_state(state)
         // Health check (no auth)
         .with_get("/health", api::health_handler)
         .with_sub_service("/ingest", ingest)
+        .with_match_route(
+            "/opentelemetry.proto.collector.trace.v1.TraceService/Export",
+            HttpMatcher::method_post(),
+            otlp_grpc,
+        )
         // 404 handler
         .with_not_found((
             StatusCode::NOT_FOUND,
