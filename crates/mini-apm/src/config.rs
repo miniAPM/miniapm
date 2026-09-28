@@ -183,8 +183,10 @@ mod tests {
 
     #[test]
     fn test_validate_invalid_url() {
-        let mut config = Config::default();
-        config.mini_apm_url = "not-a-url".to_string();
+        let config = Config {
+            mini_apm_url: "not-a-url".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -198,16 +200,20 @@ mod tests {
 
     #[test]
     fn test_validate_https_url() {
-        let mut config = Config::default();
-        config.mini_apm_url = "https://miniapm.example.com".to_string();
+        let config = Config {
+            mini_apm_url: "https://miniapm.example.com".to_string(),
+            ..Default::default()
+        };
 
         assert!(config.validate().is_ok());
     }
 
     #[test]
     fn test_validate_negative_retention_days() {
-        let mut config = Config::default();
-        config.retention_days_errors = -1;
+        let config = Config {
+            retention_days_errors: -1,
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -221,8 +227,10 @@ mod tests {
 
     #[test]
     fn test_validate_zero_retention_days() {
-        let mut config = Config::default();
-        config.retention_days_spans = 0;
+        let config = Config {
+            retention_days_spans: 0,
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -236,8 +244,10 @@ mod tests {
 
     #[test]
     fn test_validate_negative_threshold() {
-        let mut config = Config::default();
-        config.slow_request_threshold_ms = -100.0;
+        let config = Config {
+            slow_request_threshold_ms: -100.0,
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -251,9 +261,11 @@ mod tests {
 
     #[test]
     fn test_validate_short_session_secret_with_user_accounts() {
-        let mut config = Config::default();
-        config.enable_user_accounts = true;
-        config.session_secret = "short".to_string();
+        let config = Config {
+            enable_user_accounts: true,
+            session_secret: "short".to_string(),
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -267,9 +279,11 @@ mod tests {
 
     #[test]
     fn test_validate_short_session_secret_without_user_accounts() {
-        let mut config = Config::default();
-        config.enable_user_accounts = false;
-        config.session_secret = "short".to_string();
+        let config = Config {
+            enable_user_accounts: false,
+            session_secret: "short".to_string(),
+            ..Default::default()
+        };
 
         // Should be OK when user accounts are disabled
         assert!(config.validate().is_ok());
@@ -277,10 +291,12 @@ mod tests {
 
     #[test]
     fn test_validate_multiple_errors() {
-        let mut config = Config::default();
-        config.mini_apm_url = "invalid".to_string();
-        config.retention_days_errors = -1;
-        config.retention_days_spans = 0;
+        let config = Config {
+            mini_apm_url: "invalid".to_string(),
+            retention_days_errors: -1,
+            retention_days_spans: 0,
+            ..Default::default()
+        };
 
         let result = config.validate();
         assert!(result.is_err());
@@ -292,8 +308,10 @@ mod tests {
 
     #[test]
     fn test_memory_db_validation() {
-        let mut config = Config::default();
-        config.sqlite_path = ":memory:".to_string();
+        let config = Config {
+            sqlite_path: ":memory:".to_string(),
+            ..Default::default()
+        };
 
         assert!(config.validate().is_ok());
     }
