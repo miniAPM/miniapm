@@ -55,6 +55,12 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
         tracing::info!("Single-project mode - API key: {}", default_project.api_key);
     }
 
+    match crate::repair::otlp_ids(&pool).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("Repaired {} spans stored with mangled ids", n),
+        Err(e) => tracing::error!("Failed to repair mangled span ids: {:#}", e),
+    }
+
     // MiniAPM records its own requests and errors into the `self` project
     let self_project = models::project::ensure_self_project(&pool).await?;
     SelfMonitor::start(pool.clone(), self_project.id, "miniapm").install();
