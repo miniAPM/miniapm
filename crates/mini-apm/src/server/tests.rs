@@ -99,30 +99,70 @@ async fn test_errors_from_one_location_share_a_group() {
 }
 
 #[tokio::test]
-async fn test_routes_summary_for_route_without_db_spans() {
+async fn test_routes_summary_stats() {
     let (app, pool, project) = setup().await;
-    let start = jiff::Timestamp::now().as_nanosecond();
-    let span = format!(
-        r#"{{"traceId":"0af7651916cd43dd8448eb211c80319c","spanId":"b7ad6b7169203331","name":"GET /users","kind":2,"startTimeUnixNano":"{start}","endTimeUnixNano":"{}","attributes":[{{"key":"http.method","value":{{"stringValue":"GET"}}}}]}}"#,
-        start + 1_000_000
-    );
+    let now = jiff::Timestamp::now().as_nanosecond() as i64;
+    let span = |trace: u32, id: u32, parent: Option<u32>, name: &str, ms: i64| {
+        let (kind, attribute, parent) = match parent {
+            Some(p) => (
+                3,
+                r#"{"key":"db.system","value":{"stringValue":"sqlite"}}"#,
+                format!(r#""parentSpanId":"{p:016x}","#),
+            ),
+            None => (
+                2,
+                r#"{"key":"http.method","value":{"stringValue":"GET"}}"#,
+                String::new(),
+            ),
+        };
+        format!(
+            r#"{{"traceId":"{trace:032x}","spanId":"{id:016x}",{parent}"name":"{name}","kind":{kind},"startTimeUnixNano":{now},"endTimeUnixNano":{},"attributes":[{attribute}]}}"#,
+            now + ms * 1_000_000
+        )
+    };
+    let mut spans = vec![span(9, 90, None, "GET /b", 5)];
+    for (i, ms) in [(1, 10), (2, 20), (3, 30)] {
+        spans.push(span(i, i * 10, None, "GET /a", ms));
+        spans.push(span(i, i * 10 + 1, Some(i * 10), "SELECT", 2));
+    }
     let req = Request::builder()
         .method(Method::POST)
         .uri("/ingest/v1/traces")
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {}", project.api_key))
         .body(Body::from(format!(
-            r#"{{"resourceSpans":[{{"scopeSpans":[{{"spans":[{span}]}}]}}]}}"#
+            r#"{{"resourceSpans":[{{"scopeSpans":[{{"spans":[{}]}}]}}]}}"#,
+            spans.join(",")
         )))
         .unwrap();
     assert_eq!(app.serve(req).await.unwrap().status(), StatusCode::ACCEPTED);
 
     let since = crate::time::rfc3339(crate::time::hours_ago(1));
-    let routes =
+    let mut routes: Vec<_> =
         models::span::routes_summary(&pool, Some(project.id), &since, None, "requests", 10)
             .await
-            .unwrap();
-    assert_eq!(routes.len(), 1);
+            .unwrap()
+            .into_iter()
+            .map(|r| {
+                (
+                    r.path,
+                    r.request_count,
+                    r.avg_ms,
+                    r.p95_ms,
+                    r.p99_ms,
+                    r.avg_db_ms,
+                    r.avg_db_count,
+                )
+            })
+            .collect();
+    routes.sort();
+    assert_eq!(
+        routes,
+        [
+            ("GET /a".to_string(), 3, 20, 30, 30, 2, 1),
+            ("GET /b".to_string(), 1, 5, 5, 5, 0, 0),
+        ]
+    );
 }
 
 #[tokio::test]

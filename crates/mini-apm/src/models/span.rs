@@ -1152,11 +1152,17 @@ pub async fn routes_summary(
     .fetch_all(pool)
     .await?;
 
+    let paths = serde_json::to_string(&routes.iter().map(|r| &r.0).collect::<Vec<_>>())?;
+    let durations = route_durations(pool, project_id, since, &paths).await?;
+    let db_stats = route_db_stats(pool, project_id, since, &paths).await?;
+
     let mut result = Vec::new();
     for (path, method, request_count, avg_ms, max_ms, min_ms, error_count) in routes {
-        let (p95, p99) = calculate_route_percentiles(pool, project_id, &path, since).await?;
-        let (avg_db_ms, avg_db_count) =
-            calculate_route_db_stats(pool, project_id, &path, since).await?;
+        let (p95, p99) = durations
+            .get(&path)
+            .map(|d| (percentile_ms(d, 0.95), percentile_ms(d, 0.99)))
+            .unwrap_or((0, 0));
+        let (avg_db_ms, avg_db_count) = db_stats.get(&path).copied().unwrap_or((0, 0));
         let error_rate = if request_count > 0 {
             (error_count as f64 / request_count as f64) * 100.0
         } else {
@@ -1218,91 +1224,75 @@ pub async fn routes_count(
     Ok(count)
 }
 
-async fn calculate_route_percentiles(
+async fn route_durations(
     pool: &DbPool,
     project_id: Option<i64>,
-    path: &str,
     since: &str,
-) -> anyhow::Result<(i64, i64)> {
-    let values: Vec<f64> = sqlx::query_scalar(
+    paths: &str,
+) -> anyhow::Result<HashMap<String, Vec<f64>>> {
+    let rows: Vec<(String, f64)> = sqlx::query_as(
         r#"
-        SELECT duration_ms
+        SELECT COALESCE(name, http_url, 'unknown') AS path, duration_ms
         FROM spans
         WHERE parent_span_id IS NULL
-          AND COALESCE(name, http_url, 'unknown') = ?1
-          AND (?2 IS NULL OR project_id = ?2)
-          AND happened_at >= ?3
+          AND (?1 IS NULL OR project_id = ?1)
+          AND happened_at >= ?2
+          AND COALESCE(name, http_url, 'unknown') IN (SELECT value FROM json_each(?3))
         ORDER BY duration_ms ASC
         "#,
     )
-    .bind(path)
     .bind(project_id)
     .bind(since)
+    .bind(paths)
     .fetch_all(pool)
     .await?;
 
-    if values.is_empty() {
-        return Ok((0, 0));
+    let mut durations: HashMap<String, Vec<f64>> = HashMap::new();
+    for (path, duration) in rows {
+        durations.entry(path).or_default().push(duration);
     }
-
-    Ok((percentile_ms(&values, 0.95), percentile_ms(&values, 0.99)))
+    Ok(durations)
 }
 
-async fn calculate_route_db_stats(
+async fn route_db_stats(
     pool: &DbPool,
     project_id: Option<i64>,
-    path: &str,
     since: &str,
-) -> anyhow::Result<(i64, i64)> {
-    // Get all trace_ids for this route
-    let trace_ids: Vec<String> = sqlx::query_scalar(
+    paths: &str,
+) -> anyhow::Result<HashMap<String, (i64, i64)>> {
+    let rows: Vec<(String, f64, f64)> = sqlx::query_as(
         r#"
-        SELECT trace_id
-        FROM spans
-        WHERE parent_span_id IS NULL
-          AND COALESCE(name, http_url, 'unknown') = ?1
-          AND (?2 IS NULL OR project_id = ?2)
-          AND happened_at >= ?3
+        WITH roots AS (
+            SELECT trace_id, COALESCE(name, http_url, 'unknown') AS path
+            FROM spans
+            WHERE parent_span_id IS NULL
+              AND (?1 IS NULL OR project_id = ?1)
+              AND happened_at >= ?2
+              AND COALESCE(name, http_url, 'unknown') IN (SELECT value FROM json_each(?3))
+        ),
+        db AS (
+            SELECT s.trace_id, SUM(s.duration_ms) AS db_ms, COUNT(*) AS db_count
+            FROM spans s
+            JOIN (SELECT DISTINCT trace_id FROM roots) r ON r.trace_id = s.trace_id
+            WHERE s.span_category = 'db'
+            GROUP BY s.trace_id
+        )
+        SELECT roots.path, AVG(db.db_ms), AVG(db.db_count)
+        FROM roots
+        JOIN db ON db.trace_id = roots.trace_id
+        GROUP BY roots.path
         "#,
     )
-    .bind(path)
     .bind(project_id)
     .bind(since)
+    .bind(paths)
     .fetch_all(pool)
     .await?;
 
-    if trace_ids.is_empty() {
-        return Ok((0, 0));
-    }
-
-    // Calculate average DB time and count across these traces
-    let placeholders = trace_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-    let sql = format!(
-        r#"
-        SELECT
-            COALESCE(AVG(db_total_ms), 0.0) as avg_db_ms,
-            COALESCE(AVG(db_count), 0.0) as avg_db_count
-        FROM (
-            SELECT
-                trace_id,
-                SUM(duration_ms) as db_total_ms,
-                COUNT(*) as db_count
-            FROM spans
-            WHERE trace_id IN ({})
-              AND span_category = 'db'
-            GROUP BY trace_id
-        )
-        "#,
-        placeholders
-    );
-
-    let mut query = sqlx::query_as(sqlx::AssertSqlSafe(sql));
-    for trace_id in &trace_ids {
-        query = query.bind(trace_id);
-    }
-    let result: (f64, f64) = query.fetch_one(pool).await?;
-
-    Ok((result.0.round() as i64, result.1.round() as i64))
+    Ok(rows
+        .into_iter()
+        .map(|(path, db_ms, db_count)| (path, (db_ms.round() as i64, db_count.round() as i64)))
+        .collect())
 }
 
 const N_PLUS_1_THRESHOLD: usize = 5;
