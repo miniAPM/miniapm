@@ -51,11 +51,16 @@
                 <td>{{ project.name }}</td>
                 <td><code>{{ project.slug }}</code></td>
                 <td>
+                    {% if project.slug != "self" %}
                     <code class="api-key">{{ project.api_key }}</code>
                     <button type="button" class="btn-small" onclick="navigator.clipboard.writeText('{{ project.api_key }}')">Copy</button>
+                    {% else %}
+                    Records itself in-process
+                    {% endif %}
                 </td>
                 <td>{{ project.created_at }}</td>
                 <td class="actions">
+                    {% if project.slug != "self" %}
                     <form method="POST" action="/projects/regenerate-key" class="inline">
                         <input type="hidden" name="id" value="{{ project.id }}">
                         <button type="submit" class="btn-small" onclick="return confirm('Regenerate API key? Existing integrations will stop working.')">Regenerate Key</button>
@@ -64,6 +69,7 @@
                         <input type="hidden" name="id" value="{{ project.id }}">
                         <button type="submit" class="btn-small btn-danger" onclick="return confirm('Delete this project? All data will be lost.')">Delete</button>
                     </form>
+                    {% endif %}
                 </td>
             </tr>
             {% endfor %}
