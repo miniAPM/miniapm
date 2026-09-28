@@ -1,3 +1,3 @@
 [toolchain]
 channel = "1.98"
-edition = "2024"
+components = ["rustfmt", "clippy"]
