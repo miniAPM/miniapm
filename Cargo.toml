@@ -61,7 +61,7 @@ anyhow = "1"
 argon2 = "0.5"
 
 # State machines
-state-machines = "0.21"
+state-machines = "0.21.1"
 
 [profile.release]
 opt-level = "z"
