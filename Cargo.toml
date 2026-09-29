@@ -60,6 +60,9 @@ anyhow = "1"
 # Authentication
 argon2 = "0.5"
 
+# State machines
+state-machines = "0.21"
+
 [profile.release]
 opt-level = "z"
 lto = true

@@ -1647,6 +1647,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlx",
+ "state-machines",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3502,6 +3503,33 @@ name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
+
+[[package]]
+name = "state-machines"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f47a189a4799c870b5f7c7aaa7fb9cf232ba53724dfb9f70c6df6f6fcc5457c"
+dependencies = [
+ "state-machines-core",
+ "state-machines-macro",
+]
+
+[[package]]
+name = "state-machines-core"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "44c9ff2addb025d92b75ddc3984f6a2751cba4b5a86259f4dec6a251a1aac901"
+
+[[package]]
+name = "state-machines-macro"
+version = "0.22.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d080f1606ea7ed35fd0870d051573df2c0a99251186005f0da13c32260086e1a"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.114",
+]
 
 [[package]]
 name = "stringprep"

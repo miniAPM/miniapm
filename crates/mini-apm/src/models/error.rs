@@ -4,6 +4,10 @@ use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+pub mod status;
+
+pub use status::ErrorStatusEvent;
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct AppError {
     pub id: i64,
@@ -109,24 +113,23 @@ pub async fn insert(
         None => find_similar_error(pool, project_id, &location_fingerprint, &error.message).await?,
     };
 
-    let error_id = if let Some(id) = existing {
-        sqlx::query(
-            "UPDATE errors SET last_seen_at = ?1, occurrence_count = occurrence_count + 1 WHERE id = ?2",
+    let (error_id, status): (i64, String) = if let Some(id) = existing {
+        sqlx::query_as(
+            "UPDATE errors SET last_seen_at = ?1, occurrence_count = occurrence_count + 1 WHERE id = ?2 RETURNING id, status",
         )
         .bind(&timestamp)
         .bind(id)
-        .execute(pool)
-        .await?;
-        id
+        .fetch_one(pool)
+        .await?
     } else {
-        sqlx::query_scalar(
+        sqlx::query_as(
             r#"
             INSERT INTO errors (project_id, fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status)
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'open')
             ON CONFLICT (project_id, fingerprint) DO UPDATE SET
                 last_seen_at = excluded.last_seen_at,
                 occurrence_count = occurrence_count + 1
-            RETURNING id
+            RETURNING id, status
             "#,
         )
         .bind(project_id)
@@ -138,6 +141,9 @@ pub async fn insert(
         .fetch_one(pool)
         .await?
     };
+    if let Some(next) = status::transition(&status, ErrorStatusEvent::Recur) {
+        set_status(pool, error_id, &status, next).await?;
+    }
 
     // Convert IncomingSourceContext to SourceContext for storage
     let source_context_json = error.source_context.as_ref().and_then(|sc| {
@@ -384,13 +390,35 @@ pub async fn count_since(
     Ok(count)
 }
 
-pub async fn update_status(pool: &DbPool, id: i64, status: &str) -> anyhow::Result<()> {
-    sqlx::query("UPDATE errors SET status = ?1 WHERE id = ?2")
-        .bind(status)
+/// Fire `event` on an error's status. Returns the new status, or `None` when
+/// the error is unknown or its status does not allow `event`.
+pub async fn apply(
+    pool: &DbPool,
+    id: i64,
+    event: ErrorStatusEvent,
+) -> anyhow::Result<Option<&'static str>> {
+    let Some(current): Option<String> =
+        sqlx::query_scalar("SELECT status FROM errors WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await?
+    else {
+        return Ok(None);
+    };
+    let Some(next) = status::transition(&current, event) else {
+        return Ok(None);
+    };
+    Ok(set_status(pool, id, &current, next).await?.then_some(next))
+}
+
+async fn set_status(pool: &DbPool, id: i64, from: &str, to: &str) -> anyhow::Result<bool> {
+    let result = sqlx::query("UPDATE errors SET status = ?1 WHERE id = ?2 AND status = ?3")
+        .bind(to)
         .bind(id)
+        .bind(from)
         .execute(pool)
         .await?;
-    Ok(())
+    Ok(result.rows_affected() == 1)
 }
 
 /// Error trend point for charting

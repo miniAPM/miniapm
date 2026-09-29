@@ -4,6 +4,7 @@ use rama::http::service::web::response::Redirect;
 use serde::Deserialize;
 
 use crate::template::HtmlTemplate;
+use mini_apm::models::error::ErrorStatusEvent;
 use mini_apm::{DbPool, models};
 
 use super::project_context::WebProjectContext;
@@ -146,12 +147,16 @@ pub async fn update_status(
     Path(id): Path<i64>,
     Form(form): Form<UpdateStatusForm>,
 ) -> Redirect {
-    // Validate status
-    let valid_statuses = ["open", "resolved", "ignored"];
-    if valid_statuses.contains(&form.status.as_str())
-        && let Err(e) = models::error::update_status(&pool, id, &form.status).await
-    {
-        tracing::error!("Failed to update error status: {e:#}");
+    let event = match form.status.as_str() {
+        "resolved" => ErrorStatusEvent::Resolve,
+        "ignored" => ErrorStatusEvent::Ignore,
+        "open" => ErrorStatusEvent::Reopen,
+        _ => return Redirect::to("/errors"),
+    };
+    match models::error::apply(&pool, id, event).await {
+        Ok(Some(_)) => {}
+        Ok(None) => tracing::warn!("Error {} cannot move to {}", id, form.status),
+        Err(e) => tracing::error!("Failed to update error status: {e:#}"),
     }
     Redirect::to("/errors")
 }

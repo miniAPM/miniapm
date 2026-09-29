@@ -313,3 +313,41 @@ async fn test_ingest_otlp_protobuf_and_grpc() {
         .unwrap();
     assert_eq!(span_ids, ["01".repeat(8), "02".repeat(8)]);
 }
+
+#[tokio::test]
+async fn test_recurring_error_reopens_unless_ignored() {
+    use crate::models::error::{self, ErrorStatusEvent};
+
+    let (app, pool, project) = setup().await;
+    let auth = format!("Bearer {}", project.api_key);
+    let status = async || -> String {
+        sqlx::query_scalar("SELECT status FROM errors")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    app.serve(post_error(Some(&auth), "boom")).await.unwrap();
+    let id: i64 = sqlx::query_scalar("SELECT id FROM errors")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    for (event, after_event, after_recurrence) in [
+        (ErrorStatusEvent::Resolve, "resolved", "open"),
+        (ErrorStatusEvent::Ignore, "ignored", "ignored"),
+    ] {
+        assert_eq!(
+            error::apply(&pool, id, event).await.unwrap(),
+            Some(after_event)
+        );
+        app.serve(post_error(Some(&auth), "boom")).await.unwrap();
+        assert_eq!(status().await, after_recurrence);
+    }
+    assert_eq!(
+        error::apply(&pool, id, ErrorStatusEvent::Recur)
+            .await
+            .unwrap(),
+        None
+    );
+}
