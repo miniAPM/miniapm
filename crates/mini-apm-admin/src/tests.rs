@@ -94,7 +94,9 @@ async fn test_pages_follow_selected_project() {
     let page = async |uri: &str, cookie: Option<&str>| {
         let mut req = request(uri, "203.0.113.1", None);
         if let Some(slug) = cookie {
-            let value = format!("miniapm_project={slug}").parse().unwrap();
+            let value = format!("unrelated=abc=123; miniapm_project={slug}; other=xyz")
+                .parse()
+                .unwrap();
             req.headers_mut().insert("cookie", value);
         }
         let body = app.serve(req).await.unwrap().into_body();
@@ -104,6 +106,7 @@ async fn test_pages_follow_selected_project() {
     for (cookie, api_key, sees_error) in [
         (None, &default.api_key, false),
         (Some("other"), &other.api_key, true),
+        (Some("missing-project"), &default.api_key, false),
     ] {
         let api_page = page("/api-key", cookie).await;
         assert!(api_page.contains(api_key.as_str()), "{cookie:?}");
@@ -135,5 +138,18 @@ async fn test_form_posts_redirect_with_see_other() {
         *req.body_mut() = Body::from(form);
         let res = app.serve(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::SEE_OTHER, "{uri}");
+        if uri == "/projects/switch" {
+            assert_eq!(res.headers().get("location").unwrap(), "/");
+            assert_eq!(
+                res.headers().get("set-cookie").unwrap(),
+                "miniapm_project=default; Max-Age=31536000; Path=/; HttpOnly; SameSite=Lax"
+            );
+        } else if uri == "/auth/logout" {
+            assert_eq!(res.headers().get("location").unwrap(), "/auth/login");
+            assert_eq!(
+                res.headers().get("set-cookie").unwrap(),
+                "miniapm_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax"
+            );
+        }
     }
 }

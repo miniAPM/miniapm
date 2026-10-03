@@ -3,17 +3,27 @@ use crate::db;
 use rama::http::{Body, Method, StatusCode};
 
 fn post_error(authorization: Option<&str>, message: &str) -> Request {
+    post_json(
+        "/ingest/errors",
+        authorization,
+        serde_json::json!({
+            "exception_class": "E",
+            "message": message,
+            "backtrace": [],
+            "fingerprint": "fp",
+        }),
+    )
+}
+
+fn post_json(uri: &str, authorization: Option<&str>, payload: serde_json::Value) -> Request {
     let mut req = Request::builder()
         .method(Method::POST)
-        .uri("/ingest/errors")
+        .uri(uri)
         .header("Content-Type", "application/json");
     if let Some(value) = authorization {
         req = req.header("Authorization", value);
     }
-    req.body(Body::from(format!(
-        r#"{{"exception_class":"E","message":"{message}","backtrace":[],"fingerprint":"fp"}}"#
-    )))
-    .unwrap()
+    req.body(Body::from(payload.to_string())).unwrap()
 }
 
 fn get(uri: &str) -> Request {
@@ -350,4 +360,164 @@ async fn test_recurring_error_reopens_unless_ignored() {
             .unwrap(),
         None
     );
+}
+
+#[tokio::test]
+async fn health_reports_database_connectivity_through_http() -> anyhow::Result<()> {
+    use rama::http::body::util::BodyExt;
+    use serde_json::json;
+
+    let (app, pool, _) = setup().await;
+    for healthy in [true, false] {
+        if !healthy {
+            pool.close().await;
+        }
+        let response = app.serve(get("/health")).await?;
+        assert_eq!(
+            response.status(),
+            if healthy {
+                StatusCode::OK
+            } else {
+                StatusCode::SERVICE_UNAVAILABLE
+            }
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .expect("JSON content type"),
+            "application/json"
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(&response.into_body().collect().await?.to_bytes())?;
+        let uptime = body["uptime_seconds"].as_u64().expect("numeric uptime");
+        let expected = if healthy {
+            json!({"status": "ok", "db_ok": true, "uptime_seconds": uptime})
+        } else {
+            json!({
+                "status": "unhealthy", "db_ok": false, "uptime_seconds": uptime,
+                "error": "Database unreachable",
+            })
+        };
+        assert_eq!(body, expected);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn error_ingestion_persists_occurrence_details_and_source_context() -> anyhow::Result<()> {
+    use crate::models::error;
+    use serde_json::json;
+
+    let (app, pool, project) = setup().await;
+    let request = post_json(
+        "/ingest/errors",
+        Some(&format!("Bearer {}", project.api_key)),
+        json!({
+            "exception_class": "NoMethodError",
+            "message": "undefined method 'foo'",
+            "fingerprint": "source-context",
+            "backtrace": ["app/controllers/users_controller.rb:15:in `show'"],
+            "request_id": "req-123",
+            "user_id": "user-456",
+            "params": {"id": 42},
+            "timestamp": "2024-01-01T12:00:00Z",
+            "source_context": {
+                "file": "app/controllers/users_controller.rb",
+                "lineno": 15,
+                "pre_context": ["def show"],
+                "context_line": "@user.foo",
+                "post_context": ["end"],
+            },
+        }),
+    );
+    assert_eq!(app.serve(request).await?.status(), StatusCode::ACCEPTED);
+
+    let groups = error::list(&pool, Some(project.id), None, 10).await?;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].exception_class, "NoMethodError");
+    let occurrences = error::occurrences(&pool, groups[0].id, 10).await?;
+    assert_eq!(occurrences.len(), 1);
+    let occurrence = &occurrences[0];
+    assert_eq!(occurrence.request_id.as_deref(), Some("req-123"));
+    assert_eq!(occurrence.user_id.as_deref(), Some("user-456"));
+    assert_eq!(occurrence.params, Some(json!({"id": 42})));
+    assert_eq!(occurrence.happened_at, "2024-01-01 12:00");
+    assert_eq!(
+        occurrence.backtrace,
+        ["app/controllers/users_controller.rb:15:in `show'"]
+    );
+    let source = occurrence
+        .source_context
+        .as_ref()
+        .expect("source context persisted");
+    assert_eq!(source.file, "app/controllers/users_controller.rb");
+    assert_eq!(source.lineno, 15);
+    assert_eq!(source.pre_context, ["def show"]);
+    assert_eq!(source.context_line, "@user.foo");
+    assert_eq!(source.post_context, ["end"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn error_batches_handle_empty_partial_and_total_storage_failures() -> anyhow::Result<()> {
+    use serde_json::json;
+
+    for (classes, expected_status, stored) in [
+        (vec![], StatusCode::ACCEPTED, 0),
+        (vec!["StoredError", "AnotherError"], StatusCode::ACCEPTED, 2),
+        (
+            vec!["RejectedError", "StoredError"],
+            StatusCode::ACCEPTED,
+            1,
+        ),
+        (vec!["RejectedError"], StatusCode::INTERNAL_SERVER_ERROR, 0),
+    ] {
+        let (app, pool, project) = setup().await;
+        // Deterministic storage failure while leaving authentication and other rows usable.
+        sqlx::query(
+            "CREATE TRIGGER reject_error BEFORE INSERT ON errors
+             WHEN NEW.exception_class = 'RejectedError'
+             BEGIN SELECT RAISE(FAIL, 'simulated storage failure'); END",
+        )
+        .execute(&pool)
+        .await?;
+        let errors = classes.iter().map(|class| json!({
+            "exception_class": class, "message": "boom", "backtrace": [], "fingerprint": class,
+        })).collect::<Vec<_>>();
+        let response = app
+            .serve(post_json(
+                "/ingest/errors/batch",
+                Some(&format!("Bearer {}", project.api_key)),
+                json!({"errors": errors}),
+            ))
+            .await?;
+        assert_eq!(response.status(), expected_status, "{classes:?}");
+        for query in [
+            "SELECT COUNT(*) FROM errors",
+            "SELECT COUNT(*) FROM error_occurrences",
+        ] {
+            let count: i64 = sqlx::query_scalar(query).fetch_one(&pool).await?;
+            assert_eq!(count, stored, "{classes:?}: {query}");
+        }
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn empty_trace_batches_are_accepted_without_creating_spans() -> anyhow::Result<()> {
+    let (app, pool, project) = setup().await;
+    let response = app
+        .serve(post_json(
+            "/ingest/v1/traces",
+            Some(&format!("Bearer {}", project.api_key)),
+            serde_json::json!({"resourceSpans": []}),
+        ))
+        .await?;
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM spans")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(count, 0);
+    Ok(())
 }
