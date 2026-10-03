@@ -1,0 +1,12 @@
+.git
+target
+data
+.env
+.env.*
+!.env.example
+.ghcr-token
+*.db
+*.db-wal
+*.db-shm
+*.tar
+.DS_Store

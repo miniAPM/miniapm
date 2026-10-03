@@ -82,6 +82,12 @@ cargo run -p mini-apm
 cargo run -p mini-apm-admin
 ```
 
+### Persistent background service on macOS
+
+For Docker Compose with OrbStack or Docker Desktop, see the
+[macOS setup guide](docs/macos-docker.md). It covers building this checkout,
+persistent SQLite storage, automatic container restarts, logs, and backups.
+
 ## Sending Data
 
 ### Rails with miniapm gem (recommended)
@@ -178,7 +184,8 @@ export ENABLE_USER_ACCOUNTS=true
 
 Default admin credentials on first run:
 - Username: `admin`
-- Password: `admin` (you'll be prompted to change it)
+- Password: randomly generated and printed in the dashboard's startup logs
+  (you'll be prompted to change it)
 
 ## CLI Commands
 

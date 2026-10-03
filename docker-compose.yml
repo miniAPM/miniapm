@@ -4,11 +4,23 @@ services:
     build: .
     command: miniapm
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - miniapm_data:/data
     environment:
       - SQLITE_PATH=/data/miniapm.db
+      - RUST_LOG=mini_apm=info
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
   miniapm-admin:
@@ -16,16 +28,29 @@ services:
     build: .
     command: miniapm-admin
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3001:3001"
     volumes:
       - miniapm_data:/data
     environment:
       - SQLITE_PATH=/data/miniapm.db
       - ENABLE_USER_ACCOUNTS=true
-      - SESSION_SECRET=change-me
+      - SESSION_SECRET=${SESSION_SECRET:?Set SESSION_SECRET in .env (openssl rand -hex 32)}
       - MINI_APM_URL=http://localhost:3001
+      - RUST_LOG=miniapm_admin=info,mini_apm_admin=info,mini_apm=info
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5
     depends_on:
-      - miniapm
+      miniapm:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
 
 volumes:
