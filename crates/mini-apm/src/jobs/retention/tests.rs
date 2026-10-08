@@ -9,14 +9,14 @@ async fn cleanup_applies_each_retention_policy_and_preserves_recent_data() -> an
         retention_days_errors: 5,
         ..Config::default()
     };
-    let recent = time::rfc3339(time::days_ago(1));
-    let old_span = time::rfc3339(time::days_ago(3));
-    let old_error = time::rfc3339(time::days_ago(6));
-    let old_deploy = time::rfc3339(time::days_ago(91));
+    let recent = time::days_ago(1);
+    let old_span = time::days_ago(3);
+    let old_error = time::days_ago(6);
+    let old_deploy = time::days_ago(91);
     let error_id: i64 = sqlx::query_scalar(
         "INSERT INTO errors (fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status)
          VALUES ('fp', 'Error', 'failure', $1, $1, 2, 'open') RETURNING id",
-    ).bind(&old_error).fetch_one(&pool).await?;
+    ).bind(old_error).fetch_one(&pool).await?;
 
     for (name, span_time, error_time, deploy_time) in [
         ("old", &old_span, &old_error, &old_deploy),
@@ -41,8 +41,8 @@ async fn cleanup_applies_each_retention_policy_and_preserves_recent_data() -> an
              VALUES ($1, FALSE, $1, $2, $3)",
         )
         .bind(username)
-        .bind(time::rfc3339(time::days_ago(days)))
-        .bind(&recent)
+        .bind(time::days_ago(days))
+        .bind(recent)
         .execute(&pool)
         .await?;
     }

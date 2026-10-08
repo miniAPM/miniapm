@@ -62,8 +62,13 @@ async fn delete_before_drains_old_rows_across_chunk_boundaries() -> anyhow::Resu
         .execute(&pool)
         .await?;
 
-        let deleted =
-            delete_before(&pool, "deploys", "deployed_at", "2050-01-01T00:00:00Z").await?;
+        let deleted = delete_before(
+            &pool,
+            "deploys",
+            "deployed_at",
+            Stamp("2050-01-01T00:00:00Z".parse()?),
+        )
+        .await?;
         let remaining: Vec<String> = sqlx::query_scalar("SELECT deployed_at FROM deploys")
             .fetch_all(&pool)
             .await?;

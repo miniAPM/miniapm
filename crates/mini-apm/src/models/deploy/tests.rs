@@ -49,7 +49,12 @@ async fn history_is_project_scoped_ordered_and_limited() -> anyhow::Result<()> {
     assert_eq!(latest.deployer.as_deref(), Some("ci"));
     assert_eq!(list(&pool, None, 10).await?.len(), 4);
 
-    let since = list_since(&pool, Some(project.id), "2024-01-02T00:00:00+00:00").await?;
+    let since = list_since(
+        &pool,
+        Some(project.id),
+        Stamp("2024-01-02T00:00:00Z".parse()?),
+    )
+    .await?;
     assert_eq!(
         since.iter().map(|d| d.git_sha.as_str()).collect::<Vec<_>>(),
         ["second"]

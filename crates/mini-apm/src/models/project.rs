@@ -1,6 +1,6 @@
 use crate::DbPool;
 use crate::db::Db;
-use crate::time;
+use crate::time::Stamp;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ pub struct Project {
     pub name: String,
     pub slug: String,
     pub api_key: String,
-    pub created_at: String,
+    pub created_at: Stamp,
 }
 
 /// Generate a random API key for a project
@@ -44,7 +44,7 @@ pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
         .await?;
 
     if count == 0 {
-        let now = time::now_rfc3339();
+        let now = Stamp::now();
         let api_key = generate_api_key();
 
         let id = sqlx::query_scalar(
@@ -53,7 +53,7 @@ pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
         .bind("Default")
         .bind("default")
         .bind(&api_key)
-        .bind(&now)
+        .bind(now)
         .fetch_one(pool)
         .await?;
 
@@ -88,7 +88,7 @@ pub async fn ensure_self_project(pool: &DbPool) -> anyhow::Result<Project> {
     .bind("MiniAPM")
     .bind(SELF_SLUG)
     .bind(generate_api_key())
-    .bind(time::now_rfc3339())
+    .bind(Stamp::now())
     .execute(pool)
     .await?;
 
@@ -100,7 +100,7 @@ pub async fn ensure_self_project(pool: &DbPool) -> anyhow::Result<Project> {
 /// List all projects
 pub async fn list_all(pool: &DbPool) -> anyhow::Result<Vec<Project>> {
     let projects = sqlx::query_as::<_, Project>(
-        "SELECT id, name, slug, api_key, strftime('%Y-%m-%d %H:%M', created_at) AS created_at FROM projects ORDER BY name",
+        "SELECT id, name, slug, api_key, created_at FROM projects ORDER BY name",
     )
     .fetch_all(pool)
     .await?;
@@ -138,7 +138,7 @@ where
 
 /// Create a new project
 pub async fn create(pool: &DbPool, name: &str) -> anyhow::Result<Project> {
-    let now = time::now_rfc3339();
+    let now = Stamp::now();
     let slug = slugify(name);
     let api_key = generate_api_key();
 
@@ -148,7 +148,7 @@ pub async fn create(pool: &DbPool, name: &str) -> anyhow::Result<Project> {
     .bind(name)
     .bind(&slug)
     .bind(&api_key)
-    .bind(&now)
+    .bind(now)
     .fetch_one(pool)
     .await?;
 

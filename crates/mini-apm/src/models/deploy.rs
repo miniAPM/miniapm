@@ -1,5 +1,5 @@
 use crate::DbPool;
-use crate::time;
+use crate::time::Stamp;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -10,7 +10,7 @@ pub struct Deploy {
     pub git_sha: String,
     pub version: Option<String>,
     pub env: Option<String>,
-    pub deployed_at: String,
+    pub deployed_at: Stamp,
     pub description: Option<String>,
     pub deployer: Option<String>,
 }
@@ -40,7 +40,7 @@ pub async fn insert(
     deploy: &IncomingDeploy,
     project_id: Option<i64>,
 ) -> anyhow::Result<i64> {
-    let timestamp = time::rfc3339(deploy.timestamp.unwrap_or_else(Timestamp::now));
+    let timestamp = Stamp(deploy.timestamp.unwrap_or_else(Timestamp::now));
 
     let id = sqlx::query_scalar(
         r#"
@@ -70,7 +70,7 @@ pub async fn list(
     let deploys = sqlx::query_as::<_, Deploy>(
         r#"
         SELECT id, project_id, git_sha, version, env,
-               strftime('%Y-%m-%d %H:%M', deployed_at) as deployed_at,
+               deployed_at,
                description, deployer
         FROM deploys
         WHERE ($1 IS NULL OR project_id = $1)
@@ -90,7 +90,7 @@ pub async fn list(
 pub async fn list_since(
     pool: &DbPool,
     project_id: Option<i64>,
-    since: &str,
+    since: Stamp,
 ) -> anyhow::Result<Vec<Deploy>> {
     let deploys = sqlx::query_as::<_, Deploy>(
         r#"
@@ -115,7 +115,7 @@ pub async fn latest(pool: &DbPool, project_id: Option<i64>) -> anyhow::Result<Op
     let deploy = sqlx::query_as::<_, Deploy>(
         r#"
         SELECT id, project_id, git_sha, version, env,
-               strftime('%Y-%m-%d %H:%M', deployed_at) as deployed_at,
+               deployed_at,
                description, deployer
         FROM deploys
         WHERE ($1 IS NULL OR project_id = $1)

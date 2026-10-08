@@ -14,12 +14,11 @@ pub use auth_middleware::WebAuthMiddleware;
 pub use project_context::WebProjectContext;
 pub use security_headers::SecurityHeadersMiddleware;
 
-use jiff::Timestamp;
-use mini_apm::time;
+use mini_apm::time::{self, Stamp};
 
 /// Parse a dashboard period filter into a lower time bound.
 /// Anything other than "1h", "24h", "7d", "30d" means "all" (no bound).
-pub fn period_start(period: &str) -> Option<Timestamp> {
+pub fn period_start(period: &str) -> Option<Stamp> {
     match period {
         "1h" => Some(time::hours_ago(1)),
         "24h" => Some(time::hours_ago(24)),

@@ -147,9 +147,9 @@ async fn test_routes_summary_stats() {
         .unwrap();
     assert_eq!(app.serve(req).await.unwrap().status(), StatusCode::ACCEPTED);
 
-    let since = crate::time::rfc3339(crate::time::hours_ago(1));
+    let since = crate::time::hours_ago(1);
     let mut routes: Vec<_> =
-        models::span::routes_summary(&pool, Some(project.id), &since, None, "requests", 10)
+        models::span::routes_summary(&pool, Some(project.id), since, None, "requests", 10)
             .await
             .unwrap()
             .into_iter()
@@ -442,7 +442,7 @@ async fn error_ingestion_persists_occurrence_details_and_source_context() -> any
     assert_eq!(occurrence.request_id.as_deref(), Some("req-123"));
     assert_eq!(occurrence.user_id.as_deref(), Some("user-456"));
     assert_eq!(occurrence.params, Some(json!({"id": 42})));
-    assert_eq!(occurrence.happened_at, "2024-01-01 12:00");
+    assert_eq!(occurrence.happened_at.to_string(), "2024-01-01 12:00");
     assert_eq!(
         occurrence.backtrace,
         ["app/controllers/users_controller.rb:15:in `show'"]

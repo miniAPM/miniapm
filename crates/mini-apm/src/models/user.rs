@@ -1,5 +1,5 @@
 use crate::DbPool;
-use crate::time;
+use crate::time::Stamp;
 use argon2::{
     Argon2,
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
@@ -18,9 +18,9 @@ pub struct User {
     pub must_change_password: bool,
     #[serde(skip_serializing)]
     pub invite_token: Option<String>,
-    pub invite_expires_at: Option<String>,
-    pub created_at: String,
-    pub last_login_at: Option<String>,
+    pub invite_expires_at: Option<Stamp>,
+    pub created_at: Stamp,
+    pub last_login_at: Option<Stamp>,
 }
 
 const USER_COLUMNS: &str = "id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at, created_at, last_login_at";
@@ -30,8 +30,8 @@ pub struct Session {
     pub id: i64,
     pub token: String,
     pub user_id: i64,
-    pub created_at: String,
-    pub expires_at: String,
+    pub created_at: Stamp,
+    pub expires_at: Stamp,
 }
 
 /// Validation error for username
@@ -140,14 +140,14 @@ pub async fn ensure_default_admin(pool: &DbPool) -> anyhow::Result<()> {
     if count == 0 {
         let password = generate_random_password();
         let password_hash = hash_password(&password)?;
-        let now = time::now_rfc3339();
+        let now = Stamp::now();
 
         sqlx::query(
             "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES ($1, $2, TRUE, TRUE, $3)",
         )
         .bind("admin")
         .bind(&password_hash)
-        .bind(&now)
+        .bind(now)
         .execute(pool)
         .await?;
 
@@ -181,9 +181,9 @@ pub async fn authenticate(
                 .is_some_and(|h| verify_password(password, h)) =>
         {
             // Update last login time
-            let now = time::now_rfc3339();
+            let now = Stamp::now();
             let _ = sqlx::query("UPDATE users SET last_login_at = $1 WHERE id = $2")
-                .bind(&now)
+                .bind(now)
                 .bind(u.id)
                 .execute(pool)
                 .await;
@@ -204,8 +204,8 @@ pub async fn create_session(pool: &DbPool, user_id: i64) -> anyhow::Result<Strin
     )
     .bind(&token)
     .bind(user_id)
-    .bind(time::rfc3339(now))
-    .bind(time::rfc3339(expires))
+    .bind(Stamp(now))
+    .bind(Stamp(expires))
     .execute(pool)
     .await?;
 
@@ -214,7 +214,7 @@ pub async fn create_session(pool: &DbPool, user_id: i64) -> anyhow::Result<Strin
 
 /// Get user from session token
 pub async fn get_user_from_session(pool: &DbPool, token: &str) -> anyhow::Result<Option<User>> {
-    let now = time::now_rfc3339();
+    let now = Stamp::now();
 
     let user: Option<User> = sqlx::query_as(
         r#"
@@ -226,7 +226,7 @@ pub async fn get_user_from_session(pool: &DbPool, token: &str) -> anyhow::Result
         "#,
     )
     .bind(token)
-    .bind(&now)
+    .bind(now)
     .fetch_optional(pool)
     .await?;
 
@@ -244,9 +244,9 @@ pub async fn delete_session(pool: &DbPool, token: &str) -> anyhow::Result<()> {
 
 /// Delete expired sessions (cleanup)
 pub async fn delete_expired_sessions(pool: &DbPool) -> anyhow::Result<usize> {
-    let now = time::now_rfc3339();
+    let now = Stamp::now();
     let result = sqlx::query("DELETE FROM sessions WHERE expires_at < $1")
-        .bind(&now)
+        .bind(now)
         .execute(pool)
         .await?;
     Ok(result.rows_affected() as usize)
@@ -256,8 +256,8 @@ pub async fn delete_expired_sessions(pool: &DbPool) -> anyhow::Result<usize> {
 pub async fn list_all(pool: &DbPool) -> anyhow::Result<Vec<User>> {
     let users = sqlx::query_as::<_, User>(
         r#"SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at,
-                  strftime('%Y-%m-%d %H:%M', created_at) AS created_at,
-                  CASE WHEN last_login_at IS NOT NULL THEN strftime('%Y-%m-%d %H:%M', last_login_at) ELSE NULL END AS last_login_at
+                  created_at,
+                  last_login_at
            FROM users ORDER BY username"#,
     )
     .fetch_all(pool)
@@ -274,7 +274,7 @@ pub async fn create(
     is_admin: bool,
 ) -> anyhow::Result<i64> {
     let password_hash = hash_password(password)?;
-    let now = time::now_rfc3339();
+    let now = Stamp::now();
 
     let id = sqlx::query_scalar(
         "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES ($1, $2, $3, FALSE, $4) RETURNING id",
@@ -282,7 +282,7 @@ pub async fn create(
     .bind(username)
     .bind(&password_hash)
     .bind(is_admin)
-    .bind(&now)
+    .bind(now)
     .fetch_one(pool)
     .await?;
 
@@ -389,8 +389,8 @@ pub async fn create_with_invite(
     .bind(username)
     .bind(is_admin)
     .bind(&invite_token)
-    .bind(time::rfc3339(expires))
-    .bind(time::rfc3339(now))
+    .bind(Stamp(expires))
+    .bind(Stamp(now))
     .execute(pool)
     .await?;
 
@@ -399,14 +399,14 @@ pub async fn create_with_invite(
 
 /// Find user by invite token
 pub async fn find_by_invite_token(pool: &DbPool, token: &str) -> anyhow::Result<Option<User>> {
-    let now = time::now_rfc3339();
+    let now = Stamp::now();
     let sql = format!(
         "SELECT {USER_COLUMNS} FROM users WHERE invite_token = $1 AND invite_expires_at > $2"
     );
 
     let user: Option<User> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(token)
-        .bind(&now)
+        .bind(now)
         .fetch_optional(pool)
         .await?;
 
@@ -430,12 +430,12 @@ pub async fn accept_invite(pool: &DbPool, user_id: i64, password: &str) -> anyho
 
 /// Delete users with expired invite tokens who never activated their account
 pub async fn delete_expired_invites(pool: &DbPool) -> anyhow::Result<usize> {
-    let now = time::now_rfc3339();
+    let now = Stamp::now();
 
     let result = sqlx::query(
         "DELETE FROM users WHERE invite_token IS NOT NULL AND invite_expires_at < $1 AND password_hash IS NULL",
     )
-    .bind(&now)
+    .bind(now)
     .execute(pool)
     .await?;
 

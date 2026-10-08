@@ -78,7 +78,7 @@ fn trace_names_resolve_http_paths_with_span_name_fallbacks() {
             http_method: method.map(str::to_string),
             http_url: url.map(str::to_string),
             http_status_code: None,
-            happened_at: "2024-01-01 12:00".into(),
+            happened_at: Stamp(Timestamp::UNIX_EPOCH),
         };
         assert_eq!(trace.display_name(), expected, "{name}: {url:?}");
     }

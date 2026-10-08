@@ -30,17 +30,17 @@ pub async fn index(
     ctx: WebProjectContext,
 ) -> HtmlTemplate<DashboardTemplate> {
     let project_id = ctx.project_id();
-    let since = time::rfc3339(time::hours_ago(24));
+    let since = time::hours_ago(24);
 
-    let requests_24h = span::count_since(&pool, project_id, &since)
+    let requests_24h = span::count_since(&pool, project_id, since)
         .await
         .inspect_err(|e| tracing::error!("Failed to load requests 24h: {e:#}"))
         .unwrap_or(0);
-    let errors_24h = models::error::count_since(&pool, project_id, &since)
+    let errors_24h = models::error::count_since(&pool, project_id, since)
         .await
         .inspect_err(|e| tracing::error!("Failed to load errors 24h: {e:#}"))
         .unwrap_or(0);
-    let latency_stats = span::latency_stats_since(&pool, project_id, &since)
+    let latency_stats = span::latency_stats_since(&pool, project_id, since)
         .await
         .inspect_err(|e| tracing::error!("Failed to load latency stats: {e:#}"))
         .unwrap_or(span::LatencyStats {
@@ -60,7 +60,7 @@ pub async fn index(
         .await
         .inspect_err(|e| tracing::error!("Failed to load hourly stats: {e:#}"))
         .unwrap_or_default();
-    let deploys = models::deploy::list_since(&pool, project_id, &since)
+    let deploys = models::deploy::list_since(&pool, project_id, since)
         .await
         .inspect_err(|e| tracing::error!("Failed to load deploys: {e:#}"))
         .unwrap_or_default();

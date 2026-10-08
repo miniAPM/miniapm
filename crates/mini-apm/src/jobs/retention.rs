@@ -11,8 +11,8 @@ pub async fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
         ),
         ("deploys", "deployed_at", 90),
     ] {
-        let cutoff = time::rfc3339(time::days_ago(days));
-        let deleted = db::delete_before(pool, table, column, &cutoff).await?;
+        let cutoff = time::days_ago(days);
+        let deleted = db::delete_before(pool, table, column, cutoff).await?;
         tracing::info!("Deleted {} old rows from {}", deleted, table);
     }
 

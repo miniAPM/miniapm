@@ -45,14 +45,12 @@ pub async fn index(
         _ => time::hours_ago(24),
     };
 
-    let since_str = time::rfc3339(since);
-
-    let routes = span::routes_summary(&pool, project_id, &since_str, search.as_deref(), &sort, 100)
+    let routes = span::routes_summary(&pool, project_id, since, search.as_deref(), &sort, 100)
         .await
         .inspect_err(|e| tracing::error!("Failed to load routes: {e:#}"))
         .unwrap_or_default();
 
-    let total_count = span::routes_count(&pool, project_id, &since_str, search.as_deref())
+    let total_count = span::routes_count(&pool, project_id, since, search.as_deref())
         .await
         .inspect_err(|e| tracing::error!("Failed to load total count: {e:#}"))
         .unwrap_or(0);

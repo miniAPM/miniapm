@@ -1,6 +1,6 @@
 use crate::DbPool;
 use crate::db::DbRow;
-use crate::time;
+use crate::time::{self, Stamp};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize};
@@ -284,7 +284,7 @@ pub struct TraceSummary {
     pub http_method: Option<String>,
     pub http_url: Option<String>,
     pub http_status_code: Option<i32>,
-    pub happened_at: String,
+    pub happened_at: Stamp,
 }
 
 /// Map a row with the canonical trace summary column order:
@@ -444,7 +444,7 @@ use sha2::{Digest, Sha256};
 /// Backfill errors from existing spans that have exception events
 /// This is useful for extracting errors from spans that were ingested before error extraction was added
 pub async fn backfill_errors_from_spans(pool: &DbPool) -> anyhow::Result<usize> {
-    let rows: Vec<(Option<i64>, String, String, String)> = sqlx::query_as(
+    let rows: Vec<(Option<i64>, String, String, Stamp)> = sqlx::query_as(
         r#"
         SELECT project_id, trace_id, events_json, happened_at
         FROM spans
@@ -460,7 +460,7 @@ pub async fn backfill_errors_from_spans(pool: &DbPool) -> anyhow::Result<usize> 
     for (project_id, trace_id, events_json, happened_at) in rows {
         if let Ok(events) = serde_json::from_str::<Vec<SpanEvent>>(&events_json) {
             let events_opt = Some(events);
-            extract_and_insert_errors(pool, &events_opt, &trace_id, &happened_at, project_id).await;
+            extract_and_insert_errors(pool, &events_opt, &trace_id, happened_at, project_id).await;
             count += 1;
         }
     }
@@ -473,7 +473,7 @@ async fn extract_and_insert_errors(
     pool: &DbPool,
     events: &Option<Vec<SpanEvent>>,
     trace_id: &str,
-    happened_at: &str,
+    happened_at: Stamp,
     project_id: Option<i64>,
 ) {
     let events = match events {
@@ -512,7 +512,7 @@ async fn extract_and_insert_errors(
             request_id: Some(trace_id.to_string()),
             user_id: None,
             params: None,
-            timestamp: happened_at.parse().ok(),
+            timestamp: Some(happened_at.0),
             source_context: None,
         };
 
@@ -576,7 +576,7 @@ pub async fn insert_otlp_batch(
                 let end_nano = otlp_span.end_time_unix_nano;
                 let duration_ms = (end_nano - start_nano) as f64 / 1_000_000.0;
 
-                let happened_at = time::rfc3339(Timestamp::from_nanosecond(start_nano.into())?);
+                let happened_at = Stamp(Timestamp::from_nanosecond(start_nano.into())?);
 
                 let status_code = otlp_span.status.as_ref().and_then(|s| s.code).unwrap_or(0);
                 let status_message = otlp_span.status.as_ref().and_then(|s| s.message.clone());
@@ -682,7 +682,7 @@ pub async fn insert_otlp_batch(
                 .bind(&attrs_json)
                 .bind(events_json.as_deref())
                 .bind(&resource_json)
-                .bind(&happened_at)
+                .bind(happened_at)
                 .execute(&mut *tx)
                 .await?;
                 count += 1;
@@ -696,7 +696,7 @@ pub async fn insert_otlp_batch(
     tx.commit().await?;
 
     for (events, trace_id, happened_at) in events_by_span {
-        extract_and_insert_errors(pool, events, &trace_id, &happened_at, project_id).await;
+        extract_and_insert_errors(pool, events, &trace_id, happened_at, project_id).await;
     }
 
     Ok(count)
@@ -726,7 +726,7 @@ pub async fn list_traces_filtered(
     pool: &DbPool,
     project_id: Option<i64>,
     root_type_filter: Option<RootSpanType>,
-    since: Option<&str>,
+    since: Option<Stamp>,
     search: Option<&str>,
     min_duration_ms: Option<f64>,
     sort_by: &str,
@@ -751,7 +751,7 @@ pub async fn list_traces_paginated(
     pool: &DbPool,
     project_id: Option<i64>,
     root_type_filter: Option<RootSpanType>,
-    since: Option<&str>,
+    since: Option<Stamp>,
     search: Option<&str>,
     min_duration_ms: Option<f64>,
     sort_by: &str,
@@ -777,7 +777,7 @@ pub async fn list_traces_paginated(
             s.http_method,
             s.http_url,
             s.http_status_code,
-            strftime('%Y-%m-%d %H:%M', s.happened_at) as happened_at
+            s.happened_at
         FROM spans s
         WHERE s.parent_span_id IS NULL
           AND ($1 IS NULL OR s.project_id = $1)
@@ -815,7 +815,7 @@ pub async fn count_traces_filtered(
     pool: &DbPool,
     project_id: Option<i64>,
     root_type_filter: Option<RootSpanType>,
-    since: Option<&str>,
+    since: Option<Stamp>,
     search: Option<&str>,
     min_duration_ms: Option<f64>,
 ) -> anyhow::Result<i64> {
@@ -959,7 +959,7 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
 pub async fn count_since(
     pool: &DbPool,
     project_id: Option<i64>,
-    since: &str,
+    since: Stamp,
 ) -> anyhow::Result<i64> {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM spans WHERE parent_span_id IS NULL AND ($1 IS NULL OR project_id = $1) AND happened_at >= $2",
@@ -988,7 +988,7 @@ pub struct LatencyStats {
 pub async fn latency_stats_since(
     pool: &DbPool,
     project_id: Option<i64>,
-    since: &str,
+    since: Stamp,
 ) -> anyhow::Result<LatencyStats> {
     let values: Vec<f64> = sqlx::query_scalar(
         "SELECT duration_ms FROM spans WHERE parent_span_id IS NULL AND happened_at >= $1 AND ($2 IS NULL OR project_id = $2) ORDER BY duration_ms ASC",
@@ -1034,7 +1034,7 @@ pub async fn slow_traces(
             s.http_method,
             s.http_url,
             s.http_status_code,
-            strftime('%Y-%m-%d %H:%M', s.happened_at) as happened_at
+            s.happened_at
         FROM spans s
         WHERE s.parent_span_id IS NULL
           AND s.duration_ms >= $1
@@ -1086,7 +1086,7 @@ pub async fn hourly_stats(
         "#,
     )
     .bind(project_id)
-    .bind(time::rfc3339(time::hours_ago(hours)))
+    .bind(time::hours_ago(hours))
     .fetch_all(pool)
     .await?;
 
@@ -1108,7 +1108,7 @@ pub async fn hourly_stats(
     // Fill in all hours with zeros for missing data
     let mut points = Vec::with_capacity(hours as usize);
     for i in (0..hours).rev() {
-        let hour_key = time::hours_ago(i).strftime("%Y-%m-%d %H:00").to_string();
+        let hour_key = time::hours_ago(i).0.strftime("%Y-%m-%d %H:00").to_string();
         points.push(
             data_points
                 .get(&hour_key)
@@ -1144,7 +1144,7 @@ pub struct RouteSummary {
 pub async fn routes_summary(
     pool: &DbPool,
     project_id: Option<i64>,
-    since: &str,
+    since: Stamp,
     search: Option<&str>,
     sort: &str,
     limit: i64,
@@ -1228,7 +1228,7 @@ pub async fn routes_summary(
 pub async fn routes_count(
     pool: &DbPool,
     project_id: Option<i64>,
-    since: &str,
+    since: Stamp,
     search: Option<&str>,
 ) -> anyhow::Result<i64> {
     let count: i64 = sqlx::query_scalar(
@@ -1253,7 +1253,7 @@ pub async fn routes_count(
 async fn route_durations(
     pool: &DbPool,
     project_id: Option<i64>,
-    since: &str,
+    since: Stamp,
     paths: &str,
 ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
     let rows: Vec<(String, f64)> = sqlx::query_as(
@@ -1283,7 +1283,7 @@ async fn route_durations(
 async fn route_db_stats(
     pool: &DbPool,
     project_id: Option<i64>,
-    since: &str,
+    since: Stamp,
     paths: &str,
 ) -> anyhow::Result<HashMap<String, (i64, i64)>> {
     let rows: Vec<(String, f64, f64)> = sqlx::query_as(

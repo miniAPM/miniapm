@@ -2,6 +2,7 @@
 compile_error!("mini-apm needs a database backend: enable the `sqlite` feature");
 
 use crate::config::Config;
+use crate::time::Stamp;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::fs;
 use std::path::Path;
@@ -59,7 +60,7 @@ pub async fn delete_before(
     pool: &DbPool,
     table: &'static str,
     column: &'static str,
-    before: &str,
+    before: Stamp,
 ) -> anyhow::Result<u64> {
     let sql: Arc<str> = format!(
         "DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {column} < $1 LIMIT $2)"

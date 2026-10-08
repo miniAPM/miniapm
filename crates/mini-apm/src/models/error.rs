@@ -1,5 +1,5 @@
 use crate::DbPool;
-use crate::time;
+use crate::time::{self, Stamp};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -14,8 +14,8 @@ pub struct AppError {
     pub fingerprint: String,
     pub exception_class: String,
     pub message: String,
-    pub first_seen_at: String,
-    pub last_seen_at: String,
+    pub first_seen_at: Stamp,
+    pub last_seen_at: Stamp,
     pub occurrence_count: i64,
     pub status: String,
 }
@@ -28,7 +28,7 @@ pub struct ErrorOccurrence {
     pub user_id: Option<String>,
     pub backtrace: Vec<String>,
     pub params: Option<serde_json::Value>,
-    pub happened_at: String,
+    pub happened_at: Stamp,
     pub source_context: Option<SourceContext>,
 }
 
@@ -92,7 +92,7 @@ pub async fn insert(
     error: &IncomingError,
     project_id: Option<i64>,
 ) -> anyhow::Result<i64> {
-    let timestamp = time::rfc3339(error.timestamp.unwrap_or_else(Timestamp::now));
+    let timestamp = Stamp(error.timestamp.unwrap_or_else(Timestamp::now));
 
     // Generate location-based fingerprint for smart grouping
     let location_fingerprint =
@@ -117,7 +117,7 @@ pub async fn insert(
         sqlx::query_as(
             "UPDATE errors SET last_seen_at = $1, occurrence_count = occurrence_count + 1 WHERE id = $2 RETURNING id, status",
         )
-        .bind(&timestamp)
+        .bind(timestamp)
         .bind(id)
         .fetch_one(pool)
         .await?
@@ -136,8 +136,8 @@ pub async fn insert(
         .bind(&location_fingerprint)
         .bind(&error.exception_class)
         .bind(&error.message)
-        .bind(&timestamp)
-        .bind(&timestamp)
+        .bind(timestamp)
+        .bind(timestamp)
         .fetch_one(pool)
         .await?
     };
@@ -169,7 +169,7 @@ pub async fn insert(
     .bind(error.user_id.as_deref())
     .bind(serde_json::to_string(&error.backtrace)?)
     .bind(error.params.as_ref().and_then(|p| serde_json::to_string(p).ok()))
-    .bind(&timestamp)
+    .bind(timestamp)
     .bind(source_context_json)
     .execute(pool)
     .await?;
@@ -223,7 +223,7 @@ pub async fn list_filtered(
     project_id: Option<i64>,
     status: Option<&str>,
     search: Option<&str>,
-    since: Option<&str>,
+    since: Option<Stamp>,
     sort_by: &str,
     limit: i64,
 ) -> anyhow::Result<Vec<AppError>> {
@@ -236,7 +236,7 @@ pub async fn list_paginated(
     project_id: Option<i64>,
     status: Option<&str>,
     search: Option<&str>,
-    since: Option<&str>,
+    since: Option<Stamp>,
     sort_by: &str,
     limit: i64,
     offset: i64,
@@ -250,8 +250,8 @@ pub async fn list_paginated(
     let sql = format!(
         r#"
         SELECT id, fingerprint, exception_class, message,
-               strftime('%Y-%m-%d %H:%M', first_seen_at) AS first_seen_at,
-               strftime('%Y-%m-%d %H:%M', last_seen_at) AS last_seen_at,
+               first_seen_at,
+               last_seen_at,
                occurrence_count, status
         FROM errors
         WHERE ($1 IS NULL OR project_id = $1)
@@ -282,7 +282,7 @@ pub async fn count_filtered(
     project_id: Option<i64>,
     status: Option<&str>,
     search: Option<&str>,
-    since: Option<&str>,
+    since: Option<Stamp>,
 ) -> anyhow::Result<i64> {
     let count: i64 = sqlx::query_scalar(
         r#"
@@ -307,8 +307,8 @@ pub async fn count_filtered(
 pub async fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<AppError>> {
     let error = sqlx::query_as::<_, AppError>(
         "SELECT id, fingerprint, exception_class, message,
-                strftime('%Y-%m-%d %H:%M', first_seen_at) AS first_seen_at,
-                strftime('%Y-%m-%d %H:%M', last_seen_at) AS last_seen_at,
+                first_seen_at,
+                last_seen_at,
                 occurrence_count, status
          FROM errors WHERE id = $1",
     )
@@ -331,11 +331,11 @@ pub async fn occurrences(
         Option<String>,
         String,
         Option<String>,
-        String,
+        Stamp,
         Option<String>,
     )> = sqlx::query_as(
         "SELECT id, error_id, request_id, user_id, backtrace, params,
-                strftime('%Y-%m-%d %H:%M', happened_at), source_context
+                happened_at, source_context
          FROM error_occurrences WHERE error_id = $1 ORDER BY happened_at DESC LIMIT $2",
     )
     .bind(error_id)
@@ -376,7 +376,7 @@ pub async fn occurrences(
 pub async fn count_since(
     pool: &DbPool,
     project_id: Option<i64>,
-    since: &str,
+    since: Stamp,
 ) -> anyhow::Result<i64> {
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM error_occurrences eo
@@ -441,7 +441,7 @@ pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec
         "#,
     )
     .bind(error_id)
-    .bind(time::rfc3339(time::hours_ago(24)))
+    .bind(time::hours_ago(24))
     .fetch_all(pool)
     .await?;
 
@@ -450,7 +450,7 @@ pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec
     // Generate 24 hours of data, filling in zeros where no occurrences
     let mut counts = Vec::with_capacity(24);
     for i in (0..24).rev() {
-        let hour_key = time::hours_ago(i).strftime("%Y-%m-%d %H").to_string();
+        let hour_key = time::hours_ago(i).0.strftime("%Y-%m-%d %H").to_string();
         counts.push(*hour_counts.get(&hour_key).unwrap_or(&0));
     }
 
@@ -476,7 +476,7 @@ pub async fn hourly_error_stats(
         "#,
     )
     .bind(project_id)
-    .bind(time::rfc3339(time::hours_ago(hours)))
+    .bind(time::hours_ago(hours))
     .fetch_all(pool)
     .await?;
 
@@ -485,7 +485,7 @@ pub async fn hourly_error_stats(
     // Fill in all hours with zeros for missing data
     let mut points = Vec::with_capacity(hours as usize);
     for i in (0..hours).rev() {
-        let hour_key = time::hours_ago(i).strftime("%Y-%m-%d %H:00").to_string();
+        let hour_key = time::hours_ago(i).0.strftime("%Y-%m-%d %H:00").to_string();
         points.push(ErrorTrendPoint {
             hour: hour_key.clone(),
             count: *data_points.get(&hour_key).unwrap_or(&0),

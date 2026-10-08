@@ -86,7 +86,7 @@
                             <span class="badge badge-user">user</span>
                             {% endif %}
                         </td>
-                        <td>{{ u.last_login_at.as_deref().unwrap_or("-") }}</td>
+                        <td>{% if let Some(at) = u.last_login_at %}{{ at }}{% else %}-{% endif %}</td>
                         <td>
                             {% if u.id != current_user_id %}
                             <form method="POST" action="/auth/users/delete" class="inline-form" onsubmit="return confirm('Delete user {{ u.username }}?')">

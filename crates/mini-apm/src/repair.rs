@@ -2,7 +2,8 @@
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-use crate::{DbPool, time};
+use crate::DbPool;
+use crate::time::Stamp;
 
 #[cfg(test)]
 mod tests;
@@ -60,7 +61,7 @@ pub async fn otlp_ids(pool: &DbPool) -> anyhow::Result<u64> {
     )
     .bind(OTLP_IDS)
     .bind(repaired.to_string())
-    .bind(time::now_rfc3339())
+    .bind(Stamp::now())
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;

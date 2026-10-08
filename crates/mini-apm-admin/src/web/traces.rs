@@ -54,15 +54,13 @@ pub async fn index(
     let page = query.page.unwrap_or(1).max(1);
 
     let since = super::period_start(&period);
-
-    let since_str = since.map(mini_apm::time::rfc3339);
     let min_duration_ms: Option<f64> = min_duration.as_ref().and_then(|s| s.parse().ok());
 
     let total_count = models::span::count_traces_filtered(
         &pool,
         project_id,
         root_type_filter,
-        since_str.as_deref(),
+        since,
         search.as_deref(),
         min_duration_ms,
     )
@@ -77,7 +75,7 @@ pub async fn index(
         &pool,
         project_id,
         root_type_filter,
-        since_str.as_deref(),
+        since,
         search.as_deref(),
         min_duration_ms,
         &sort,

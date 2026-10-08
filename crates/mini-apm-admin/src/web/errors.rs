@@ -49,14 +49,12 @@ pub async fn index(
 
     let since = super::period_start(&period);
 
-    let since_str = since.map(mini_apm::time::rfc3339);
-
     let total_count = models::error::count_filtered(
         &pool,
         project_id,
         query.status.as_deref(),
         search.as_deref(),
-        since_str.as_deref(),
+        since,
     )
     .await
     .inspect_err(|e| tracing::error!("Failed to load total count: {e:#}"))
@@ -70,7 +68,7 @@ pub async fn index(
         project_id,
         query.status.as_deref(),
         search.as_deref(),
-        since_str.as_deref(),
+        since,
         &sort,
         PAGE_SIZE,
         offset,
