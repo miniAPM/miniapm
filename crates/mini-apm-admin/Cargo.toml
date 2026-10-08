@@ -17,7 +17,7 @@ sqlite = ["mini-apm/sqlite"]
 postgres = ["mini-apm/postgres"]
 
 [dependencies]
-mini-apm = { workspace = true, default-features = false }
+mini-apm = { workspace = true }
 rama = { workspace = true }
 askama = { workspace = true }
 jiff = { workspace = true }
@@ -27,5 +27,5 @@ anyhow = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-mini-apm = { workspace = true, default-features = false, features = ["test-support"] }
+mini-apm = { workspace = true, features = ["test-support"] }
 sqlx = { workspace = true }

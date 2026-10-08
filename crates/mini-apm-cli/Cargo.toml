@@ -14,7 +14,7 @@ sqlite = ["mini-apm/sqlite"]
 postgres = ["mini-apm/postgres"]
 
 [dependencies]
-mini-apm = { workspace = true, default-features = false }
+mini-apm = { workspace = true }
 usage-lib = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }

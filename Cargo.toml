@@ -14,7 +14,7 @@ categories = ["development-tools", "web-programming"]
 
 [workspace.dependencies]
 # Internal crates
-mini-apm = { path = "crates/mini-apm" }
+mini-apm = { path = "crates/mini-apm", default-features = false }
 mini-apm-admin = { path = "crates/mini-apm-admin" }
 
 # Async runtime
