@@ -1,4 +1,5 @@
 use crate::DbPool;
+use crate::db::DbRow;
 use crate::time;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use jiff::Timestamp;
@@ -289,7 +290,7 @@ pub struct TraceSummary {
 /// Map a row with the canonical trace summary column order:
 /// trace_id, root_span_name, root_span_type, duration_ms, span_count,
 /// status_code, service_name, http_method, http_url, http_status_code, happened_at
-fn map_trace_summary_row(row: &sqlx::sqlite::SqliteRow) -> Result<TraceSummary, sqlx::Error> {
+fn map_trace_summary_row(row: &DbRow) -> Result<TraceSummary, sqlx::Error> {
     Ok(TraceSummary {
         trace_id: row.try_get(0)?,
         root_span_name: row.try_get(1)?,

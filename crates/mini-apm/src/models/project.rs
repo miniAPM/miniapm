@@ -1,4 +1,5 @@
 use crate::DbPool;
+use crate::db::Db;
 use crate::time;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
@@ -125,7 +126,7 @@ async fn find_by<'q, T>(
     value: T,
 ) -> anyhow::Result<Option<Project>>
 where
-    T: 'q + Send + sqlx::Encode<'q, sqlx::Sqlite> + sqlx::Type<sqlx::Sqlite>,
+    T: 'q + Send + sqlx::Encode<'q, Db> + sqlx::Type<Db>,
 {
     let sql =
         format!("SELECT id, name, slug, api_key, created_at FROM projects WHERE {column} = ?1");

@@ -1,12 +1,16 @@
+#[cfg(not(feature = "sqlite"))]
+compile_error!("mini-apm needs a database backend: enable the `sqlite` feature");
+
 use crate::config::Config;
-use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub type DbPool = SqlitePool;
+pub type Db = sqlx::Sqlite;
+pub type DbPool = sqlx::Pool<Db>;
+pub type DbRow = <Db as sqlx::Database>::Row;
 
 const DELETE_CHUNK_ROWS: i64 = 5_000;
 const WRITE_LOCK_HANDOFF: Duration = Duration::from_millis(200);

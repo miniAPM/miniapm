@@ -11,6 +11,10 @@ path = "src/lib.rs"
 name = "miniapm"
 path = "src/bin/server/main.rs"
 
+[features]
+default = ["sqlite"]
+sqlite = ["sqlx/sqlite", "sqlx/sqlite-bundled"]
+
 [dependencies]
 tokio = { workspace = true }
 rama = { workspace = true }
