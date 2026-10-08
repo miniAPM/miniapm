@@ -69,6 +69,31 @@ pub fn text_list(items: &[String]) -> &[String] {
     items
 }
 
+/// Run `job` unless another MiniAPM instance on this database is running the
+/// job called `name`, and say whether it ran. The advisory lock lives on one
+/// connection, so a crashed instance releases it.
+pub async fn exclusively(
+    pool: &DbPool,
+    name: &str,
+    job: impl Future<Output = anyhow::Result<()>>,
+) -> anyhow::Result<bool> {
+    let mut lock = pool.acquire().await?;
+    let locked: bool =
+        sqlx::query_scalar("SELECT pg_try_advisory_lock(hashtext('miniapm'), hashtext($1))")
+            .bind(name)
+            .fetch_one(&mut *lock)
+            .await?;
+    if !locked {
+        return Ok(false);
+    }
+    let result = job.await;
+    sqlx::query("SELECT pg_advisory_unlock(hashtext('miniapm'), hashtext($1))")
+        .bind(name)
+        .execute(&mut *lock)
+        .await?;
+    result.map(|()| true)
+}
+
 /// Create day partitions from yesterday to a week ahead, so retention can
 /// drop whole days
 pub async fn maintain(pool: &DbPool) -> anyhow::Result<()> {

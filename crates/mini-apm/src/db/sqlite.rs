@@ -54,6 +54,16 @@ pub fn text_list(items: &[String]) -> String {
     serde_json::to_string(items).expect("a list of strings serializes")
 }
 
+/// Run `job`; a SQLite database has a single writer process, so it always runs
+pub async fn exclusively(
+    _pool: &DbPool,
+    _name: &str,
+    job: impl Future<Output = anyhow::Result<()>>,
+) -> anyhow::Result<bool> {
+    job.await?;
+    Ok(true)
+}
+
 /// Periodic upkeep of the schema; SQLite needs none
 pub async fn maintain(_pool: &DbPool) -> anyhow::Result<()> {
     Ok(())

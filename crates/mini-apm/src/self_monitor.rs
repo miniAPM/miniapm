@@ -72,9 +72,9 @@ impl SelfMonitor {
         let _ = self.tx.try_send(record);
     }
 
-    pub async fn trace_job<F>(&self, name: &str, job: F) -> anyhow::Result<()>
+    pub async fn trace_job<F, T>(&self, name: &str, job: F) -> anyhow::Result<T>
     where
-        F: Future<Output = anyhow::Result<()>>,
+        F: Future<Output = anyhow::Result<T>>,
     {
         let trace = Trace::start();
         let result = job.instrument(trace.span.clone()).await;
@@ -128,9 +128,9 @@ impl SelfMonitor {
     }
 }
 
-pub async fn trace_job<F>(name: &str, job: F) -> anyhow::Result<()>
+pub async fn trace_job<F, T>(name: &str, job: F) -> anyhow::Result<T>
 where
-    F: Future<Output = anyhow::Result<()>>,
+    F: Future<Output = anyhow::Result<T>>,
 {
     match SelfMonitor::global() {
         Some(monitor) => monitor.trace_job(name, job).await,

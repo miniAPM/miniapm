@@ -23,7 +23,8 @@ pub use backend::reject_inserts;
 #[cfg(any(test, feature = "test-support"))]
 pub use backend::test_pool;
 pub use backend::{
-    begin_write, describe, expire, get_db_size, in_text_list, init, maintain, text_list,
+    begin_write, describe, exclusively, expire, get_db_size, in_text_list, init, maintain,
+    text_list,
 };
 
 pub type DbPool = sqlx::Pool<Db>;

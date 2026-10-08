@@ -86,3 +86,29 @@ async fn day_partitions_take_over_default_rows_and_expire_whole_days() -> anyhow
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn jobs_skip_while_another_instance_holds_them() -> anyhow::Result<()> {
+    let pool = test_pool().await;
+    let lock = "SELECT pg_advisory_lock(hashtext('miniapm'), hashtext('test.lock'))";
+    let unlock = "SELECT pg_advisory_unlock(hashtext('miniapm'), hashtext('test.lock'))";
+    let mut other_instance = pool.acquire().await?;
+    sqlx::query(lock).execute(&mut *other_instance).await?;
+
+    let ran = std::sync::atomic::AtomicBool::new(false);
+    let job = async {
+        ran.store(true, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    };
+    assert!(!exclusively(&pool, "test.lock", job).await?);
+    assert!(!ran.load(std::sync::atomic::Ordering::Relaxed));
+
+    sqlx::query(unlock).execute(&mut *other_instance).await?;
+    let failing = async { Err::<(), _>(anyhow::anyhow!("boom")) };
+    assert!(exclusively(&pool, "test.lock", failing).await.is_err());
+    assert!(
+        exclusively(&pool, "test.lock", async { Ok(()) }).await?,
+        "a failed run releases the lock"
+    );
+    Ok(())
+}
