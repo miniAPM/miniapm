@@ -62,28 +62,25 @@ pub async fn insert(
     Ok(id)
 }
 
+const DEPLOY_COLUMNS: &str =
+    "id, project_id, git_sha, version, env, deployed_at, description, deployer";
+
 pub async fn list(
     pool: &DbPool,
     project_id: Option<i64>,
     limit: i64,
 ) -> anyhow::Result<Vec<Deploy>> {
-    let deploys = sqlx::query_as::<_, Deploy>(
-        r#"
-        SELECT id, project_id, git_sha, version, env,
-               deployed_at,
-               description, deployer
-        FROM deploys
-        WHERE ($1 IS NULL OR project_id = $1)
-        ORDER BY deployed_at DESC
-        LIMIT $2
-        "#,
-    )
-    .bind(project_id)
-    .bind(limit)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(deploys)
+    let sql = format!(
+        "SELECT {DEPLOY_COLUMNS} FROM deploys
+         WHERE ($1 IS NULL OR project_id = $1)
+         ORDER BY deployed_at DESC
+         LIMIT $2"
+    );
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(project_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?)
 }
 
 /// Get deploys within a time range for chart markers
@@ -92,42 +89,21 @@ pub async fn list_since(
     project_id: Option<i64>,
     since: Stamp,
 ) -> anyhow::Result<Vec<Deploy>> {
-    let deploys = sqlx::query_as::<_, Deploy>(
-        r#"
-        SELECT id, project_id, git_sha, version, env,
-               deployed_at,
-               description, deployer
-        FROM deploys
-        WHERE deployed_at >= $1 AND ($2 IS NULL OR project_id = $2)
-        ORDER BY deployed_at ASC
-        "#,
-    )
-    .bind(since)
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
-
-    Ok(deploys)
+    let sql = format!(
+        "SELECT {DEPLOY_COLUMNS} FROM deploys
+         WHERE deployed_at >= $1 AND ($2 IS NULL OR project_id = $2)
+         ORDER BY deployed_at ASC"
+    );
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(since)
+        .bind(project_id)
+        .fetch_all(pool)
+        .await?)
 }
 
 /// Get the most recent deploy
 pub async fn latest(pool: &DbPool, project_id: Option<i64>) -> anyhow::Result<Option<Deploy>> {
-    let deploy = sqlx::query_as::<_, Deploy>(
-        r#"
-        SELECT id, project_id, git_sha, version, env,
-               deployed_at,
-               description, deployer
-        FROM deploys
-        WHERE ($1 IS NULL OR project_id = $1)
-        ORDER BY deployed_at DESC
-        LIMIT 1
-        "#,
-    )
-    .bind(project_id)
-    .fetch_optional(pool)
-    .await?;
-
-    Ok(deploy)
+    Ok(list(pool, project_id, 1).await?.into_iter().next())
 }
 
 #[cfg(test)]

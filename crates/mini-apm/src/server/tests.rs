@@ -110,7 +110,7 @@ async fn test_errors_from_one_location_share_a_group() {
 }
 
 #[tokio::test]
-async fn test_routes_summary_stats() {
+async fn test_routes_and_traces_summarize_filter_and_count() {
     let (app, pool, project) = setup().await;
     let now = jiff::Timestamp::now().as_nanosecond() as i64;
     let span = |trace: u32, id: u32, parent: Option<u32>, name: &str, ms: i64| {
@@ -174,6 +174,44 @@ async fn test_routes_summary_stats() {
             ("GET /b".to_string(), 1, 5, 5, 5, 0, 0),
         ]
     );
+
+    use models::span::{self, RootSpanType};
+    for (search, expected) in [(None, 2), (Some("/A"), 1), (Some("nothing"), 0)] {
+        let listed = span::routes_summary(&pool, Some(project.id), since, search, "requests", 10)
+            .await
+            .unwrap();
+        let count = span::routes_count(&pool, Some(project.id), since, search)
+            .await
+            .unwrap();
+        assert_eq!(
+            (listed.len() as i64, count),
+            (expected, expected),
+            "{search:?}"
+        );
+    }
+    for (root_type, search, min_ms, expected) in [
+        (None, None, None, 4),
+        (Some(RootSpanType::Web), None, None, 4),
+        (Some(RootSpanType::Job), None, None, 0),
+        (None, Some("/A"), None, 3),
+        (None, None, Some(15.0), 2),
+    ] {
+        let filter = (Some(project.id), root_type, Some(since), search, min_ms);
+        let listed = span::list_traces_paginated(
+            &pool, filter.0, filter.1, filter.2, filter.3, filter.4, "recent", 10, 0,
+        )
+        .await
+        .unwrap();
+        let count =
+            span::count_traces_filtered(&pool, filter.0, filter.1, filter.2, filter.3, filter.4)
+                .await
+                .unwrap();
+        assert_eq!(
+            (listed.len() as i64, count),
+            (expected, expected),
+            "{filter:?}"
+        );
+    }
 }
 
 #[tokio::test]

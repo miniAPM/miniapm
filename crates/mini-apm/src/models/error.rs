@@ -217,6 +217,16 @@ async fn find_similar_error(
     Ok(None)
 }
 
+const ERROR_COLUMNS: &str = "id, fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status";
+
+/// Filter shared by [`list_paginated`] and [`count_filtered`]: project `$1`,
+/// status `$2`, search `$3` and last seen since `$4`
+const ERROR_FILTER: &str = "
+    WHERE ($1 IS NULL OR project_id = $1)
+      AND ($2 IS NULL OR status = $2)
+      AND ($3 IS NULL OR LOWER(exception_class) LIKE '%' || LOWER($3) || '%' OR LOWER(message) LIKE '%' || LOWER($3) || '%')
+      AND ($4 IS NULL OR last_seen_at >= $4)";
+
 pub async fn list(
     pool: &DbPool,
     project_id: Option<i64>,
@@ -261,20 +271,7 @@ pub async fn list_paginated(
     };
 
     let sql = format!(
-        r#"
-        SELECT id, fingerprint, exception_class, message,
-               first_seen_at,
-               last_seen_at,
-               occurrence_count, status
-        FROM errors
-        WHERE ($1 IS NULL OR project_id = $1)
-          AND ($2 IS NULL OR status = $2)
-          AND ($3 IS NULL OR LOWER(exception_class) LIKE '%' || LOWER($3) || '%' OR LOWER(message) LIKE '%' || LOWER($3) || '%')
-          AND ($4 IS NULL OR last_seen_at >= $4)
-        ORDER BY {}
-        LIMIT $5 OFFSET $6
-        "#,
-        order_clause
+        "SELECT {ERROR_COLUMNS} FROM errors {ERROR_FILTER} ORDER BY {order_clause} LIMIT $5 OFFSET $6"
     );
 
     let errors = sqlx::query_as::<_, AppError>(sqlx::AssertSqlSafe(sql))
@@ -297,37 +294,22 @@ pub async fn count_filtered(
     search: Option<&str>,
     since: Option<Stamp>,
 ) -> anyhow::Result<i64> {
-    let count: i64 = sqlx::query_scalar(
-        r#"
-        SELECT COUNT(*)
-        FROM errors
-        WHERE ($1 IS NULL OR project_id = $1)
-          AND ($2 IS NULL OR status = $2)
-          AND ($3 IS NULL OR LOWER(exception_class) LIKE '%' || LOWER($3) || '%' OR LOWER(message) LIKE '%' || LOWER($3) || '%')
-          AND ($4 IS NULL OR last_seen_at >= $4)
-        "#,
-    )
-    .bind(project_id)
-    .bind(status)
-    .bind(search)
-    .bind(since)
-    .fetch_one(pool)
-    .await?;
-
-    Ok(count)
+    let sql = format!("SELECT COUNT(*) FROM errors {ERROR_FILTER}");
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+        .bind(project_id)
+        .bind(status)
+        .bind(search)
+        .bind(since)
+        .fetch_one(pool)
+        .await?)
 }
 
 pub async fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<AppError>> {
-    let error = sqlx::query_as::<_, AppError>(
-        "SELECT id, fingerprint, exception_class, message,
-                first_seen_at,
-                last_seen_at,
-                occurrence_count, status
-         FROM errors WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
+    let sql = format!("SELECT {ERROR_COLUMNS} FROM errors WHERE id = $1");
+    let error = sqlx::query_as::<_, AppError>(sqlx::AssertSqlSafe(sql))
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
     Ok(error)
 }
 
@@ -391,7 +373,7 @@ pub async fn count_since(
     project_id: Option<i64>,
     since: Stamp,
 ) -> anyhow::Result<i64> {
-    let count: i64 = sqlx::query_scalar(
+    Ok(sqlx::query_scalar(
         "SELECT COUNT(*) FROM error_occurrences eo
          JOIN errors e ON e.id = eo.error_id
          WHERE eo.happened_at >= $1 AND ($2 IS NULL OR e.project_id = $2)",
@@ -399,8 +381,7 @@ pub async fn count_since(
     .bind(since)
     .bind(project_id)
     .fetch_one(pool)
-    .await?;
-    Ok(count)
+    .await?)
 }
 
 /// Fire `event` on an error's status. Returns the new status, or `None` when

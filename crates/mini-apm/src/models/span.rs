@@ -759,6 +759,16 @@ pub async fn list_traces_filtered(
     .await
 }
 
+/// Root spans matching project `$1`, root type `$2`, happened since `$3`,
+/// search `$4` and minimum duration `$5`
+const TRACE_FILTER: &str = "
+    WHERE s.parent_span_id IS NULL
+      AND ($1 IS NULL OR s.project_id = $1)
+      AND ($2 IS NULL OR s.root_span_type = $2)
+      AND ($3 IS NULL OR s.happened_at >= $3)
+      AND ($4 IS NULL OR LOWER(s.name) LIKE '%' || LOWER($4) || '%' OR LOWER(s.http_url) LIKE '%' || LOWER($4) || '%')
+      AND ($5 IS NULL OR s.duration_ms >= $5)";
+
 #[allow(clippy::too_many_arguments)]
 pub async fn list_traces_paginated(
     pool: &DbPool,
@@ -792,16 +802,10 @@ pub async fn list_traces_paginated(
             s.http_status_code,
             s.happened_at
         FROM spans s
-        WHERE s.parent_span_id IS NULL
-          AND ($1 IS NULL OR s.project_id = $1)
-          AND ($2 IS NULL OR s.root_span_type = $2)
-          AND ($3 IS NULL OR s.happened_at >= $3)
-          AND ($4 IS NULL OR LOWER(s.name) LIKE '%' || LOWER($4) || '%' OR LOWER(s.http_url) LIKE '%' || LOWER($4) || '%')
-          AND ($5 IS NULL OR s.duration_ms >= $5)
-        ORDER BY {}
+        {TRACE_FILTER}
+        ORDER BY {order_clause}
         LIMIT $6 OFFSET $7
-        "#,
-        order_clause
+        "#
     );
 
     let root_type_str = root_type_filter.map(|r| r.as_str());
@@ -832,28 +836,15 @@ pub async fn count_traces_filtered(
     search: Option<&str>,
     min_duration_ms: Option<f64>,
 ) -> anyhow::Result<i64> {
-    let root_type_str = root_type_filter.map(|r| r.as_str());
-    let count: i64 = sqlx::query_scalar(
-        r#"
-        SELECT COUNT(*)
-        FROM spans s
-        WHERE s.parent_span_id IS NULL
-          AND ($1 IS NULL OR s.project_id = $1)
-          AND ($2 IS NULL OR s.root_span_type = $2)
-          AND ($3 IS NULL OR s.happened_at >= $3)
-          AND ($4 IS NULL OR LOWER(s.name) LIKE '%' || LOWER($4) || '%' OR LOWER(s.http_url) LIKE '%' || LOWER($4) || '%')
-          AND ($5 IS NULL OR s.duration_ms >= $5)
-        "#,
-    )
-    .bind(project_id)
-    .bind(root_type_str)
-    .bind(since)
-    .bind(search)
-    .bind(min_duration_ms)
-    .fetch_one(pool)
-    .await?;
-
-    Ok(count)
+    let sql = format!("SELECT COUNT(*) FROM spans s {TRACE_FILTER}");
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+        .bind(project_id)
+        .bind(root_type_filter.map(|r| r.as_str()))
+        .bind(since)
+        .bind(search)
+        .bind(min_duration_ms)
+        .fetch_one(pool)
+        .await?)
 }
 
 pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<TraceDetail>> {
@@ -974,14 +965,13 @@ pub async fn count_since(
     project_id: Option<i64>,
     since: Stamp,
 ) -> anyhow::Result<i64> {
-    let count: i64 = sqlx::query_scalar(
+    Ok(sqlx::query_scalar(
         "SELECT COUNT(*) FROM spans WHERE parent_span_id IS NULL AND ($1 IS NULL OR project_id = $1) AND happened_at >= $2",
     )
     .bind(project_id)
     .bind(since)
     .fetch_one(pool)
-    .await?;
-    Ok(count)
+    .await?)
 }
 
 /// Nearest-rank percentile (0.0-1.0) over `sorted` (ascending), rounded to the
@@ -1094,6 +1084,14 @@ pub struct RouteSummary {
     pub error_rate: f64,
 }
 
+/// Web root spans matching project `$1`, happened since `$2` and search `$3`
+const ROUTE_FILTER: &str = "
+    WHERE parent_span_id IS NULL
+      AND root_span_type = 'web'
+      AND ($1 IS NULL OR project_id = $1)
+      AND happened_at >= $2
+      AND ($3 IS NULL OR LOWER(name) LIKE '%' || LOWER($3) || '%' OR LOWER(http_url) LIKE '%' || LOWER($3) || '%')";
+
 pub async fn routes_summary(
     pool: &DbPool,
     project_id: Option<i64>,
@@ -1103,7 +1101,8 @@ pub async fn routes_summary(
     limit: i64,
 ) -> anyhow::Result<Vec<RouteSummary>> {
     // Get unique routes with basic stats
-    let routes: Vec<(String, String, i64, f64, f64, f64, i64)> = sqlx::query_as(
+    let routes: Vec<(String, String, i64, f64, f64, f64, i64)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
         r#"
         SELECT
             COALESCE(name, http_url, 'unknown') as path,
@@ -1114,16 +1113,12 @@ pub async fn routes_summary(
             MIN(duration_ms) as min_ms,
             SUM(CASE WHEN status_code = 2 OR http_status_code >= 500 THEN 1 ELSE 0 END) as error_count
         FROM spans
-        WHERE parent_span_id IS NULL
-          AND root_span_type = 'web'
-          AND ($1 IS NULL OR project_id = $1)
-          AND happened_at >= $2
-          AND ($3 IS NULL OR LOWER(name) LIKE '%' || LOWER($3) || '%' OR LOWER(http_url) LIKE '%' || LOWER($3) || '%')
+        {ROUTE_FILTER}
         GROUP BY COALESCE(name, http_url, 'unknown'), COALESCE(http_method, 'GET')
         ORDER BY request_count DESC
         LIMIT $4
-        "#,
-    )
+        "#
+    )))
     .bind(project_id)
     .bind(since)
     .bind(search)
@@ -1184,23 +1179,16 @@ pub async fn routes_count(
     since: Stamp,
     search: Option<&str>,
 ) -> anyhow::Result<i64> {
-    let count: i64 = sqlx::query_scalar(
-        r#"
-        SELECT COUNT(DISTINCT COALESCE(name, http_url, 'unknown') || COALESCE(http_method, 'GET'))
-        FROM spans
-        WHERE parent_span_id IS NULL
-          AND root_span_type = 'web'
-          AND ($1 IS NULL OR project_id = $1)
-          AND happened_at >= $2
-          AND ($3 IS NULL OR LOWER(name) LIKE '%' || LOWER($3) || '%' OR LOWER(http_url) LIKE '%' || LOWER($3) || '%')
-        "#,
-    )
-    .bind(project_id)
-    .bind(since)
-    .bind(search)
-    .fetch_one(pool)
-    .await?;
-    Ok(count)
+    let sql = format!(
+        "SELECT COUNT(DISTINCT COALESCE(name, http_url, 'unknown') || COALESCE(http_method, 'GET'))
+         FROM spans {ROUTE_FILTER}"
+    );
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+        .bind(project_id)
+        .bind(since)
+        .bind(search)
+        .fetch_one(pool)
+        .await?)
 }
 
 async fn route_durations(

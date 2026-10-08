@@ -1,5 +1,20 @@
 use super::*;
+use crate::time::hours_ago;
 use crate::{db::test_pool, models::project};
+
+fn incoming(exception_class: &str, hours: i64) -> IncomingError {
+    IncomingError {
+        exception_class: exception_class.into(),
+        message: "boom".into(),
+        backtrace: vec![],
+        fingerprint: exception_class.into(),
+        request_id: None,
+        user_id: None,
+        params: None,
+        timestamp: Some(hours_ago(hours).0),
+        source_context: None,
+    }
+}
 
 #[test]
 fn similarity_normalizes_words_and_handles_empty_inputs() {
@@ -131,20 +146,9 @@ async fn hourly_counts_bucket_occurrences_inside_the_window() -> anyhow::Result<
     let project = project::create(&pool, "Hourly").await?;
     let mut error_id = 0;
     for hours in [0, 2, 2, 30] {
-        let error = IncomingError {
-            exception_class: "TimeoutError".into(),
-            message: "slow".into(),
-            backtrace: vec![],
-            fingerprint: "timeout".into(),
-            request_id: None,
-            user_id: None,
-            params: None,
-            timestamp: Some(crate::time::hours_ago(hours).0),
-            source_context: None,
-        };
-        error_id = insert(&pool, &error, Some(project.id)).await?;
+        error_id = insert(&pool, &incoming("TimeoutError", hours), Some(project.id)).await?;
     }
-    let label = |hours| crate::time::hours_ago(hours).hour_label();
+    let label = |hours| hours_ago(hours).hour_label();
 
     let points = hourly_error_stats(&pool, Some(project.id), 24).await?;
     let counts: std::collections::HashMap<_, _> =
@@ -156,5 +160,42 @@ async fn hourly_counts_bucket_occurrences_inside_the_window() -> anyhow::Result<
     let trend = error_trend_24h(&pool, error_id).await?;
     assert_eq!(trend.len(), 24);
     assert_eq!(trend.iter().sum::<i64>(), 3);
+    Ok(())
+}
+
+#[tokio::test]
+async fn filtered_error_lists_agree_with_their_counts() -> anyhow::Result<()> {
+    let pool = test_pool().await;
+    let project = project::create(&pool, "Filters").await?;
+    let timeout = insert(&pool, &incoming("TimeoutError", 0), Some(project.id)).await?;
+    insert(&pool, &incoming("NoMethodError", 5), Some(project.id)).await?;
+    apply(&pool, timeout, ErrorStatusEvent::Resolve).await?;
+
+    for (status, search, since, expected) in [
+        (None, None, None, 2),
+        (Some("open"), None, None, 1),
+        (Some("resolved"), None, None, 1),
+        (None, Some("TIMEOUT"), None, 1),
+        (None, None, Some(hours_ago(1)), 1),
+        (Some("open"), None, Some(hours_ago(1)), 0),
+    ] {
+        let listed = list_paginated(
+            &pool,
+            Some(project.id),
+            status,
+            search,
+            since,
+            "last_seen",
+            10,
+            0,
+        )
+        .await?;
+        let count = count_filtered(&pool, Some(project.id), status, search, since).await?;
+        assert_eq!(
+            (listed.len() as i64, count),
+            (expected, expected),
+            "{status:?} {search:?} {since:?}"
+        );
+    }
     Ok(())
 }

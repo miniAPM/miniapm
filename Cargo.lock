@@ -1675,6 +1675,7 @@ dependencies = [
  "mini-apm",
  "rama",
  "serde",
+ "sqlx",
  "tokio",
  "tracing",
 ]

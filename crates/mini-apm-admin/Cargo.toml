@@ -28,3 +28,4 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 mini-apm = { workspace = true, default-features = false, features = ["test-support"] }
+sqlx = { workspace = true }
