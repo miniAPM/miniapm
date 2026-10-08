@@ -1644,7 +1644,7 @@ dependencies = [
 
 [[package]]
 name = "mini-apm"
-version = "0.0.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1667,7 +1667,7 @@ dependencies = [
 
 [[package]]
 name = "mini-apm-admin"
-version = "0.0.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "askama",
@@ -1682,7 +1682,7 @@ dependencies = [
 
 [[package]]
 name = "mini-apm-cli"
-version = "0.0.0"
+version = "2.0.0"
 dependencies = [
  "anyhow",
  "mini-apm",
