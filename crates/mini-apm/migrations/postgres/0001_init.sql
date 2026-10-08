@@ -131,8 +131,8 @@ CREATE FUNCTION hour_buckets(until timestamptz, hours integer)
 RETURNS SETOF timestamptz
 LANGUAGE sql STABLE
 RETURN generate_series(
-    date_trunc('hour', until) - make_interval(hours => hours - 1),
-    date_trunc('hour', until),
+    date_trunc('hour', until, 'UTC') - make_interval(hours => hours - 1),
+    date_trunc('hour', until, 'UTC'),
     interval '1 hour'
 );
 
@@ -220,7 +220,9 @@ BEGIN
          INSERT INTO moved_rows SELECT * FROM moved',
         schema_name, table_name || '_default', lo, hi);
     EXECUTE format('CREATE TABLE %s PARTITION OF %s FOR VALUES FROM (%L) TO (%L)', part, parent, lo, hi);
-    EXECUTE format('INSERT INTO %s OVERRIDING SYSTEM VALUE SELECT * FROM moved_rows', parent);
+    -- Into the partition itself, so the parent's rollup triggers do not count
+    -- the moved rows a second time
+    EXECUTE format('INSERT INTO %s OVERRIDING SYSTEM VALUE SELECT * FROM moved_rows', part);
     DROP TABLE moved_rows;
 END
 $$;
@@ -271,3 +273,81 @@ BEGIN
     RETURN NEXT;
 END
 $$;
+
+-- Per project and UTC hour totals of root spans, kept by roll_up_spans
+CREATE TABLE span_rollups (
+    project_id BIGINT REFERENCES projects (id) ON DELETE CASCADE,
+    hour TIMESTAMPTZ NOT NULL,
+    requests BIGINT NOT NULL DEFAULT 0,
+    errors BIGINT NOT NULL DEFAULT 0,
+    timed BIGINT NOT NULL DEFAULT 0,
+    duration_ms DOUBLE PRECISION NOT NULL DEFAULT 0,
+    UNIQUE NULLS NOT DISTINCT (project_id, hour)
+);
+
+CREATE INDEX span_rollups_hour ON span_rollups (hour);
+
+-- Inserted root spans add to their hour's rollup and deleted ones subtract;
+-- an update does both. Rows are locked in key order so concurrent writers
+-- cannot deadlock on a rollup. Statements on a single partition (moving or
+-- expiring days) do not fire these.
+CREATE FUNCTION roll_up_spans()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF TG_OP IN ('UPDATE', 'DELETE') THEN
+        PERFORM 1
+           FROM span_rollups r
+           JOIN (SELECT DISTINCT project_id, date_trunc('hour', happened_at, 'UTC') AS hour
+                   FROM old_spans WHERE parent_span_id IS NULL) g
+             ON r.project_id IS NOT DISTINCT FROM g.project_id AND r.hour = g.hour
+          ORDER BY r.project_id, r.hour
+            FOR UPDATE OF r;
+        UPDATE span_rollups r
+           SET requests = r.requests - g.requests,
+               errors = r.errors - g.errors,
+               timed = r.timed - g.timed,
+               duration_ms = r.duration_ms - g.duration_ms
+          FROM (SELECT project_id, date_trunc('hour', happened_at, 'UTC') AS hour,
+                       count(*) AS requests,
+                       count(*) FILTER (WHERE status_code = 2 OR http_status_code >= 500) AS errors,
+                       count(duration_ms) AS timed,
+                       coalesce(sum(duration_ms), 0) AS duration_ms
+                  FROM old_spans
+                 WHERE parent_span_id IS NULL
+                 GROUP BY 1, 2) g
+         WHERE r.project_id IS NOT DISTINCT FROM g.project_id AND r.hour = g.hour;
+    END IF;
+
+    IF TG_OP IN ('INSERT', 'UPDATE') THEN
+        INSERT INTO span_rollups AS r (project_id, hour, requests, errors, timed, duration_ms)
+        SELECT project_id, date_trunc('hour', happened_at, 'UTC'),
+               count(*),
+               count(*) FILTER (WHERE status_code = 2 OR http_status_code >= 500),
+               count(duration_ms),
+               coalesce(sum(duration_ms), 0)
+          FROM new_spans
+         WHERE parent_span_id IS NULL
+         GROUP BY 1, 2
+         ORDER BY 1, 2
+        ON CONFLICT (project_id, hour) DO UPDATE
+           SET requests = r.requests + excluded.requests,
+               errors = r.errors + excluded.errors,
+               timed = r.timed + excluded.timed,
+               duration_ms = r.duration_ms + excluded.duration_ms;
+    END IF;
+
+    RETURN NULL;
+END
+$$;
+
+CREATE TRIGGER spans_roll_up_insert AFTER INSERT ON spans
+    REFERENCING NEW TABLE AS new_spans
+    FOR EACH STATEMENT EXECUTE FUNCTION roll_up_spans();
+CREATE TRIGGER spans_roll_up_update AFTER UPDATE ON spans
+    REFERENCING OLD TABLE AS old_spans NEW TABLE AS new_spans
+    FOR EACH STATEMENT EXECUTE FUNCTION roll_up_spans();
+CREATE TRIGGER spans_roll_up_delete AFTER DELETE ON spans
+    REFERENCING OLD TABLE AS old_spans
+    FOR EACH STATEMENT EXECUTE FUNCTION roll_up_spans();

@@ -65,6 +65,21 @@ pub async fn hourly_stats(
     Ok(points)
 }
 
+/// Root spans since `since`
+pub async fn count_since(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: Stamp,
+) -> anyhow::Result<i64> {
+    Ok(sqlx::query_scalar(
+        "SELECT COUNT(*) FROM spans WHERE parent_span_id IS NULL AND ($1 IS NULL OR project_id = $1) AND happened_at >= $2",
+    )
+    .bind(project_id)
+    .bind(since)
+    .fetch_one(pool)
+    .await?)
+}
+
 /// The unique key a resent span is matched on
 pub(super) const SPAN_KEY: &[&str] = &["trace_id", "span_id"];
 

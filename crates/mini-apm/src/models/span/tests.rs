@@ -254,6 +254,38 @@ async fn hourly_stats_bucket_root_spans_inside_the_window() -> anyhow::Result<()
     assert_eq!(by_hour[&label(0)], (1, 10.0, 0));
     assert_eq!(by_hour[&label(2)], (2, 25.0, 1));
     assert_eq!(points.iter().map(|p| p.count).sum::<i64>(), 3);
+
+    for statement in [
+        "UPDATE spans SET status_code = 2, duration_ms = 50.0 WHERE span_id = '0000000000000000'",
+        "DELETE FROM spans WHERE span_id = '0000000000000002'",
+    ] {
+        sqlx::query(statement).execute(&pool).await?;
+    }
+    let points = hourly_stats(&pool, None, 24).await?;
+    let by_hour: HashMap<_, _> = points
+        .iter()
+        .map(|p| (p.hour.clone(), (p.count, p.avg_ms, p.error_count)))
+        .collect();
+    assert_eq!(by_hour[&label(0)], (1, 50.0, 1));
+    assert_eq!(by_hour[&label(2)], (1, 20.0, 0));
+    Ok(())
+}
+
+#[tokio::test]
+async fn root_spans_count_from_the_exact_instant() -> anyhow::Result<()> {
+    let pool = crate::db::test_pool().await;
+    let since = crate::time::hours_ago(2);
+    let at = |offset_secs: i64| Stamp(since.0 + jiff::SignedDuration::from_secs(offset_secs));
+    for (i, offset, parent) in [
+        (0, -60, None),
+        (1, 60, None),
+        (2, 3_660, None),
+        (3, 7_000, None),
+        (4, 7_000, Some("0000000000000003")),
+    ] {
+        insert_span(&pool, i, parent, 1.0, 0, at(offset)).await?;
+    }
+    assert_eq!(count_since(&pool, None, since).await?, 3);
     Ok(())
 }
 

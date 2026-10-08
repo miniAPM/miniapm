@@ -99,6 +99,12 @@ pub async fn expire(
                 .fetch_one(pool)
                 .await?;
         tracing::info!("Dropped {dropped} day partitions and {deleted} old rows from {table}");
+        if table == "spans" {
+            sqlx::query("DELETE FROM span_rollups WHERE hour < date_trunc('hour', $1, 'UTC')")
+                .bind(cutoff)
+                .execute(pool)
+                .await?;
+        }
     } else {
         let deleted = super::delete_before(pool, table, column, cutoff).await?;
         tracing::info!("Deleted {deleted} old rows from {table}");

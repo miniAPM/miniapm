@@ -31,6 +31,7 @@ async fn migrations_create_schema_and_preserve_data_when_reapplied() -> anyhow::
             "projects",
             "sessions",
             "settings",
+            "span_rollups",
             "spans",
             "users"
         ]
@@ -67,11 +68,21 @@ async fn day_partitions_take_over_default_rows_and_expire_whole_days() -> anyhow
         placed.iter().all(|(_, table)| table.starts_with("spans_p")),
         "{placed:?}"
     );
+    let rolled_up = || {
+        sqlx::query_scalar::<_, i64>("SELECT COALESCE(SUM(requests), 0)::bigint FROM span_rollups")
+            .fetch_one(&pool)
+    };
+    assert_eq!(rolled_up().await?, 3, "moved rows are counted once");
 
     expire(&pool, "spans", "happened_at", time::days_ago(5)).await?;
     let left: Vec<String> = sqlx::query_scalar("SELECT span_id FROM spans ORDER BY span_id")
         .fetch_all(&pool)
         .await?;
     assert_eq!(left, ["mid", "new"]);
+    assert_eq!(
+        rolled_up().await?,
+        2,
+        "expired days take their rollups along"
+    );
     Ok(())
 }

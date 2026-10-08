@@ -13,19 +13,15 @@ pub async fn hourly_stats(
     let rows: Vec<(String, i64, f64, i64)> = sqlx::query_as(
         r#"
         SELECT
-            to_char(hour, 'YYYY-MM-DD HH24:00'),
-            COUNT(s.id),
-            COALESCE(AVG(s.duration_ms), 0),
-            COUNT(s.id) FILTER (WHERE s.status_code = 2 OR s.http_status_code >= 500)
-        FROM hour_buckets($2, $3::int) AS hour
-        LEFT JOIN spans s
-            ON s.happened_at >= hour
-           AND s.happened_at < hour + interval '1 hour'
-           AND s.happened_at >= $2::timestamptz - make_interval(hours => $3::int)
-           AND s.parent_span_id IS NULL
-           AND ($1::bigint IS NULL OR s.project_id = $1)
-        GROUP BY hour
-        ORDER BY hour
+            to_char(b.hour, 'YYYY-MM-DD HH24:00'),
+            COALESCE(SUM(r.requests), 0)::bigint,
+            COALESCE(SUM(r.duration_ms) / NULLIF(SUM(r.timed), 0), 0),
+            COALESCE(SUM(r.errors), 0)::bigint
+        FROM hour_buckets($2, $3::int) AS b(hour)
+        LEFT JOIN span_rollups r
+            ON r.hour = b.hour AND ($1::bigint IS NULL OR r.project_id = $1)
+        GROUP BY b.hour
+        ORDER BY b.hour
         "#,
     )
     .bind(project_id)
@@ -43,6 +39,30 @@ pub async fn hourly_stats(
             error_count,
         })
         .collect())
+}
+
+/// Root spans since `since`: whole hours from the rollups, the partial hour
+/// `since` falls in from the spans themselves
+pub async fn count_since(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: Stamp,
+) -> anyhow::Result<i64> {
+    Ok(sqlx::query_scalar(
+        "SELECT
+            (SELECT COALESCE(SUM(requests), 0)::bigint FROM span_rollups
+              WHERE hour > date_trunc('hour', $2, 'UTC')
+                AND ($1::bigint IS NULL OR project_id = $1))
+          + (SELECT COUNT(*) FROM spans
+              WHERE parent_span_id IS NULL
+                AND ($1::bigint IS NULL OR project_id = $1)
+                AND happened_at >= $2
+                AND happened_at < date_trunc('hour', $2, 'UTC') + interval '1 hour')",
+    )
+    .bind(project_id)
+    .bind(since)
+    .fetch_one(pool)
+    .await?)
 }
 
 /// The unique key a resent span is matched on, which on a table partitioned
