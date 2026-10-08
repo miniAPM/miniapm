@@ -112,3 +112,6 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t miniapm .
+
+      - name: Build PostgreSQL Docker image
+        run: docker build --build-arg FEATURES=postgres -t miniapm:postgres .

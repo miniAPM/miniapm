@@ -1,0 +1,47 @@
+# PostgreSQL instead of SQLite, layered on docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+# Needs POSTGRES_PASSWORD in .env next to SESSION_SECRET.
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      - POSTGRES_USER=miniapm
+      - POSTGRES_DB=miniapm
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - miniapm_pg:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "miniapm", "-d", "miniapm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+  miniapm:
+    image: ghcr.io/miniapm/miniapm:postgres
+    build:
+      context: .
+      args:
+        FEATURES: postgres
+    environment:
+      - DATABASE_URL=postgres://miniapm:${POSTGRES_PASSWORD}@postgres:5432/miniapm
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  miniapm-admin:
+    image: ghcr.io/miniapm/miniapm:postgres
+    build:
+      context: .
+      args:
+        FEATURES: postgres
+    environment:
+      - DATABASE_URL=postgres://miniapm:${POSTGRES_PASSWORD}@postgres:5432/miniapm
+
+volumes:
+  miniapm_pg:

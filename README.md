@@ -35,6 +35,18 @@ MiniAPM is built for one database backend, chosen at compile time:
 PostgreSQL 18 or newer is required: the collector and dashboard refuse to start
 against an older server. Both backends run their migrations on startup.
 
+With Docker, build the image with `--build-arg FEATURES=postgres`, or run the
+bundled compose files with `POSTGRES_PASSWORD` and `SESSION_SECRET` in `.env`:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.postgres.yml up -d
+```
+
+On PostgreSQL, spans and error occurrences are partitioned by day and retention
+drops whole days, so data can outlive its retention period by up to a day.
+Several collectors can share one database: each background job runs on one of
+them at a time.
+
 ## Quick Start
 
 ### Docker Compose (recommended)

@@ -10,8 +10,11 @@ COPY Cargo.toml Cargo.lock ./
 # Copy workspace crates
 COPY crates ./crates
 
+# Database backend: sqlite or postgres
+ARG FEATURES=sqlite
+
 # Build all workspace crates
-RUN cargo build --release --workspace
+RUN cargo build --release --workspace --no-default-features --features ${FEATURES}
 
 # Runtime image
 FROM alpine:3.23
