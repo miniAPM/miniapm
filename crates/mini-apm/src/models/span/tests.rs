@@ -165,10 +165,9 @@ fn classification_respects_attribute_precedence_and_name_fallbacks() {
 async fn batches_are_atomic_and_resent_spans_update_in_place() -> anyhow::Result<()> {
     let pool = crate::db::test_pool().await;
     crate::db::reject_inserts(&pool, "spans", "name", "poison").await?;
-    let batch = |names: &[&str]| -> serde_json::Result<OtlpTraceRequest> {
-        let spans: Vec<_> = names
+    let batch = |spans: &[(u32, &str)]| -> serde_json::Result<OtlpTraceRequest> {
+        let spans: Vec<_> = spans
             .iter()
-            .enumerate()
             .map(|(i, name)| {
                 serde_json::json!({
                     "traceId": "0af7651916cd43dd8448eb211c80319c",
@@ -189,9 +188,10 @@ async fn batches_are_atomic_and_resent_spans_update_in_place() -> anyhow::Result
 
     let mut ids = Vec::new();
     for (names, inserted, spans, errors) in [
-        (&["ok", "poison"][..], None, 0, 0),
-        (&["ok", "fine"][..], Some(2), 2, 2),
-        (&["ok", "renamed"][..], Some(2), 2, 3),
+        (&[(0, "ok"), (1, "poison")][..], None, 0, 0),
+        (&[(0, "ok"), (1, "fine")][..], Some(2), 2, 2),
+        (&[(0, "ok"), (1, "renamed")][..], Some(2), 2, 3),
+        (&[(1, "first"), (1, "last")][..], Some(2), 2, 5),
     ] {
         assert_eq!(
             insert_otlp_batch(&pool, &batch(names)?, None).await.ok(),
@@ -211,11 +211,15 @@ async fn batches_are_atomic_and_resent_spans_update_in_place() -> anyhow::Result
                 .await?,
         );
     }
-    assert_eq!(ids[1], ids[2], "resent spans keep their ids");
+    assert_eq!(
+        (&ids[2], &ids[3]),
+        (&ids[1], &ids[1]),
+        "resent spans keep their ids"
+    );
     let names: Vec<String> = sqlx::query_scalar("SELECT name FROM spans ORDER BY span_id")
         .fetch_all(&pool)
         .await?;
-    assert_eq!(names, ["ok", "renamed"]);
+    assert_eq!(names, ["ok", "last"]);
     Ok(())
 }
 

@@ -2,12 +2,18 @@ use super::Stamp;
 use jiff_sqlx::ToSqlx;
 use sqlx::encode::IsNull;
 use sqlx::error::BoxDynError;
-use sqlx::postgres::{PgTypeInfo, PgValueRef};
+use sqlx::postgres::{PgHasArrayType, PgTypeInfo, PgValueRef};
 use sqlx::{Database, Decode, Encode, Postgres, Type};
 
 impl Type<Postgres> for Stamp {
     fn type_info() -> PgTypeInfo {
         <jiff_sqlx::Timestamp as Type<Postgres>>::type_info()
+    }
+}
+
+impl PgHasArrayType for Stamp {
+    fn array_type_info() -> PgTypeInfo {
+        <jiff_sqlx::Timestamp as PgHasArrayType>::array_type_info()
     }
 }
 

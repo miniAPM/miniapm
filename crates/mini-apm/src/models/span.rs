@@ -6,6 +6,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::Row;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 mod proto;
 
@@ -535,14 +536,88 @@ async fn extract_and_insert_errors(
     }
 }
 
+/// Columns of `spans` written on ingest after `project_id`, in [`SpanRow`]
+/// field order
+const SPAN_COLUMNS: [&str; 26] = [
+    "trace_id",
+    "span_id",
+    "parent_span_id",
+    "start_time_unix_nano",
+    "end_time_unix_nano",
+    "duration_ms",
+    "name",
+    "kind",
+    "status_code",
+    "status_message",
+    "span_category",
+    "root_span_type",
+    "service_name",
+    "http_method",
+    "http_url",
+    "http_status_code",
+    "db_system",
+    "db_statement",
+    "db_operation",
+    "messaging_system",
+    "messaging_operation",
+    "request_id",
+    "attributes_json",
+    "events_json",
+    "resource_attributes_json",
+    "happened_at",
+];
+
+/// `ON CONFLICT` clause updating a resent span in place, keeping its id
+static SPAN_UPSERT: LazyLock<String> = LazyLock::new(|| {
+    let set = std::iter::once("project_id")
+        .chain(
+            SPAN_COLUMNS
+                .into_iter()
+                .filter(|c| !matches!(*c, "trace_id" | "span_id")),
+        )
+        .map(|c| format!("{c} = excluded.{c}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("ON CONFLICT (trace_id, span_id) DO UPDATE SET {set}")
+});
+
+/// One `spans` row, the [`SPAN_COLUMNS`] after `project_id`
+struct SpanRow {
+    trace_id: String,
+    span_id: String,
+    parent_span_id: Option<String>,
+    start_time_unix_nano: i64,
+    end_time_unix_nano: i64,
+    duration_ms: f64,
+    name: String,
+    kind: i32,
+    status_code: i32,
+    status_message: Option<String>,
+    span_category: &'static str,
+    root_span_type: Option<&'static str>,
+    service_name: Option<String>,
+    http_method: Option<String>,
+    http_url: Option<String>,
+    http_status_code: Option<i32>,
+    db_system: Option<String>,
+    db_statement: Option<String>,
+    db_operation: Option<String>,
+    messaging_system: Option<String>,
+    messaging_operation: Option<String>,
+    request_id: Option<String>,
+    attributes_json: String,
+    events_json: Option<String>,
+    resource_attributes_json: String,
+    happened_at: Stamp,
+}
+
 pub async fn insert_otlp_batch(
     pool: &DbPool,
     request: &OtlpTraceRequest,
     project_id: Option<i64>,
 ) -> anyhow::Result<usize> {
-    let mut count = 0;
+    let mut rows = Vec::new();
     let mut events_by_span = Vec::new();
-    let mut tx = db::begin_write(pool).await?;
 
     for resource_span in &request.resource_spans {
         let resource_attrs = parse_attributes(
@@ -577,142 +652,66 @@ pub async fn insert_otlp_batch(
                     None
                 };
 
-                let trace_id = decode_id(&otlp_span.trace_id);
-                let span_id = decode_id(&otlp_span.span_id);
-                let parent_span_id = otlp_span
-                    .parent_span_id
-                    .as_ref()
-                    .filter(|s| !s.is_empty())
-                    .map(|s| decode_id(s));
-
                 let start_nano = otlp_span.start_time_unix_nano;
                 let end_nano = otlp_span.end_time_unix_nano;
-                let duration_ms = (end_nano - start_nano) as f64 / 1_000_000.0;
-
                 let happened_at = Stamp(Timestamp::from_nanosecond(start_nano.into())?);
+                let attr = |keys: &[&str]| keys.iter().find_map(|k| attrs.get(*k)).cloned();
 
-                let status_code = otlp_span.status.as_ref().and_then(|s| s.code).unwrap_or(0);
-                let status_message = otlp_span.status.as_ref().and_then(|s| s.message.clone());
-
-                // Extract denormalized fields
-                let http_method = attrs
-                    .get("http.method")
-                    .or_else(|| attrs.get("http.request.method"))
-                    .cloned();
-                let http_url = attrs
-                    .get("http.url")
-                    .or_else(|| attrs.get("url.full"))
-                    .or_else(|| attrs.get("http.target"))
-                    .cloned();
-                let http_status: Option<i32> = attrs
-                    .get("http.status_code")
-                    .or_else(|| attrs.get("http.response.status_code"))
-                    .and_then(|s| s.parse().ok());
-                let db_system = attrs.get("db.system").cloned();
-                let db_statement = attrs.get("db.statement").cloned();
-                let db_operation = attrs.get("db.operation").cloned();
-                let messaging_system = attrs.get("messaging.system").cloned();
-                let messaging_operation = attrs
-                    .get("messaging.operation")
-                    .or_else(|| attrs.get("messaging.destination.name"))
-                    .cloned();
-                let request_id = attrs
-                    .get("http.request_id")
-                    .or_else(|| attrs.get("request_id"))
-                    .cloned();
-
-                let attrs_json = serde_json::to_string(&attrs)?;
-                let events_json = otlp_span
-                    .events
-                    .as_ref()
-                    .map(serde_json::to_string)
-                    .transpose()?;
-
-                sqlx::query(
-                    r#"
-                    INSERT INTO spans
-                    (project_id, trace_id, span_id, parent_span_id,
-                     start_time_unix_nano, end_time_unix_nano, duration_ms, name, kind,
-                     status_code, status_message, span_category, root_span_type,
-                     service_name, http_method, http_url, http_status_code,
-                     db_system, db_statement, db_operation,
-                     messaging_system, messaging_operation, request_id,
-                     attributes_json, events_json, resource_attributes_json, happened_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
-                            $24, $25, $26, $27)
-                    ON CONFLICT (trace_id, span_id) DO UPDATE SET
-                     project_id = excluded.project_id,
-                     parent_span_id = excluded.parent_span_id,
-                     start_time_unix_nano = excluded.start_time_unix_nano,
-                     end_time_unix_nano = excluded.end_time_unix_nano,
-                     duration_ms = excluded.duration_ms,
-                     name = excluded.name,
-                     kind = excluded.kind,
-                     status_code = excluded.status_code,
-                     status_message = excluded.status_message,
-                     span_category = excluded.span_category,
-                     root_span_type = excluded.root_span_type,
-                     service_name = excluded.service_name,
-                     http_method = excluded.http_method,
-                     http_url = excluded.http_url,
-                     http_status_code = excluded.http_status_code,
-                     db_system = excluded.db_system,
-                     db_statement = excluded.db_statement,
-                     db_operation = excluded.db_operation,
-                     messaging_system = excluded.messaging_system,
-                     messaging_operation = excluded.messaging_operation,
-                     request_id = excluded.request_id,
-                     attributes_json = excluded.attributes_json,
-                     events_json = excluded.events_json,
-                     resource_attributes_json = excluded.resource_attributes_json,
-                     happened_at = excluded.happened_at
-                    "#,
-                )
-                .bind(project_id)
-                .bind(&trace_id)
-                .bind(&span_id)
-                .bind(parent_span_id.as_deref())
-                .bind(start_nano)
-                .bind(end_nano)
-                .bind(duration_ms)
-                .bind(&otlp_span.name)
-                .bind(kind)
-                .bind(status_code)
-                .bind(status_message.as_deref())
-                .bind(category.as_str())
-                .bind(root_span_type.map(|r| r.as_str()))
-                .bind(service_name.as_deref())
-                .bind(http_method.as_deref())
-                .bind(http_url.as_deref())
-                .bind(http_status)
-                .bind(db_system.as_deref())
-                .bind(db_statement.as_deref())
-                .bind(db_operation.as_deref())
-                .bind(messaging_system.as_deref())
-                .bind(messaging_operation.as_deref())
-                .bind(request_id.as_deref())
-                .bind(&attrs_json)
-                .bind(events_json.as_deref())
-                .bind(&resource_json)
-                .bind(happened_at)
-                .execute(&mut *tx)
-                .await?;
-                count += 1;
+                let row = SpanRow {
+                    trace_id: decode_id(&otlp_span.trace_id),
+                    span_id: decode_id(&otlp_span.span_id),
+                    parent_span_id: otlp_span
+                        .parent_span_id
+                        .as_ref()
+                        .filter(|s| !s.is_empty())
+                        .map(|s| decode_id(s)),
+                    start_time_unix_nano: start_nano,
+                    end_time_unix_nano: end_nano,
+                    duration_ms: (end_nano - start_nano) as f64 / 1_000_000.0,
+                    name: otlp_span.name.clone(),
+                    kind,
+                    status_code: otlp_span.status.as_ref().and_then(|s| s.code).unwrap_or(0),
+                    status_message: otlp_span.status.as_ref().and_then(|s| s.message.clone()),
+                    span_category: category.as_str(),
+                    root_span_type: root_span_type.map(|r| r.as_str()),
+                    service_name: service_name.clone(),
+                    http_method: attr(&["http.method", "http.request.method"]),
+                    http_url: attr(&["http.url", "url.full", "http.target"]),
+                    http_status_code: attr(&["http.status_code", "http.response.status_code"])
+                        .and_then(|s| s.parse().ok()),
+                    db_system: attr(&["db.system"]),
+                    db_statement: attr(&["db.statement"]),
+                    db_operation: attr(&["db.operation"]),
+                    messaging_system: attr(&["messaging.system"]),
+                    messaging_operation: attr(&[
+                        "messaging.operation",
+                        "messaging.destination.name",
+                    ]),
+                    request_id: attr(&["http.request_id", "request_id"]),
+                    attributes_json: serde_json::to_string(&attrs)?,
+                    events_json: otlp_span
+                        .events
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()?,
+                    resource_attributes_json: resource_json.clone(),
+                    happened_at,
+                };
 
                 if otlp_span.events.is_some() {
-                    events_by_span.push((&otlp_span.events, trace_id, happened_at));
+                    events_by_span.push((&otlp_span.events, row.trace_id.clone(), happened_at));
                 }
+                rows.push(row);
             }
         }
     }
-    tx.commit().await?;
+    backend::insert_spans(pool, project_id, &rows).await?;
 
     for (events, trace_id, happened_at) in events_by_span {
         extract_and_insert_errors(pool, events, &trace_id, happened_at, project_id).await;
     }
 
-    Ok(count)
+    Ok(rows.len())
 }
 
 pub async fn list_traces(
