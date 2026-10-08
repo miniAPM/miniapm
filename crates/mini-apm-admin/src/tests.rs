@@ -16,8 +16,7 @@ fn request(uri: &str, peer: &str, forwarded_for: Option<&str>) -> Request {
 }
 
 async fn app() -> impl Service<Request, Output = Response, Error = Infallible> {
-    let config = mini_apm::config::Config::default();
-    make_app(mini_apm::db::init(&config).await.unwrap())
+    make_app(mini_apm::db::test_pool().await)
 }
 
 #[tokio::test]
@@ -71,8 +70,7 @@ async fn test_pages_follow_selected_project() {
     use mini_apm::models::{error, project};
     use rama::http::body::util::BodyExt;
 
-    let config = mini_apm::config::Config::default();
-    let pool = mini_apm::db::init(&config).await.unwrap();
+    let pool = mini_apm::db::test_pool().await;
     let default = project::ensure_default_project(&pool).await.unwrap();
     let other = project::create(&pool, "Other").await.unwrap();
     let only_in_other = error::IncomingError {

@@ -8,3 +8,4 @@
 .ghcr-token
 deploy.tar
 captain-definition
+mise.local.toml

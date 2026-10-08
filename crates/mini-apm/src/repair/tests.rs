@@ -12,7 +12,7 @@ async fn test_restores_mangled_ids_once() {
     let (root, child) = ("b7ad6b7169203331", "00f067aa0ba902b7");
     let clean = ("4bf92f3577b34da6a3ce929d0e0e4736", "53995c3f42cd8ad8");
     let insert = "INSERT INTO spans (trace_id, span_id, parent_span_id, start_time_unix_nano,
-        end_time_unix_nano, name, span_category, happened_at) VALUES ($1, $2, $3, 0, 1, 'x', 'internal', '')";
+        end_time_unix_nano, name, span_category, happened_at) VALUES ($1, $2, $3, 0, 1, 'x', 'internal', $4)";
     for (t, s, p) in [
         (mangle(trace), mangle(root), None),
         (mangle(trace), mangle(child), Some(mangle(root))),
@@ -22,6 +22,7 @@ async fn test_restores_mangled_ids_once() {
             .bind(t)
             .bind(s)
             .bind(p)
+            .bind(crate::time::Stamp::now())
             .execute(&pool)
             .await
             .unwrap();

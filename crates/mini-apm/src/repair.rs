@@ -32,7 +32,9 @@ pub async fn otlp_ids(pool: &DbPool) -> anyhow::Result<u64> {
     let mut repaired = 0;
     for (id, trace_id, span_id, parent_span_id) in spans {
         let result = sqlx::query(
-            "UPDATE OR IGNORE spans SET trace_id = $1, span_id = $2, parent_span_id = $3 WHERE id = $4",
+            "UPDATE spans SET trace_id = $1, span_id = $2, parent_span_id = $3
+             WHERE id = $4
+               AND NOT EXISTS (SELECT 1 FROM spans WHERE trace_id = $1 AND span_id = $2 AND id <> $4)",
         )
         .bind(restore(&trace_id, 48))
         .bind(restore(&span_id, 24))

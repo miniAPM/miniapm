@@ -11,8 +11,13 @@ path = "src/lib.rs"
 name = "miniapm-admin"
 path = "src/main.rs"
 
+[features]
+default = ["sqlite"]
+sqlite = ["mini-apm/sqlite"]
+postgres = ["mini-apm/postgres"]
+
 [dependencies]
-mini-apm = { workspace = true }
+mini-apm = { workspace = true, default-features = false }
 rama = { workspace = true }
 askama = { workspace = true }
 jiff = { workspace = true }
@@ -20,3 +25,6 @@ serde = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
+
+[dev-dependencies]
+mini-apm = { workspace = true, default-features = false, features = ["test-support"] }

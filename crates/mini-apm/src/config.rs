@@ -4,6 +4,7 @@ use std::path::Path;
 #[derive(Clone, Debug)]
 pub struct Config {
     pub sqlite_path: String,
+    pub database_url: Option<String>,
     pub retention_days_errors: i64,
     pub retention_days_spans: i64,
     pub slow_request_threshold_ms: f64,
@@ -56,6 +57,7 @@ impl Config {
         Ok(Self {
             sqlite_path: env::var("SQLITE_PATH")
                 .unwrap_or_else(|_| "./data/miniapm.db".to_string()),
+            database_url: env::var("DATABASE_URL").ok(),
             retention_days_errors: env_positive("RETENTION_DAYS_ERRORS", 30),
             retention_days_spans: env_positive("RETENTION_DAYS_SPANS", 7),
             slow_request_threshold_ms: env_positive("SLOW_REQUEST_THRESHOLD_MS", 500.0),
@@ -130,7 +132,7 @@ impl Config {
     /// Logs configuration summary at startup
     pub fn log_summary(&self) {
         tracing::info!("Configuration:");
-        tracing::info!("  Database: {}", self.sqlite_path);
+        tracing::info!("  Database: {}", crate::db::describe(self));
         tracing::info!("  Base URL: {}", self.mini_apm_url);
         tracing::info!("  User accounts: {}", self.enable_user_accounts);
         tracing::info!("  Multi-project mode: {}", self.enable_projects);
@@ -150,6 +152,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             sqlite_path: ":memory:".to_string(),
+            database_url: None,
             retention_days_errors: 30,
             retention_days_spans: 7,
             slow_request_threshold_ms: 500.0,

@@ -40,6 +40,49 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace -- -D warnings
 
+  test-postgres:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: miniapm
+          POSTGRES_PASSWORD: miniapm
+          POSTGRES_DB: miniapm_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U miniapm"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MINIAPM_TEST_DATABASE_URL: postgres://miniapm:miniapm@localhost:5432/miniapm_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.98
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-postgres-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run tests
+        run: cargo test --workspace --no-default-features --features postgres
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --no-default-features --features postgres -- -D warnings
+
   build:
     runs-on: ubuntu-latest
     steps:

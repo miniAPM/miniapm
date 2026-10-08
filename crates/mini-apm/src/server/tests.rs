@@ -99,12 +99,13 @@ async fn test_errors_from_one_location_share_a_group() {
         assert_eq!(res.status(), StatusCode::ACCEPTED, "{message}");
     }
 
-    let (groups, occurrences): (i64, i64) =
-        sqlx::query_as("SELECT COUNT(*), SUM(occurrence_count) FROM errors WHERE project_id = $1")
-            .bind(project.id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let (groups, occurrences): (i64, i64) = sqlx::query_as(
+        "SELECT COUNT(*), CAST(SUM(occurrence_count) AS BIGINT) FROM errors WHERE project_id = $1",
+    )
+    .bind(project.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!((groups, occurrences), (1, 2));
 }
 
@@ -227,11 +228,11 @@ async fn test_ingest_validates_payloads() {
         .unwrap();
     assert_eq!(trace_ids, ["0af7651916cd43dd8448eb211c80319c"]);
 
-    let deployed_at: String = sqlx::query_scalar("SELECT deployed_at FROM deploys")
+    let deployed_at: crate::time::Stamp = sqlx::query_scalar("SELECT deployed_at FROM deploys")
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert_eq!(deployed_at, "2026-09-26T10:49:01+00:00");
+    assert_eq!(deployed_at.0, "2026-09-26T10:49:01Z".parse().unwrap());
 }
 
 #[tokio::test]
@@ -475,13 +476,7 @@ async fn error_batches_handle_empty_partial_and_total_storage_failures() -> anyh
     ] {
         let (app, pool, project) = setup().await;
         // Deterministic storage failure while leaving authentication and other rows usable.
-        sqlx::query(
-            "CREATE TRIGGER reject_error BEFORE INSERT ON errors
-             WHEN NEW.exception_class = 'RejectedError'
-             BEGIN SELECT RAISE(FAIL, 'simulated storage failure'); END",
-        )
-        .execute(&pool)
-        .await?;
+        db::reject_inserts(&pool, "errors", "exception_class", "RejectedError").await?;
         let errors = classes.iter().map(|class| json!({
             "exception_class": class, "message": "boom", "backtrace": [], "fingerprint": class,
         })).collect::<Vec<_>>();

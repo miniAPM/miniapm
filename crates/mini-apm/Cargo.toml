@@ -14,11 +14,14 @@ path = "src/bin/server/main.rs"
 [features]
 default = ["sqlite"]
 sqlite = ["sqlx/sqlite", "sqlx/sqlite-bundled"]
+test-support = []
+postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki", "dep:jiff-sqlx", "jiff-sqlx/postgres"]
 
 [dependencies]
 tokio = { workspace = true }
 rama = { workspace = true }
 sqlx = { workspace = true }
+jiff-sqlx = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 usage-lib = { workspace = true }

@@ -143,12 +143,7 @@ fn classification_respects_attribute_precedence_and_name_fallbacks() {
 #[tokio::test]
 async fn batches_are_atomic_and_resent_spans_update_in_place() -> anyhow::Result<()> {
     let pool = crate::db::test_pool().await;
-    sqlx::query(
-        "CREATE TRIGGER reject_poison BEFORE INSERT ON spans WHEN NEW.name = 'poison'
-         BEGIN SELECT RAISE(ABORT, 'rejected'); END",
-    )
-    .execute(&pool)
-    .await?;
+    crate::db::reject_inserts(&pool, "spans", "name", "poison").await?;
     let batch = |names: &[&str]| -> serde_json::Result<OtlpTraceRequest> {
         let spans: Vec<_> = names
             .iter()
@@ -171,6 +166,7 @@ async fn batches_are_atomic_and_resent_spans_update_in_place() -> anyhow::Result
         )
     };
 
+    let mut ids = Vec::new();
     for (names, inserted, spans, errors) in [
         (&["ok", "poison"][..], None, 0, 0),
         (&["ok", "fine"][..], Some(2), 2, 2),
@@ -188,10 +184,16 @@ async fn batches_are_atomic_and_resent_spans_update_in_place() -> anyhow::Result
             let count: i64 = sqlx::query_scalar(query).fetch_one(&pool).await?;
             assert_eq!(count, expected, "{query} after {names:?}");
         }
+        ids.push(
+            sqlx::query_scalar::<_, i64>("SELECT id FROM spans ORDER BY span_id")
+                .fetch_all(&pool)
+                .await?,
+        );
     }
-    let rows: Vec<(i64, String)> = sqlx::query_as("SELECT id, name FROM spans ORDER BY span_id")
+    assert_eq!(ids[1], ids[2], "resent spans keep their ids");
+    let names: Vec<String> = sqlx::query_scalar("SELECT name FROM spans ORDER BY span_id")
         .fetch_all(&pool)
         .await?;
-    assert_eq!(rows, [(1, "ok".into()), (2, "renamed".into())]);
+    assert_eq!(names, ["ok", "renamed"]);
     Ok(())
 }

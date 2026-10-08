@@ -21,7 +21,19 @@ MiniAPM consists of two services:
 | `miniapm` | 3000 | **Collector** - Ingestion API for traces, errors, deploys |
 | `miniapm-admin` | 3001 | **Dashboard** - Web UI for viewing and managing data |
 
-Both services share the same SQLite database.
+Both services share the same database.
+
+## Database
+
+MiniAPM is built for one database backend, chosen at compile time:
+
+| Backend | Build | Configure |
+|---------|-------|-----------|
+| SQLite (default) | `cargo build --release` | `SQLITE_PATH` |
+| PostgreSQL 18+ | `cargo build --release --no-default-features --features postgres` | `DATABASE_URL` |
+
+PostgreSQL 18 or newer is required: the collector and dashboard refuse to start
+against an older server. Both backends run their migrations on startup.
 
 ## Quick Start
 
@@ -156,7 +168,8 @@ curl -X POST http://localhost:3000/ingest/deploys \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SQLITE_PATH` | `./data/miniapm.db` | Database file location |
+| `SQLITE_PATH` | `./data/miniapm.db` | Database file location (SQLite builds) |
+| `DATABASE_URL` | | PostgreSQL connection URL (PostgreSQL builds) |
 | `RUST_LOG` | `mini_apm=info` | Log level |
 | `RETENTION_DAYS_ERRORS` | `30` | Days to keep error data |
 | `RETENTION_DAYS_SPANS` | `7` | Days to keep trace spans |
@@ -167,7 +180,8 @@ curl -X POST http://localhost:3000/ingest/deploys \
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SQLITE_PATH` | `./data/miniapm.db` | Database file location (same as collector) |
+| `SQLITE_PATH` | `./data/miniapm.db` | Database file location, same as collector (SQLite builds) |
+| `DATABASE_URL` | | PostgreSQL connection URL, same as collector (PostgreSQL builds) |
 | `ENABLE_USER_ACCOUNTS` | `false` | Enable multi-user authentication |
 | `SESSION_SECRET` | (required) | Secret for session cookies |
 | `MINI_APM_URL` | `http://localhost:3001` | URL for generating links |
@@ -219,6 +233,10 @@ curl http://localhost:3001/health
 # Run tests
 cargo test --workspace
 
+# Run tests against PostgreSQL (each test gets its own schema in that database)
+MINIAPM_TEST_DATABASE_URL=postgres://user:pass@localhost/miniapm_test \
+  cargo test --workspace --no-default-features --features postgres
+
 # Run collector
 cargo run -p mini-apm
 
@@ -238,7 +256,7 @@ cargo clippy --workspace
 ## Tech Stack
 
 - **Rust** with [Rama](https://github.com/plabayo/rama) web framework
-- **SQLite** - Zero-config, automatic migrations
+- **SQLite** or **PostgreSQL 18+** - automatic migrations
 - **OTLP/HTTP** - Standard OpenTelemetry protocol
 
 ## License
