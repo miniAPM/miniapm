@@ -527,6 +527,8 @@ pub async fn insert_otlp_batch(
     project_id: Option<i64>,
 ) -> anyhow::Result<usize> {
     let mut count = 0;
+    let mut events_by_span = Vec::new();
+    let mut tx = pool.begin_with("BEGIN IMMEDIATE").await?;
 
     for resource_span in &request.resource_spans {
         let resource_attrs = parse_attributes(
@@ -656,21 +658,20 @@ pub async fn insert_otlp_batch(
                 .bind(events_json.as_deref())
                 .bind(&resource_json)
                 .bind(&happened_at)
-                .execute(pool)
+                .execute(&mut *tx)
                 .await?;
                 count += 1;
 
-                // Extract errors from exception events
-                extract_and_insert_errors(
-                    pool,
-                    &otlp_span.events,
-                    &trace_id,
-                    &happened_at,
-                    project_id,
-                )
-                .await;
+                if otlp_span.events.is_some() {
+                    events_by_span.push((&otlp_span.events, trace_id, happened_at));
+                }
             }
         }
+    }
+    tx.commit().await?;
+
+    for (events, trace_id, happened_at) in events_by_span {
+        extract_and_insert_errors(pool, events, &trace_id, &happened_at, project_id).await;
     }
 
     Ok(count)

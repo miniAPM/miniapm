@@ -139,3 +139,55 @@ fn classification_respects_attribute_precedence_and_name_fallbacks() {
         );
     }
 }
+
+#[tokio::test]
+async fn batch_is_all_or_nothing_and_records_exceptions_only_once_committed() -> anyhow::Result<()>
+{
+    let pool = crate::db::test_pool().await;
+    sqlx::query(
+        "CREATE TRIGGER reject_poison BEFORE INSERT ON spans WHEN NEW.name = 'poison'
+         BEGIN SELECT RAISE(ABORT, 'rejected'); END",
+    )
+    .execute(&pool)
+    .await?;
+    let batch = |names: &[&str]| -> serde_json::Result<OtlpTraceRequest> {
+        let spans: Vec<_> = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| {
+                serde_json::json!({
+                    "traceId": "0af7651916cd43dd8448eb211c80319c",
+                    "spanId": format!("{i:016x}"),
+                    "name": name,
+                    "startTimeUnixNano": 1_000_000_000,
+                    "endTimeUnixNano": 2_000_000_000,
+                    "events": [{"name": "exception", "attributes": [
+                        {"key": "exception.type", "value": {"stringValue": format!("{name}Error")}}
+                    ]}],
+                })
+            })
+            .collect();
+        serde_json::from_value(
+            serde_json::json!({"resourceSpans": [{"scopeSpans": [{"spans": spans}]}]}),
+        )
+    };
+
+    for (names, inserted, spans, errors) in [
+        (&["ok", "poison"][..], None, 0, 0),
+        (&["ok", "fine"][..], Some(2), 2, 2),
+    ] {
+        assert_eq!(
+            insert_otlp_batch(&pool, &batch(names)?, None).await.ok(),
+            inserted,
+            "{names:?}"
+        );
+        for (query, expected) in [
+            ("SELECT COUNT(*) FROM spans", spans),
+            ("SELECT COUNT(*) FROM errors", errors),
+        ] {
+            let count: i64 = sqlx::query_scalar(query).fetch_one(&pool).await?;
+            assert_eq!(count, expected, "{query} after {names:?}");
+        }
+    }
+    Ok(())
+}
