@@ -428,52 +428,6 @@ pub struct ErrorTrendPoint {
     pub count: i64,
 }
 
-/// Get hourly error occurrence counts for a specific error (for trend sparklines)
-pub async fn error_trend(
-    pool: &DbPool,
-    error_id: i64,
-    hours: i64,
-) -> anyhow::Result<Vec<ErrorTrendPoint>> {
-    let rows: Vec<(String, i64)> = sqlx::query_as(
-        r#"
-        WITH hours AS (
-            SELECT datetime('now', '-' || (value - 1) || ' hours') as hour
-            FROM generate_series(1, ?2)
-        )
-        SELECT strftime('%Y-%m-%d %H:00', h.hour) as hour,
-               COALESCE(SUM(CASE WHEN eo.happened_at IS NOT NULL THEN 1 ELSE 0 END), 0) as cnt
-        FROM (
-            SELECT datetime('now', '-' || (value - 1) || ' hours') as hour
-            FROM (
-                SELECT 1 as value UNION SELECT 2 UNION SELECT 3 UNION SELECT 4
-                UNION SELECT 5 UNION SELECT 6 UNION SELECT 7 UNION SELECT 8
-                UNION SELECT 9 UNION SELECT 10 UNION SELECT 11 UNION SELECT 12
-                UNION SELECT 13 UNION SELECT 14 UNION SELECT 15 UNION SELECT 16
-                UNION SELECT 17 UNION SELECT 18 UNION SELECT 19 UNION SELECT 20
-                UNION SELECT 21 UNION SELECT 22 UNION SELECT 23 UNION SELECT 24
-            )
-            WHERE value <= ?2
-        ) h
-        LEFT JOIN error_occurrences eo
-            ON strftime('%Y-%m-%d %H', eo.happened_at) = strftime('%Y-%m-%d %H', h.hour)
-            AND eo.error_id = ?1
-        GROUP BY strftime('%Y-%m-%d %H:00', h.hour)
-        ORDER BY hour ASC
-        "#,
-    )
-    .bind(error_id)
-    .bind(hours)
-    .fetch_all(pool)
-    .await?;
-
-    let points = rows
-        .into_iter()
-        .map(|(hour, count)| ErrorTrendPoint { hour, count })
-        .collect();
-
-    Ok(points)
-}
-
 /// Get simplified 24h trend for an error (returns just the hourly counts as a string for sparkline)
 pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec<i64>> {
     // Get occurrence counts per hour for the last 24 hours
@@ -481,12 +435,13 @@ pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec
         r#"
         SELECT strftime('%Y-%m-%d %H', happened_at) as hour, COUNT(*) as cnt
         FROM error_occurrences
-        WHERE error_id = ?1 AND happened_at >= datetime('now', '-24 hours')
+        WHERE error_id = ?1 AND happened_at >= ?2
         GROUP BY hour
         ORDER BY hour ASC
         "#,
     )
     .bind(error_id)
+    .bind(time::rfc3339(time::hours_ago(24)))
     .fetch_all(pool)
     .await?;
 
@@ -514,14 +469,14 @@ pub async fn hourly_error_stats(
         SELECT strftime('%Y-%m-%d %H:00', eo.happened_at) as hour_label, COUNT(*) as cnt
         FROM error_occurrences eo
         JOIN errors e ON e.id = eo.error_id
-        WHERE eo.happened_at >= datetime('now', '-' || ?2 || ' hours')
+        WHERE eo.happened_at >= ?2
           AND (?1 IS NULL OR e.project_id = ?1)
         GROUP BY strftime('%Y-%m-%d %H', eo.happened_at)
         ORDER BY eo.happened_at ASC
         "#,
     )
     .bind(project_id)
-    .bind(hours)
+    .bind(time::rfc3339(time::hours_ago(hours)))
     .fetch_all(pool)
     .await?;
 

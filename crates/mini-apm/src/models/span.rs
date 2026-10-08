@@ -575,9 +575,7 @@ pub async fn insert_otlp_batch(
                 let end_nano = otlp_span.end_time_unix_nano;
                 let duration_ms = (end_nano - start_nano) as f64 / 1_000_000.0;
 
-                let happened_at = Timestamp::from_nanosecond(start_nano.into())?
-                    .strftime("%Y-%m-%dT%H:%M:%S%.3fZ")
-                    .to_string();
+                let happened_at = time::rfc3339(Timestamp::from_nanosecond(start_nano.into())?);
 
                 let status_code = otlp_span.status.as_ref().and_then(|s| s.code).unwrap_or(0);
                 let status_message = otlp_span.status.as_ref().and_then(|s| s.message.clone());
@@ -1055,13 +1053,13 @@ pub async fn hourly_stats(
         FROM spans
         WHERE parent_span_id IS NULL
           AND (?1 IS NULL OR project_id = ?1)
-          AND happened_at >= datetime('now', '-' || ?2 || ' hours')
+          AND happened_at >= ?2
         GROUP BY strftime('%Y-%m-%d %H:00', happened_at)
         ORDER BY hour ASC
         "#,
     )
     .bind(project_id)
-    .bind(hours)
+    .bind(time::rfc3339(time::hours_ago(hours)))
     .fetch_all(pool)
     .await?;
 
