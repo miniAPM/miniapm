@@ -292,8 +292,8 @@ pub async fn occurrences(
         Stamp,
         Option<String>,
     )> = sqlx::query_as(
-        "SELECT id, error_id, request_id, user_id, backtrace, params,
-                happened_at, source_context
+        "SELECT id, error_id, request_id, user_id, CAST(backtrace AS TEXT), CAST(params AS TEXT),
+                happened_at, CAST(source_context AS TEXT)
          FROM error_occurrences WHERE error_id = $1 ORDER BY happened_at DESC LIMIT $2",
     )
     .bind(error_id)

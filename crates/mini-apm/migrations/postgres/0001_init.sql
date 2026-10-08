@@ -56,10 +56,10 @@ CREATE TABLE error_occurrences (
     error_id BIGINT NOT NULL REFERENCES errors (id) ON DELETE CASCADE,
     request_id TEXT,
     user_id TEXT,
-    backtrace TEXT NOT NULL,
-    params TEXT,
+    backtrace JSONB NOT NULL,
+    params JSONB,
     happened_at TIMESTAMPTZ NOT NULL,
-    source_context TEXT
+    source_context JSONB
 );
 
 CREATE INDEX error_occurrences_error_id ON error_occurrences (error_id, happened_at DESC);
@@ -104,9 +104,9 @@ CREATE TABLE spans (
     messaging_system TEXT,
     messaging_operation TEXT,
     request_id TEXT,
-    attributes_json TEXT,
-    events_json TEXT,
-    resource_attributes_json TEXT,
+    attributes_json JSONB,
+    events_json JSONB,
+    resource_attributes_json JSONB,
     happened_at TIMESTAMPTZ NOT NULL,
     UNIQUE (trace_id, span_id)
 );
@@ -176,7 +176,8 @@ BEGIN
     INSERT INTO error_occurrences
         (error_id, request_id, user_id, backtrace, params, happened_at, source_context)
     VALUES
-        (recorded, p_request_id, p_user_id, p_backtrace, p_params, p_happened_at, p_source_context);
+        (recorded, p_request_id, p_user_id, p_backtrace::jsonb, p_params::jsonb, p_happened_at,
+         p_source_context::jsonb);
 
     RETURN recorded;
 END

@@ -48,13 +48,19 @@ pub async fn hourly_stats(
 /// last copy, as `ON CONFLICT` may not touch the same row twice.
 static INSERT_SPANS: LazyLock<String> = LazyLock::new(|| {
     let columns = SPAN_COLUMNS.join(", ");
+    let values = SPAN_COLUMNS
+        .map(|c| match c {
+            "attributes_json" | "events_json" | "resource_attributes_json" => format!("{c}::jsonb"),
+            _ => c.to_string(),
+        })
+        .join(", ");
     let arrays = (2..=SPAN_COLUMNS.len() + 1)
         .map(|i| format!("${i}"))
         .collect::<Vec<_>>()
         .join(", ");
     format!(
         "INSERT INTO spans (project_id, {columns})
-         SELECT DISTINCT ON (trace_id, span_id) $1, {columns}
+         SELECT DISTINCT ON (trace_id, span_id) $1, {values}
          FROM unnest({arrays}) WITH ORDINALITY AS r({columns}, ord)
          ORDER BY trace_id, span_id, ord DESC
          {}",

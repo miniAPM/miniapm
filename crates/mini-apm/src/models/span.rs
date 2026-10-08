@@ -455,33 +455,6 @@ fn decode_id(s: &str) -> String {
 use crate::models::error as app_error;
 use sha2::{Digest, Sha256};
 
-/// Backfill errors from existing spans that have exception events
-/// This is useful for extracting errors from spans that were ingested before error extraction was added
-pub async fn backfill_errors_from_spans(pool: &DbPool) -> anyhow::Result<usize> {
-    let rows: Vec<(Option<i64>, String, String, Stamp)> = sqlx::query_as(
-        r#"
-        SELECT project_id, trace_id, events_json, happened_at
-        FROM spans
-        WHERE events_json IS NOT NULL
-          AND events_json != '[]'
-          AND events_json LIKE '%exception%'
-        "#,
-    )
-    .fetch_all(pool)
-    .await?;
-
-    let mut count = 0;
-    for (project_id, trace_id, events_json, happened_at) in rows {
-        if let Ok(events) = serde_json::from_str::<Vec<SpanEvent>>(&events_json) {
-            let events_opt = Some(events);
-            extract_and_insert_errors(pool, &events_opt, &trace_id, happened_at, project_id).await;
-            count += 1;
-        }
-    }
-
-    Ok(count)
-}
-
 /// Extract exception events from OTLP span and insert as errors
 async fn extract_and_insert_errors(
     pool: &DbPool,
