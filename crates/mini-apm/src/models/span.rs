@@ -974,11 +974,14 @@ pub async fn count_since(
     .await?)
 }
 
-/// Nearest-rank percentile (0.0-1.0) over `sorted` (ascending), rounded to the
-/// nearest ms. `sorted` must be non-empty.
-fn percentile_ms(sorted: &[f64], p: f64) -> i64 {
-    let idx = ((p * (sorted.len() as f64 - 1.0)).round() as usize).min(sorted.len() - 1);
-    sorted[idx].round() as i64
+/// The nearest-rank `percent`th percentile of `sorted` (ascending), rounded to
+/// the nearest ms: the smallest sample that at least `percent`% of samples are
+/// at or below, as SQL `percentile_disc` picks it. `sorted` must be non-empty.
+fn percentile_ms(sorted: &[f64], percent: usize) -> i64 {
+    let rank = (percent * sorted.len())
+        .div_ceil(100)
+        .clamp(1, sorted.len());
+    sorted[rank - 1].round() as i64
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1013,8 +1016,8 @@ pub async fn latency_stats_since(
 
     Ok(LatencyStats {
         avg_ms: avg.round() as i64,
-        p95_ms: percentile_ms(&values, 0.95),
-        p99_ms: percentile_ms(&values, 0.99),
+        p95_ms: percentile_ms(&values, 95),
+        p99_ms: percentile_ms(&values, 99),
     })
 }
 
@@ -1134,7 +1137,7 @@ pub async fn routes_summary(
     for (path, method, request_count, avg_ms, max_ms, min_ms, error_count) in routes {
         let (p95, p99) = durations
             .get(&path)
-            .map(|d| (percentile_ms(d, 0.95), percentile_ms(d, 0.99)))
+            .map(|d| (percentile_ms(d, 95), percentile_ms(d, 99)))
             .unwrap_or((0, 0));
         let (avg_db_ms, avg_db_count) = db_stats.get(&path).copied().unwrap_or((0, 0));
         let error_rate = if request_count > 0 {
