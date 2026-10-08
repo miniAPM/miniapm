@@ -197,3 +197,43 @@ async fn batches_are_atomic_and_resent_spans_update_in_place() -> anyhow::Result
     assert_eq!(names, ["ok", "renamed"]);
     Ok(())
 }
+
+#[tokio::test]
+async fn hourly_stats_bucket_root_spans_inside_the_window() -> anyhow::Result<()> {
+    let pool = crate::db::test_pool().await;
+    for (i, (hours, duration_ms, status_code, parent)) in [
+        (0, 10.0, 0, None),
+        (2, 20.0, 0, None),
+        (2, 30.0, 2, None),
+        (2, 99.0, 0, Some("0000000000000001")),
+        (30, 99.0, 0, None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        sqlx::query(
+            "INSERT INTO spans (trace_id, span_id, parent_span_id, start_time_unix_nano,
+                end_time_unix_nano, duration_ms, name, status_code, span_category, happened_at)
+             VALUES ('trace', $1, $2, 0, 1, $3, 'GET /', $4, 'http_server', $5)",
+        )
+        .bind(format!("{i:016x}"))
+        .bind(parent)
+        .bind(duration_ms)
+        .bind(status_code)
+        .bind(crate::time::hours_ago(hours))
+        .execute(&pool)
+        .await?;
+    }
+    let label = |hours| crate::time::hours_ago(hours).hour_label();
+
+    let points = hourly_stats(&pool, None, 24).await?;
+    let by_hour: HashMap<_, _> = points
+        .iter()
+        .map(|p| (p.hour.clone(), (p.count, p.avg_ms, p.error_count)))
+        .collect();
+    assert_eq!(points.len(), 24);
+    assert_eq!(by_hour[&label(0)], (1, 10.0, 0));
+    assert_eq!(by_hour[&label(2)], (2, 25.0, 1));
+    assert_eq!(points.iter().map(|p| p.count).sum::<i64>(), 3);
+    Ok(())
+}

@@ -116,3 +116,13 @@ CREATE INDEX spans_happened_at ON spans USING brin (happened_at);
 CREATE INDEX spans_roots ON spans (happened_at) WHERE parent_span_id IS NULL;
 CREATE INDEX spans_root_type ON spans (root_span_type) WHERE root_span_type IS NOT NULL;
 CREATE INDEX spans_category ON spans (span_category);
+
+-- The start of each of the `hours` hours up to and including the one `until` falls in
+CREATE FUNCTION hour_buckets(until timestamptz, hours integer)
+RETURNS SETOF timestamptz
+LANGUAGE sql STABLE
+RETURN generate_series(
+    date_trunc('hour', until) - make_interval(hours => hours - 1),
+    date_trunc('hour', until),
+    interval '1 hour'
+);

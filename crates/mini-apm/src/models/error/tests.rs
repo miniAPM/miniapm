@@ -124,3 +124,37 @@ async fn grouping_preserves_occurrences_and_isolates_projects_and_locations() ->
     assert_eq!(occurrences(&pool, id, 10).await?.len(), 2);
     Ok(())
 }
+
+#[tokio::test]
+async fn hourly_counts_bucket_occurrences_inside_the_window() -> anyhow::Result<()> {
+    let pool = test_pool().await;
+    let project = project::create(&pool, "Hourly").await?;
+    let mut error_id = 0;
+    for hours in [0, 2, 2, 30] {
+        let error = IncomingError {
+            exception_class: "TimeoutError".into(),
+            message: "slow".into(),
+            backtrace: vec![],
+            fingerprint: "timeout".into(),
+            request_id: None,
+            user_id: None,
+            params: None,
+            timestamp: Some(crate::time::hours_ago(hours).0),
+            source_context: None,
+        };
+        error_id = insert(&pool, &error, Some(project.id)).await?;
+    }
+    let label = |hours| crate::time::hours_ago(hours).hour_label();
+
+    let points = hourly_error_stats(&pool, Some(project.id), 24).await?;
+    let counts: std::collections::HashMap<_, _> =
+        points.iter().map(|p| (p.hour.clone(), p.count)).collect();
+    assert_eq!(points.len(), 24);
+    assert_eq!((counts[&label(0)], counts[&label(2)]), (1, 2));
+    assert_eq!(points.iter().map(|p| p.count).sum::<i64>(), 3);
+
+    let trend = error_trend_24h(&pool, error_id).await?;
+    assert_eq!(trend.len(), 24);
+    assert_eq!(trend.iter().sum::<i64>(), 3);
+    Ok(())
+}

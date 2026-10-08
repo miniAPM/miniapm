@@ -7,11 +7,7 @@ pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec
     Ok(sqlx::query_scalar(
         r#"
         SELECT COUNT(eo.id)
-        FROM generate_series(
-            date_trunc('hour', $2::timestamptz) - interval '23 hours',
-            date_trunc('hour', $2::timestamptz),
-            interval '1 hour'
-        ) AS hour
+        FROM hour_buckets($2, 24) AS hour
         LEFT JOIN error_occurrences eo
             ON eo.error_id = $1
            AND eo.happened_at >= hour
@@ -36,11 +32,7 @@ pub async fn hourly_error_stats(
     let rows: Vec<(String, i64)> = sqlx::query_as(
         r#"
         SELECT to_char(hour, 'YYYY-MM-DD HH24:00'), COUNT(eo.id)
-        FROM generate_series(
-            date_trunc('hour', $2::timestamptz) - make_interval(hours => $3::int - 1),
-            date_trunc('hour', $2::timestamptz),
-            interval '1 hour'
-        ) AS hour
+        FROM hour_buckets($2, $3::int) AS hour
         LEFT JOIN (
             error_occurrences eo
             JOIN errors e ON e.id = eo.error_id AND ($1::bigint IS NULL OR e.project_id = $1)

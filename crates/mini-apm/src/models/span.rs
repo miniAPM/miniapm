@@ -1132,8 +1132,8 @@ pub async fn routes_summary(
     .await?;
 
     let paths: Vec<String> = routes.iter().map(|r| r.0.clone()).collect();
-    let durations = backend::route_durations(pool, project_id, since, &paths).await?;
-    let db_stats = backend::route_db_stats(pool, project_id, since, &paths).await?;
+    let durations = route_durations(pool, project_id, since, &paths).await?;
+    let db_stats = route_db_stats(pool, project_id, since, &paths).await?;
 
     let mut result = Vec::new();
     for (path, method, request_count, avg_ms, max_ms, min_ms, error_count) in routes {
@@ -1201,6 +1201,79 @@ pub async fn routes_count(
     .fetch_one(pool)
     .await?;
     Ok(count)
+}
+
+async fn route_durations(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: Stamp,
+    paths: &[String],
+) -> anyhow::Result<HashMap<String, Vec<f64>>> {
+    let in_paths = db::in_text_list(3);
+    let rows: Vec<(String, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        r#"
+        SELECT COALESCE(name, http_url, 'unknown') AS path, duration_ms
+        FROM spans
+        WHERE parent_span_id IS NULL
+          AND ($1 IS NULL OR project_id = $1)
+          AND happened_at >= $2
+          AND COALESCE(name, http_url, 'unknown') {in_paths}
+        ORDER BY duration_ms ASC
+        "#
+    )))
+    .bind(project_id)
+    .bind(since)
+    .bind(db::text_list(paths))
+    .fetch_all(pool)
+    .await?;
+
+    let mut durations: HashMap<String, Vec<f64>> = HashMap::new();
+    for (path, duration) in rows {
+        durations.entry(path).or_default().push(duration);
+    }
+    Ok(durations)
+}
+
+async fn route_db_stats(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: Stamp,
+    paths: &[String],
+) -> anyhow::Result<HashMap<String, (i64, i64)>> {
+    let in_paths = db::in_text_list(3);
+    let rows: Vec<(String, f64, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        r#"
+        WITH roots AS (
+            SELECT trace_id, COALESCE(name, http_url, 'unknown') AS path
+            FROM spans
+            WHERE parent_span_id IS NULL
+              AND ($1 IS NULL OR project_id = $1)
+              AND happened_at >= $2
+              AND COALESCE(name, http_url, 'unknown') {in_paths}
+        ),
+        db AS (
+            SELECT s.trace_id, SUM(s.duration_ms) AS db_ms, COUNT(*) AS db_count
+            FROM spans s
+            JOIN (SELECT DISTINCT trace_id FROM roots) r ON r.trace_id = s.trace_id
+            WHERE s.span_category = 'db'
+            GROUP BY s.trace_id
+        )
+        SELECT roots.path, AVG(db.db_ms), AVG(CAST(db.db_count AS DOUBLE PRECISION))
+        FROM roots
+        JOIN db ON db.trace_id = roots.trace_id
+        GROUP BY roots.path
+        "#
+    )))
+    .bind(project_id)
+    .bind(since)
+    .bind(db::text_list(paths))
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(path, db_ms, db_count)| (path, (db_ms.round() as i64, db_count.round() as i64)))
+        .collect())
 }
 
 const N_PLUS_1_THRESHOLD: usize = 5;

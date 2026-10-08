@@ -53,6 +53,17 @@ pub fn describe(config: &Config) -> String {
     }
 }
 
+/// SQL testing a value against the list bound as parameter `param` with
+/// [`text_list`]
+pub fn in_text_list(param: u8) -> String {
+    format!("= ANY(${param})")
+}
+
+/// Bind value for [`in_text_list`]
+pub fn text_list(items: &[String]) -> &[String] {
+    items
+}
+
 pub async fn begin_write(pool: &DbPool) -> sqlx::Result<DbTransaction> {
     pool.begin().await
 }

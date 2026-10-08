@@ -42,6 +42,17 @@ pub fn describe(config: &Config) -> String {
     format!("SQLite {}", config.sqlite_path)
 }
 
+/// SQL testing a value against the list bound as parameter `param` with
+/// [`text_list`]
+pub fn in_text_list(param: u8) -> String {
+    format!("IN (SELECT value FROM json_each(${param}))")
+}
+
+/// Bind value for [`in_text_list`]: SQLite has no arrays, so a JSON array
+pub fn text_list(items: &[String]) -> String {
+    serde_json::to_string(items).expect("a list of strings serializes")
+}
+
 /// Open a transaction that takes SQLite's write lock up front, so a batch
 /// never fails halfway on a lock upgrade
 pub async fn begin_write(pool: &DbPool) -> sqlx::Result<DbTransaction> {

@@ -19,6 +19,11 @@ impl Stamp {
     pub fn now() -> Self {
         Self(Timestamp::now())
     }
+
+    /// The `YYYY-MM-DD HH:00` label of the UTC hour this instant falls in
+    pub fn hour_label(self) -> String {
+        self.0.strftime("%Y-%m-%d %H:00").to_string()
+    }
 }
 
 impl From<Timestamp> for Stamp {

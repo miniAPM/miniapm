@@ -22,7 +22,7 @@ cfg_select! {
 pub use backend::reject_inserts;
 #[cfg(any(test, feature = "test-support"))]
 pub use backend::test_pool;
-pub use backend::{begin_write, describe, get_db_size, init};
+pub use backend::{begin_write, describe, get_db_size, in_text_list, init, text_list};
 
 pub type DbPool = sqlx::Pool<Db>;
 pub type DbRow = <Db as sqlx::Database>::Row;
