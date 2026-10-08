@@ -199,3 +199,22 @@ async fn filtered_error_lists_agree_with_their_counts() -> anyhow::Result<()> {
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn a_failed_occurrence_leaves_its_group_untouched() -> anyhow::Result<()> {
+    let pool = test_pool().await;
+    let project = project::create(&pool, "Atomic").await?;
+    let id = insert(&pool, &incoming("TimeoutError", 0), Some(project.id)).await?;
+    crate::db::reject_inserts(&pool, "error_occurrences", "request_id", "rejected").await?;
+
+    let mut rejected = incoming("TimeoutError", 0);
+    rejected.request_id = Some("rejected".into());
+    assert!(insert(&pool, &rejected, Some(project.id)).await.is_err());
+
+    let count: i64 = sqlx::query_scalar("SELECT occurrence_count FROM errors WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(count, 1);
+    Ok(())
+}

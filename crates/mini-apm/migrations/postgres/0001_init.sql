@@ -126,3 +126,58 @@ RETURN generate_series(
     date_trunc('hour', until),
     interval '1 hour'
 );
+
+-- Store one error occurrence and bump the group it belongs to: `p_group_id`
+-- when the caller matched one, else the group at `p_fingerprint`. A recurring
+-- group moves from each status in `p_recur_from` to the one at the same
+-- position in `p_recur_to`.
+CREATE FUNCTION record_error(
+    p_group_id bigint,
+    p_project_id bigint,
+    p_fingerprint text,
+    p_exception_class text,
+    p_message text,
+    p_happened_at timestamptz,
+    p_recur_from text[],
+    p_recur_to text[],
+    p_request_id text,
+    p_user_id text,
+    p_backtrace text,
+    p_params text,
+    p_source_context text
+)
+RETURNS bigint
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    recorded bigint;
+BEGIN
+    IF p_group_id IS NOT NULL THEN
+        UPDATE errors
+           SET last_seen_at = p_happened_at,
+               occurrence_count = occurrence_count + 1,
+               status = COALESCE(p_recur_to[array_position(p_recur_from, status)], status)
+         WHERE id = p_group_id
+        RETURNING id INTO recorded;
+    END IF;
+
+    IF recorded IS NULL THEN
+        INSERT INTO errors AS e
+            (project_id, fingerprint, exception_class, message, first_seen_at, last_seen_at)
+        VALUES
+            (p_project_id, p_fingerprint, p_exception_class, p_message, p_happened_at, p_happened_at)
+        ON CONFLICT (project_id, fingerprint) DO UPDATE
+           SET last_seen_at = excluded.last_seen_at,
+               occurrence_count = e.occurrence_count + 1,
+               status = COALESCE(p_recur_to[array_position(p_recur_from, e.status)], e.status)
+        RETURNING id INTO recorded;
+    END IF;
+
+    INSERT INTO error_occurrences
+        (error_id, request_id, user_id, backtrace, params, happened_at, source_context)
+    VALUES
+        (recorded, p_request_id, p_user_id, p_backtrace, p_params, p_happened_at, p_source_context);
+
+    RETURN recorded;
+END
+$$;

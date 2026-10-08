@@ -16,6 +16,15 @@ state_machine! {
     }
 }
 
+const STATES: [&str; 3] = ["open", "resolved", "ignored"];
+
+/// Every `(from, to)` status pair a recurring error moves between
+pub fn recur_transitions() -> impl Iterator<Item = (&'static str, &'static str)> {
+    STATES
+        .into_iter()
+        .filter_map(|from| Some((from, transition(from, ErrorStatusEvent::Recur)?)))
+}
+
 /// The status after `event`, or `None` when `status` is unknown or does not
 /// allow `event`
 pub fn transition(status: &str, event: ErrorStatusEvent) -> Option<&'static str> {

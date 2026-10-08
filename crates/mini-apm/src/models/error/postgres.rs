@@ -1,4 +1,5 @@
-use super::ErrorTrendPoint;
+use super::status;
+use super::{ErrorTrendPoint, Recording};
 use crate::DbPool;
 use crate::time::Stamp;
 
@@ -54,4 +55,28 @@ pub async fn hourly_error_stats(
         .into_iter()
         .map(|(hour, count)| ErrorTrendPoint { hour, count })
         .collect())
+}
+
+/// Store an occurrence and bump its group with `record_error`, which applies
+/// the status changes a recurrence makes as the state machine lists them
+pub(super) async fn record(pool: &DbPool, r: &Recording<'_>) -> anyhow::Result<i64> {
+    let (recur_from, recur_to): (Vec<_>, Vec<_>) = status::recur_transitions().unzip();
+    Ok(sqlx::query_scalar(
+        "SELECT record_error($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+    )
+    .bind(r.group)
+    .bind(r.project_id)
+    .bind(r.fingerprint)
+    .bind(r.exception_class)
+    .bind(r.message)
+    .bind(r.happened_at)
+    .bind(recur_from)
+    .bind(recur_to)
+    .bind(r.request_id)
+    .bind(r.user_id)
+    .bind(&r.backtrace)
+    .bind(r.params.as_deref())
+    .bind(r.source_context.as_deref())
+    .fetch_one(pool)
+    .await?)
 }

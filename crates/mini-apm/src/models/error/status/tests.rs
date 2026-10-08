@@ -20,4 +20,8 @@ fn test_transitions() {
         let label = format!("{status} {event:?}");
         assert_eq!(transition(status, event), expected, "{label}");
     }
+    assert_eq!(
+        recur_transitions().collect::<Vec<_>>(),
+        [("resolved", "open")]
+    );
 }

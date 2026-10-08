@@ -100,66 +100,54 @@ pub struct IncomingSourceContext {
 /// Minimum similarity threshold for grouping errors (50%)
 const SIMILARITY_THRESHOLD: f64 = 0.5;
 
+/// One occurrence ready to store, grouped into `group` when an existing error
+/// matched it
+struct Recording<'a> {
+    group: Option<i64>,
+    project_id: Option<i64>,
+    fingerprint: &'a str,
+    exception_class: &'a str,
+    message: &'a str,
+    happened_at: Stamp,
+    request_id: Option<&'a str>,
+    user_id: Option<&'a str>,
+    backtrace: String,
+    params: Option<String>,
+    source_context: Option<String>,
+}
+
 pub async fn insert(
     pool: &DbPool,
     error: &IncomingError,
     project_id: Option<i64>,
 ) -> anyhow::Result<i64> {
-    let timestamp = Stamp(error.timestamp.unwrap_or_else(Timestamp::now));
-
-    // Generate location-based fingerprint for smart grouping
     let location_fingerprint =
         generate_location_fingerprint(&error.exception_class, &error.backtrace);
 
-    // Try to find existing error by:
-    // 1. First check exact fingerprint match (backward compatibility)
-    // 2. Then check location fingerprint + message similarity >= 50%
-    let exact: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM errors WHERE fingerprint = $1 AND (($2 IS NULL AND project_id IS NULL) OR project_id = $2)",
+    // An error joins the group carrying its own fingerprint (kept for groups
+    // stored before location grouping), else the first group at its location
+    // with a similar enough message.
+    let candidates: Vec<(i64, String, bool)> = sqlx::query_as(
+        "SELECT id, message, fingerprint = $1 FROM errors
+         WHERE fingerprint IN ($1, $2) AND project_id IS NOT DISTINCT FROM $3
+         ORDER BY id",
     )
     .bind(&error.fingerprint)
+    .bind(&location_fingerprint)
     .bind(project_id)
-    .fetch_optional(pool)
+    .fetch_all(pool)
     .await?;
-    let existing = match exact {
-        Some(id) => Some(id),
-        None => find_similar_error(pool, project_id, &location_fingerprint, &error.message).await?,
-    };
+    let group = candidates
+        .iter()
+        .find(|(_, _, exact)| *exact)
+        .or_else(|| {
+            candidates.iter().find(|(_, message, _)| {
+                text_similarity(&error.message, message) >= SIMILARITY_THRESHOLD
+            })
+        })
+        .map(|(id, _, _)| *id);
 
-    let (error_id, status): (i64, String) = if let Some(id) = existing {
-        sqlx::query_as(
-            "UPDATE errors SET last_seen_at = $1, occurrence_count = occurrence_count + 1 WHERE id = $2 RETURNING id, status",
-        )
-        .bind(timestamp)
-        .bind(id)
-        .fetch_one(pool)
-        .await?
-    } else {
-        sqlx::query_as(
-            r#"
-            INSERT INTO errors (project_id, fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status)
-            VALUES ($1, $2, $3, $4, $5, $6, 1, 'open')
-            ON CONFLICT (project_id, fingerprint) DO UPDATE SET
-                last_seen_at = excluded.last_seen_at,
-                occurrence_count = errors.occurrence_count + 1
-            RETURNING id, status
-            "#,
-        )
-        .bind(project_id)
-        .bind(&location_fingerprint)
-        .bind(&error.exception_class)
-        .bind(&error.message)
-        .bind(timestamp)
-        .bind(timestamp)
-        .fetch_one(pool)
-        .await?
-    };
-    if let Some(next) = status::transition(&status, ErrorStatusEvent::Recur) {
-        set_status(pool, error_id, &status, next).await?;
-    }
-
-    // Convert IncomingSourceContext to SourceContext for storage
-    let source_context_json = error.source_context.as_ref().and_then(|sc| {
+    let source_context = error.source_context.as_ref().and_then(|sc| {
         let ctx = SourceContext {
             file: sc.file.clone(),
             lineno: sc.lineno,
@@ -170,51 +158,26 @@ pub async fn insert(
         serde_json::to_string(&ctx).ok()
     });
 
-    // Insert occurrence
-    sqlx::query(
-        r#"
-        INSERT INTO error_occurrences (error_id, request_id, user_id, backtrace, params, happened_at, source_context)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        "#,
+    backend::record(
+        pool,
+        &Recording {
+            group,
+            project_id,
+            fingerprint: &location_fingerprint,
+            exception_class: &error.exception_class,
+            message: &error.message,
+            happened_at: Stamp(error.timestamp.unwrap_or_else(Timestamp::now)),
+            request_id: error.request_id.as_deref(),
+            user_id: error.user_id.as_deref(),
+            backtrace: serde_json::to_string(&error.backtrace)?,
+            params: error
+                .params
+                .as_ref()
+                .and_then(|p| serde_json::to_string(p).ok()),
+            source_context,
+        },
     )
-    .bind(error_id)
-    .bind(error.request_id.as_deref())
-    .bind(error.user_id.as_deref())
-    .bind(serde_json::to_string(&error.backtrace)?)
-    .bind(error.params.as_ref().and_then(|p| serde_json::to_string(p).ok()))
-    .bind(timestamp)
-    .bind(source_context_json)
-    .execute(pool)
-    .await?;
-
-    Ok(error_id)
-}
-
-/// Find an existing error with the same location fingerprint and similar message
-async fn find_similar_error(
-    pool: &DbPool,
-    project_id: Option<i64>,
-    location_fingerprint: &str,
-    message: &str,
-) -> anyhow::Result<Option<i64>> {
-    // Find errors with the same location fingerprint
-    let candidates: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, message FROM errors WHERE fingerprint = $1 AND (($2 IS NULL AND project_id IS NULL) OR project_id = $2)"
-    )
-    .bind(location_fingerprint)
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
-
-    // Check message similarity for each candidate
-    for (id, existing_message) in candidates {
-        let similarity = text_similarity(message, &existing_message);
-        if similarity >= SIMILARITY_THRESHOLD {
-            return Ok(Some(id));
-        }
-    }
-
-    Ok(None)
+    .await
 }
 
 const ERROR_COLUMNS: &str = "id, fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status";
