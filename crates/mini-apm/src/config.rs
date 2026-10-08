@@ -5,7 +5,6 @@ use std::path::Path;
 pub struct Config {
     pub sqlite_path: String,
     pub retention_days_errors: i64,
-    pub retention_days_hourly_rollups: i64,
     pub retention_days_spans: i64,
     pub slow_request_threshold_ms: f64,
     pub mini_apm_url: String,
@@ -58,7 +57,6 @@ impl Config {
             sqlite_path: env::var("SQLITE_PATH")
                 .unwrap_or_else(|_| "./data/miniapm.db".to_string()),
             retention_days_errors: env_positive("RETENTION_DAYS_ERRORS", 30),
-            retention_days_hourly_rollups: env_positive("RETENTION_DAYS_HOURLY_ROLLUPS", 90),
             retention_days_spans: env_positive("RETENTION_DAYS_SPANS", 7),
             slow_request_threshold_ms: env_positive("SLOW_REQUEST_THRESHOLD_MS", 500.0),
             mini_apm_url: env::var("MINI_APM_URL")
@@ -87,12 +85,6 @@ impl Config {
             errors.push(format!(
                 "RETENTION_DAYS_ERRORS must be positive, got: {}",
                 self.retention_days_errors
-            ));
-        }
-        if self.retention_days_hourly_rollups <= 0 {
-            errors.push(format!(
-                "RETENTION_DAYS_HOURLY_ROLLUPS must be positive, got: {}",
-                self.retention_days_hourly_rollups
             ));
         }
         if self.retention_days_spans <= 0 {
@@ -143,9 +135,8 @@ impl Config {
         tracing::info!("  User accounts: {}", self.enable_user_accounts);
         tracing::info!("  Multi-project mode: {}", self.enable_projects);
         tracing::info!(
-            "  Retention: errors={}d, rollups={}d, spans={}d",
+            "  Retention: errors={}d, spans={}d",
             self.retention_days_errors,
-            self.retention_days_hourly_rollups,
             self.retention_days_spans
         );
         tracing::info!(
@@ -160,7 +151,6 @@ impl Default for Config {
         Self {
             sqlite_path: ":memory:".to_string(),
             retention_days_errors: 30,
-            retention_days_hourly_rollups: 90,
             retention_days_spans: 7,
             slow_request_threshold_ms: 500.0,
             mini_apm_url: "http://localhost:3000".to_string(),

@@ -9,11 +9,6 @@ pub async fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
             "happened_at",
             config.retention_days_errors,
         ),
-        (
-            "rollups_hourly",
-            "hour",
-            config.retention_days_hourly_rollups,
-        ),
         ("deploys", "deployed_at", 90),
     ] {
         let cutoff = time::rfc3339(time::days_ago(days));

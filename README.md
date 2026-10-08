@@ -160,7 +160,6 @@ curl -X POST http://localhost:3000/ingest/deploys \
 | `RUST_LOG` | `mini_apm=info` | Log level |
 | `RETENTION_DAYS_ERRORS` | `30` | Days to keep error data |
 | `RETENTION_DAYS_SPANS` | `7` | Days to keep trace spans |
-| `RETENTION_DAYS_HOURLY_ROLLUPS` | `90` | Days to keep hourly aggregates |
 | `SLOW_REQUEST_THRESHOLD_MS` | `500` | Threshold for slow request alerts |
 | `ENABLE_PROJECTS` | `false` | Enable multi-project mode |
 

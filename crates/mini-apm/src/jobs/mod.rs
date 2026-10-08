@@ -1,5 +1,4 @@
 mod retention;
-mod rollup;
 
 use crate::{DbPool, config::Config, models, self_monitor};
 use std::future::Future;
@@ -20,18 +19,6 @@ pub fn start(pool: DbPool, config: Config) {
             }
             Ok(())
         }
-    });
-
-    let p = pool.clone();
-    every("rollup.hourly", HOUR, move || {
-        let p = p.clone();
-        async move { rollup::hourly(&p).await }
-    });
-
-    let p = pool.clone();
-    every("rollup.daily", DAY, move || {
-        let p = p.clone();
-        async move { rollup::daily(&p).await }
     });
 
     every("retention", DAY, move || {
