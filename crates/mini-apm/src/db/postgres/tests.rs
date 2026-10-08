@@ -112,3 +112,14 @@ async fn jobs_skip_while_another_instance_holds_them() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
+#[tokio::test]
+async fn connections_use_utc_and_plan_with_their_parameters() -> anyhow::Result<()> {
+    let pool = test_pool().await;
+    let settings: (String, String) =
+        sqlx::query_as("SELECT current_setting('timezone'), current_setting('plan_cache_mode')")
+            .fetch_one(&pool)
+            .await?;
+    assert_eq!(settings, ("UTC".into(), "force_custom_plan".into()));
+    Ok(())
+}

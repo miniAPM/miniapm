@@ -21,7 +21,11 @@ pub async fn init(config: &Config) -> anyhow::Result<DbPool> {
 async fn connect(options: PgConnectOptions, max_connections: u32) -> anyhow::Result<DbPool> {
     let pool = PgPoolOptions::new()
         .max_connections(max_connections)
-        .connect_with(options.options([("timezone", "UTC")]))
+        .connect_with(options.options([
+            ("timezone", "UTC"),
+            // generic plans cannot use indexes behind `$1 IS NULL OR col = $1`
+            ("plan_cache_mode", "force_custom_plan"),
+        ]))
         .await?;
 
     let (version_num, version): (i32, String) = sqlx::query_as(
