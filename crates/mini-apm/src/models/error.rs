@@ -102,7 +102,7 @@ pub async fn insert(
     // 1. First check exact fingerprint match (backward compatibility)
     // 2. Then check location fingerprint + message similarity >= 50%
     let exact: Option<i64> = sqlx::query_scalar(
-        "SELECT id FROM errors WHERE fingerprint = ?1 AND ((?2 IS NULL AND project_id IS NULL) OR project_id = ?2)",
+        "SELECT id FROM errors WHERE fingerprint = $1 AND (($2 IS NULL AND project_id IS NULL) OR project_id = $2)",
     )
     .bind(&error.fingerprint)
     .bind(project_id)
@@ -115,7 +115,7 @@ pub async fn insert(
 
     let (error_id, status): (i64, String) = if let Some(id) = existing {
         sqlx::query_as(
-            "UPDATE errors SET last_seen_at = ?1, occurrence_count = occurrence_count + 1 WHERE id = ?2 RETURNING id, status",
+            "UPDATE errors SET last_seen_at = $1, occurrence_count = occurrence_count + 1 WHERE id = $2 RETURNING id, status",
         )
         .bind(&timestamp)
         .bind(id)
@@ -125,7 +125,7 @@ pub async fn insert(
         sqlx::query_as(
             r#"
             INSERT INTO errors (project_id, fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, 'open')
+            VALUES ($1, $2, $3, $4, $5, $6, 1, 'open')
             ON CONFLICT (project_id, fingerprint) DO UPDATE SET
                 last_seen_at = excluded.last_seen_at,
                 occurrence_count = occurrence_count + 1
@@ -161,7 +161,7 @@ pub async fn insert(
     sqlx::query(
         r#"
         INSERT INTO error_occurrences (error_id, request_id, user_id, backtrace, params, happened_at, source_context)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         "#,
     )
     .bind(error_id)
@@ -186,7 +186,7 @@ async fn find_similar_error(
 ) -> anyhow::Result<Option<i64>> {
     // Find errors with the same location fingerprint
     let candidates: Vec<(i64, String)> = sqlx::query_as(
-        "SELECT id, message FROM errors WHERE fingerprint = ?1 AND ((?2 IS NULL AND project_id IS NULL) OR project_id = ?2)"
+        "SELECT id, message FROM errors WHERE fingerprint = $1 AND (($2 IS NULL AND project_id IS NULL) OR project_id = $2)"
     )
     .bind(location_fingerprint)
     .bind(project_id)
@@ -254,12 +254,12 @@ pub async fn list_paginated(
                strftime('%Y-%m-%d %H:%M', last_seen_at) AS last_seen_at,
                occurrence_count, status
         FROM errors
-        WHERE (?1 IS NULL OR project_id = ?1)
-          AND (?2 IS NULL OR status = ?2)
-          AND (?3 IS NULL OR exception_class LIKE '%' || ?3 || '%' OR message LIKE '%' || ?3 || '%')
-          AND (?4 IS NULL OR last_seen_at >= ?4)
+        WHERE ($1 IS NULL OR project_id = $1)
+          AND ($2 IS NULL OR status = $2)
+          AND ($3 IS NULL OR LOWER(exception_class) LIKE '%' || LOWER($3) || '%' OR LOWER(message) LIKE '%' || LOWER($3) || '%')
+          AND ($4 IS NULL OR last_seen_at >= $4)
         ORDER BY {}
-        LIMIT ?5 OFFSET ?6
+        LIMIT $5 OFFSET $6
         "#,
         order_clause
     );
@@ -288,10 +288,10 @@ pub async fn count_filtered(
         r#"
         SELECT COUNT(*)
         FROM errors
-        WHERE (?1 IS NULL OR project_id = ?1)
-          AND (?2 IS NULL OR status = ?2)
-          AND (?3 IS NULL OR exception_class LIKE '%' || ?3 || '%' OR message LIKE '%' || ?3 || '%')
-          AND (?4 IS NULL OR last_seen_at >= ?4)
+        WHERE ($1 IS NULL OR project_id = $1)
+          AND ($2 IS NULL OR status = $2)
+          AND ($3 IS NULL OR LOWER(exception_class) LIKE '%' || LOWER($3) || '%' OR LOWER(message) LIKE '%' || LOWER($3) || '%')
+          AND ($4 IS NULL OR last_seen_at >= $4)
         "#,
     )
     .bind(project_id)
@@ -310,7 +310,7 @@ pub async fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<AppError>> {
                 strftime('%Y-%m-%d %H:%M', first_seen_at) AS first_seen_at,
                 strftime('%Y-%m-%d %H:%M', last_seen_at) AS last_seen_at,
                 occurrence_count, status
-         FROM errors WHERE id = ?1",
+         FROM errors WHERE id = $1",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -336,7 +336,7 @@ pub async fn occurrences(
     )> = sqlx::query_as(
         "SELECT id, error_id, request_id, user_id, backtrace, params,
                 strftime('%Y-%m-%d %H:%M', happened_at), source_context
-         FROM error_occurrences WHERE error_id = ?1 ORDER BY happened_at DESC LIMIT ?2",
+         FROM error_occurrences WHERE error_id = $1 ORDER BY happened_at DESC LIMIT $2",
     )
     .bind(error_id)
     .bind(limit)
@@ -381,7 +381,7 @@ pub async fn count_since(
     let count: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM error_occurrences eo
          JOIN errors e ON e.id = eo.error_id
-         WHERE eo.happened_at >= ?1 AND (?2 IS NULL OR e.project_id = ?2)",
+         WHERE eo.happened_at >= $1 AND ($2 IS NULL OR e.project_id = $2)",
     )
     .bind(since)
     .bind(project_id)
@@ -398,7 +398,7 @@ pub async fn apply(
     event: ErrorStatusEvent,
 ) -> anyhow::Result<Option<&'static str>> {
     let Some(current): Option<String> =
-        sqlx::query_scalar("SELECT status FROM errors WHERE id = ?1")
+        sqlx::query_scalar("SELECT status FROM errors WHERE id = $1")
             .bind(id)
             .fetch_optional(pool)
             .await?
@@ -412,7 +412,7 @@ pub async fn apply(
 }
 
 async fn set_status(pool: &DbPool, id: i64, from: &str, to: &str) -> anyhow::Result<bool> {
-    let result = sqlx::query("UPDATE errors SET status = ?1 WHERE id = ?2 AND status = ?3")
+    let result = sqlx::query("UPDATE errors SET status = $1 WHERE id = $2 AND status = $3")
         .bind(to)
         .bind(id)
         .bind(from)
@@ -435,7 +435,7 @@ pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec
         r#"
         SELECT strftime('%Y-%m-%d %H', happened_at) as hour, COUNT(*) as cnt
         FROM error_occurrences
-        WHERE error_id = ?1 AND happened_at >= ?2
+        WHERE error_id = $1 AND happened_at >= $2
         GROUP BY hour
         ORDER BY hour ASC
         "#,
@@ -469,8 +469,8 @@ pub async fn hourly_error_stats(
         SELECT strftime('%Y-%m-%d %H:00', eo.happened_at) as hour_label, COUNT(*) as cnt
         FROM error_occurrences eo
         JOIN errors e ON e.id = eo.error_id
-        WHERE eo.happened_at >= ?2
-          AND (?1 IS NULL OR e.project_id = ?1)
+        WHERE eo.happened_at >= $2
+          AND ($1 IS NULL OR e.project_id = $1)
         GROUP BY strftime('%Y-%m-%d %H', eo.happened_at)
         ORDER BY eo.happened_at ASC
         "#,

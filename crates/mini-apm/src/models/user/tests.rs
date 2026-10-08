@@ -91,7 +91,7 @@ async fn authentication_password_changes_and_deletion_follow_account_lifecycle()
     );
 
     // Corrupted credentials must fail closed, not panic or authenticate.
-    sqlx::query("UPDATE users SET password_hash = 'not-a-valid-hash' WHERE id = ?1")
+    sqlx::query("UPDATE users SET password_hash = 'not-a-valid-hash' WHERE id = $1")
         .bind(id)
         .execute(&pool)
         .await?;
@@ -111,7 +111,7 @@ async fn sessions_expire_and_logout_revokes_only_the_selected_token() -> anyhow:
     let active = create_session(&pool, id).await?;
     let expired = create_session(&pool, id).await?;
     assert_ne!(active, expired);
-    sqlx::query("UPDATE sessions SET expires_at = ?1 WHERE token = ?2")
+    sqlx::query("UPDATE sessions SET expires_at = $1 WHERE token = $2")
         .bind(time::rfc3339(time::days_ago(1)))
         .bind(&expired)
         .execute(&pool)
@@ -152,7 +152,7 @@ async fn invites_activate_once_and_cleanup_preserves_active_accounts() -> anyhow
 
     let expired = create_with_invite(&pool, "expired", false).await?;
     let valid = create_with_invite(&pool, "valid", false).await?;
-    sqlx::query("UPDATE users SET invite_expires_at = ?1 WHERE invite_token = ?2")
+    sqlx::query("UPDATE users SET invite_expires_at = $1 WHERE invite_token = $2")
         .bind(time::rfc3339(time::days_ago(1)))
         .bind(&expired)
         .execute(&pool)

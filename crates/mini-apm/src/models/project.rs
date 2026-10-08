@@ -38,7 +38,7 @@ pub const SELF_SLUG: &str = "self";
 
 pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
     // Check if any project other than `self` exists
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE slug != ?1")
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE slug != $1")
         .bind(SELF_SLUG)
         .fetch_one(pool)
         .await?;
@@ -47,20 +47,20 @@ pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
         let now = time::now_rfc3339();
         let api_key = generate_api_key();
 
-        let result = sqlx::query(
-            "INSERT INTO projects (name, slug, api_key, created_at) VALUES (?1, ?2, ?3, ?4)",
+        let id = sqlx::query_scalar(
+            "INSERT INTO projects (name, slug, api_key, created_at) VALUES ($1, $2, $3, $4) RETURNING id",
         )
         .bind("Default")
         .bind("default")
         .bind(&api_key)
         .bind(&now)
-        .execute(pool)
+        .fetch_one(pool)
         .await?;
 
         tracing::info!("Created default project with API key: {}", api_key);
 
         return Ok(Project {
-            id: result.last_insert_rowid(),
+            id,
             name: "Default".to_string(),
             slug: "default".to_string(),
             api_key,
@@ -70,7 +70,7 @@ pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
 
     // Return first project
     let project = sqlx::query_as::<_, Project>(
-        "SELECT id, name, slug, api_key, created_at FROM projects WHERE slug != ?1 ORDER BY id LIMIT 1",
+        "SELECT id, name, slug, api_key, created_at FROM projects WHERE slug != $1 ORDER BY id LIMIT 1",
     )
     .bind(SELF_SLUG)
     .fetch_one(pool)
@@ -83,7 +83,7 @@ pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
 /// API key is refused by the collector: data only arrives in-process.
 pub async fn ensure_self_project(pool: &DbPool) -> anyhow::Result<Project> {
     sqlx::query(
-        "INSERT OR IGNORE INTO projects (name, slug, api_key, created_at) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO projects (name, slug, api_key, created_at) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING",
     )
     .bind("MiniAPM")
     .bind(SELF_SLUG)
@@ -129,7 +129,7 @@ where
     T: 'q + Send + sqlx::Encode<'q, Db> + sqlx::Type<Db>,
 {
     let sql =
-        format!("SELECT id, name, slug, api_key, created_at FROM projects WHERE {column} = ?1");
+        format!("SELECT id, name, slug, api_key, created_at FROM projects WHERE {column} = $1");
     Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(value)
         .fetch_optional(pool)
@@ -142,18 +142,18 @@ pub async fn create(pool: &DbPool, name: &str) -> anyhow::Result<Project> {
     let slug = slugify(name);
     let api_key = generate_api_key();
 
-    let result = sqlx::query(
-        "INSERT INTO projects (name, slug, api_key, created_at) VALUES (?1, ?2, ?3, ?4)",
+    let id = sqlx::query_scalar(
+        "INSERT INTO projects (name, slug, api_key, created_at) VALUES ($1, $2, $3, $4) RETURNING id",
     )
     .bind(name)
     .bind(&slug)
     .bind(&api_key)
     .bind(&now)
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
 
     Ok(Project {
-        id: result.last_insert_rowid(),
+        id,
         name: name.to_string(),
         slug,
         api_key,
@@ -163,7 +163,7 @@ pub async fn create(pool: &DbPool, name: &str) -> anyhow::Result<Project> {
 
 /// Delete a project
 pub async fn delete(pool: &DbPool, id: i64) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM projects WHERE id = ?1 AND slug != ?2")
+    sqlx::query("DELETE FROM projects WHERE id = $1 AND slug != $2")
         .bind(id)
         .bind(SELF_SLUG)
         .execute(pool)
@@ -175,7 +175,7 @@ pub async fn delete(pool: &DbPool, id: i64) -> anyhow::Result<()> {
 pub async fn regenerate_api_key(pool: &DbPool, id: i64) -> anyhow::Result<String> {
     let new_key = generate_api_key();
 
-    sqlx::query("UPDATE projects SET api_key = ?1 WHERE id = ?2")
+    sqlx::query("UPDATE projects SET api_key = $1 WHERE id = $2")
         .bind(&new_key)
         .bind(id)
         .execute(pool)

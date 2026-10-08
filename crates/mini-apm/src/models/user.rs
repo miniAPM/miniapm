@@ -143,7 +143,7 @@ pub async fn ensure_default_admin(pool: &DbPool) -> anyhow::Result<()> {
         let now = time::now_rfc3339();
 
         sqlx::query(
-            "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES (?1, ?2, 1, 1, ?3)",
+            "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES ($1, $2, TRUE, TRUE, $3)",
         )
         .bind("admin")
         .bind(&password_hash)
@@ -168,7 +168,7 @@ pub async fn authenticate(
     username: &str,
     password: &str,
 ) -> anyhow::Result<Option<User>> {
-    let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE username = ?1");
+    let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE username = $1");
     let user: Option<User> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(username)
         .fetch_optional(pool)
@@ -182,7 +182,7 @@ pub async fn authenticate(
         {
             // Update last login time
             let now = time::now_rfc3339();
-            let _ = sqlx::query("UPDATE users SET last_login_at = ?1 WHERE id = ?2")
+            let _ = sqlx::query("UPDATE users SET last_login_at = $1 WHERE id = $2")
                 .bind(&now)
                 .bind(u.id)
                 .execute(pool)
@@ -200,7 +200,7 @@ pub async fn create_session(pool: &DbPool, user_id: i64) -> anyhow::Result<Strin
     let expires = now + SignedDuration::from_hours(7 * 24);
 
     sqlx::query(
-        "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO sessions (token, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)",
     )
     .bind(&token)
     .bind(user_id)
@@ -222,7 +222,7 @@ pub async fn get_user_from_session(pool: &DbPool, token: &str) -> anyhow::Result
                u.invite_token, u.invite_expires_at, u.created_at, u.last_login_at
         FROM users u
         JOIN sessions s ON s.user_id = u.id
-        WHERE s.token = ?1 AND s.expires_at > ?2
+        WHERE s.token = $1 AND s.expires_at > $2
         "#,
     )
     .bind(token)
@@ -235,7 +235,7 @@ pub async fn get_user_from_session(pool: &DbPool, token: &str) -> anyhow::Result
 
 /// Delete a session (logout)
 pub async fn delete_session(pool: &DbPool, token: &str) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM sessions WHERE token = ?1")
+    sqlx::query("DELETE FROM sessions WHERE token = $1")
         .bind(token)
         .execute(pool)
         .await?;
@@ -245,7 +245,7 @@ pub async fn delete_session(pool: &DbPool, token: &str) -> anyhow::Result<()> {
 /// Delete expired sessions (cleanup)
 pub async fn delete_expired_sessions(pool: &DbPool) -> anyhow::Result<usize> {
     let now = time::now_rfc3339();
-    let result = sqlx::query("DELETE FROM sessions WHERE expires_at < ?1")
+    let result = sqlx::query("DELETE FROM sessions WHERE expires_at < $1")
         .bind(&now)
         .execute(pool)
         .await?;
@@ -276,22 +276,22 @@ pub async fn create(
     let password_hash = hash_password(password)?;
     let now = time::now_rfc3339();
 
-    let result = sqlx::query(
-        "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES (?1, ?2, ?3, 0, ?4)",
+    let id = sqlx::query_scalar(
+        "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES ($1, $2, $3, FALSE, $4) RETURNING id",
     )
     .bind(username)
     .bind(&password_hash)
     .bind(is_admin)
     .bind(&now)
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
 
-    Ok(result.last_insert_rowid())
+    Ok(id)
 }
 
 /// Delete a user (admin only, cannot delete self)
 pub async fn delete(pool: &DbPool, user_id: i64) -> anyhow::Result<()> {
-    sqlx::query("DELETE FROM users WHERE id = ?1")
+    sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user_id)
         .execute(pool)
         .await?;
@@ -305,7 +305,7 @@ pub async fn verify_password_for_user(
     password: &str,
 ) -> anyhow::Result<bool> {
     let password_hash: Option<String> =
-        sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?1")
+        sqlx::query_scalar("SELECT password_hash FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_optional(pool)
             .await?
@@ -325,7 +325,7 @@ pub async fn change_password(
 ) -> anyhow::Result<()> {
     let password_hash = hash_password(new_password)?;
 
-    sqlx::query("UPDATE users SET password_hash = ?1, must_change_password = 0 WHERE id = ?2")
+    sqlx::query("UPDATE users SET password_hash = $1, must_change_password = FALSE WHERE id = $2")
         .bind(&password_hash)
         .bind(user_id)
         .execute(pool)
@@ -343,7 +343,7 @@ pub async fn reset_password(
     let password_hash = hash_password(new_password)?;
 
     let result = sqlx::query(
-        "UPDATE users SET password_hash = ?1, must_change_password = 0 WHERE username = ?2",
+        "UPDATE users SET password_hash = $1, must_change_password = FALSE WHERE username = $2",
     )
     .bind(&password_hash)
     .bind(username)
@@ -359,7 +359,7 @@ pub async fn reset_password(
 
 /// Find user by ID
 pub async fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<User>> {
-    let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE id = ?1");
+    let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1");
     let user: Option<User> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(id)
         .fetch_optional(pool)
@@ -384,7 +384,7 @@ pub async fn create_with_invite(
     let expires = now + SignedDuration::from_hours(7 * 24);
 
     sqlx::query(
-        "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at) VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(username)
     .bind(is_admin)
@@ -401,7 +401,7 @@ pub async fn create_with_invite(
 pub async fn find_by_invite_token(pool: &DbPool, token: &str) -> anyhow::Result<Option<User>> {
     let now = time::now_rfc3339();
     let sql = format!(
-        "SELECT {USER_COLUMNS} FROM users WHERE invite_token = ?1 AND invite_expires_at > ?2"
+        "SELECT {USER_COLUMNS} FROM users WHERE invite_token = $1 AND invite_expires_at > $2"
     );
 
     let user: Option<User> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
@@ -418,7 +418,7 @@ pub async fn accept_invite(pool: &DbPool, user_id: i64, password: &str) -> anyho
     let password_hash = hash_password(password)?;
 
     sqlx::query(
-        "UPDATE users SET password_hash = ?1, invite_token = NULL, invite_expires_at = NULL WHERE id = ?2",
+        "UPDATE users SET password_hash = $1, invite_token = NULL, invite_expires_at = NULL WHERE id = $2",
     )
     .bind(&password_hash)
     .bind(user_id)
@@ -433,7 +433,7 @@ pub async fn delete_expired_invites(pool: &DbPool) -> anyhow::Result<usize> {
     let now = time::now_rfc3339();
 
     let result = sqlx::query(
-        "DELETE FROM users WHERE invite_token IS NOT NULL AND invite_expires_at < ?1 AND password_hash IS NULL",
+        "DELETE FROM users WHERE invite_token IS NOT NULL AND invite_expires_at < $1 AND password_hash IS NULL",
     )
     .bind(&now)
     .execute(pool)

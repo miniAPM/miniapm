@@ -42,10 +42,11 @@ pub async fn insert(
 ) -> anyhow::Result<i64> {
     let timestamp = time::rfc3339(deploy.timestamp.unwrap_or_else(Timestamp::now));
 
-    let result = sqlx::query(
+    let id = sqlx::query_scalar(
         r#"
         INSERT INTO deploys (project_id, git_sha, version, env, deployed_at, description, deployer)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        RETURNING id
         "#,
     )
     .bind(project_id)
@@ -55,10 +56,10 @@ pub async fn insert(
     .bind(timestamp)
     .bind(deploy.description.as_deref())
     .bind(deploy.deployer.as_deref())
-    .execute(pool)
+    .fetch_one(pool)
     .await?;
 
-    Ok(result.last_insert_rowid())
+    Ok(id)
 }
 
 pub async fn list(
@@ -72,9 +73,9 @@ pub async fn list(
                strftime('%Y-%m-%d %H:%M', deployed_at) as deployed_at,
                description, deployer
         FROM deploys
-        WHERE (?1 IS NULL OR project_id = ?1)
+        WHERE ($1 IS NULL OR project_id = $1)
         ORDER BY deployed_at DESC
-        LIMIT ?2
+        LIMIT $2
         "#,
     )
     .bind(project_id)
@@ -97,7 +98,7 @@ pub async fn list_since(
                deployed_at,
                description, deployer
         FROM deploys
-        WHERE deployed_at >= ?1 AND (?2 IS NULL OR project_id = ?2)
+        WHERE deployed_at >= $1 AND ($2 IS NULL OR project_id = $2)
         ORDER BY deployed_at ASC
         "#,
     )
@@ -117,7 +118,7 @@ pub async fn latest(pool: &DbPool, project_id: Option<i64>) -> anyhow::Result<Op
                strftime('%Y-%m-%d %H:%M', deployed_at) as deployed_at,
                description, deployer
         FROM deploys
-        WHERE (?1 IS NULL OR project_id = ?1)
+        WHERE ($1 IS NULL OR project_id = $1)
         ORDER BY deployed_at DESC
         LIMIT 1
         "#,

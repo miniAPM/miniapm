@@ -38,7 +38,7 @@ async fn migrations_create_schema_and_preserve_data_when_reapplied() -> anyhow::
     ] {
         for name in names {
             let exists: Option<i64> =
-                sqlx::query_scalar("SELECT 1 FROM sqlite_master WHERE type = ?1 AND name = ?2")
+                sqlx::query_scalar("SELECT 1 FROM sqlite_master WHERE type = $1 AND name = $2")
                     .bind(kind)
                     .bind(name)
                     .fetch_optional(&pool)
@@ -54,9 +54,9 @@ async fn delete_before_drains_old_rows_across_chunk_boundaries() -> anyhow::Resu
     for old in [0, DELETE_CHUNK_ROWS, DELETE_CHUNK_ROWS + 1] {
         let pool = test_pool().await;
         sqlx::query(
-            "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?1)
+            "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < $1)
              INSERT INTO deploys (git_sha, deployed_at)
-             SELECT i, IIF(i < ?1, '2000-01-01T00:00:00Z', '2100-01-01T00:00:00Z') FROM n",
+             SELECT i, IIF(i < $1, '2000-01-01T00:00:00Z', '2100-01-01T00:00:00Z') FROM n",
         )
         .bind(old)
         .execute(&pool)

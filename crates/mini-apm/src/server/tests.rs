@@ -78,7 +78,7 @@ async fn test_collector_routes() {
         assert_eq!(res.status(), expected, "{auth:?} ({} bytes)", message.len());
     }
 
-    let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM errors WHERE project_id = ?1")
+    let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM errors WHERE project_id = $1")
         .bind(project.id)
         .fetch_one(&pool)
         .await
@@ -100,7 +100,7 @@ async fn test_errors_from_one_location_share_a_group() {
     }
 
     let (groups, occurrences): (i64, i64) =
-        sqlx::query_as("SELECT COUNT(*), SUM(occurrence_count) FROM errors WHERE project_id = ?1")
+        sqlx::query_as("SELECT COUNT(*), SUM(occurrence_count) FROM errors WHERE project_id = $1")
             .bind(project.id)
             .fetch_one(&pool)
             .await

@@ -617,7 +617,7 @@ pub async fn insert_otlp_batch(
 
                 sqlx::query(
                     r#"
-                    INSERT OR REPLACE INTO spans
+                    INSERT INTO spans
                     (project_id, trace_id, span_id, parent_span_id,
                      start_time_unix_nano, end_time_unix_nano, duration_ms, name, kind,
                      status_code, status_message, span_category, root_span_type,
@@ -625,9 +625,35 @@ pub async fn insert_otlp_batch(
                      db_system, db_statement, db_operation,
                      messaging_system, messaging_operation, request_id,
                      attributes_json, events_json, resource_attributes_json, happened_at)
-                    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                            ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23,
-                            ?24, ?25, ?26, ?27)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+                            $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
+                            $24, $25, $26, $27)
+                    ON CONFLICT (trace_id, span_id) DO UPDATE SET
+                     project_id = excluded.project_id,
+                     parent_span_id = excluded.parent_span_id,
+                     start_time_unix_nano = excluded.start_time_unix_nano,
+                     end_time_unix_nano = excluded.end_time_unix_nano,
+                     duration_ms = excluded.duration_ms,
+                     name = excluded.name,
+                     kind = excluded.kind,
+                     status_code = excluded.status_code,
+                     status_message = excluded.status_message,
+                     span_category = excluded.span_category,
+                     root_span_type = excluded.root_span_type,
+                     service_name = excluded.service_name,
+                     http_method = excluded.http_method,
+                     http_url = excluded.http_url,
+                     http_status_code = excluded.http_status_code,
+                     db_system = excluded.db_system,
+                     db_statement = excluded.db_statement,
+                     db_operation = excluded.db_operation,
+                     messaging_system = excluded.messaging_system,
+                     messaging_operation = excluded.messaging_operation,
+                     request_id = excluded.request_id,
+                     attributes_json = excluded.attributes_json,
+                     events_json = excluded.events_json,
+                     resource_attributes_json = excluded.resource_attributes_json,
+                     happened_at = excluded.happened_at
                     "#,
                 )
                 .bind(project_id)
@@ -754,13 +780,13 @@ pub async fn list_traces_paginated(
             strftime('%Y-%m-%d %H:%M', s.happened_at) as happened_at
         FROM spans s
         WHERE s.parent_span_id IS NULL
-          AND (?1 IS NULL OR s.project_id = ?1)
-          AND (?2 IS NULL OR s.root_span_type = ?2)
-          AND (?3 IS NULL OR s.happened_at >= ?3)
-          AND (?4 IS NULL OR s.name LIKE '%' || ?4 || '%' OR s.http_url LIKE '%' || ?4 || '%')
-          AND (?5 IS NULL OR s.duration_ms >= ?5)
+          AND ($1 IS NULL OR s.project_id = $1)
+          AND ($2 IS NULL OR s.root_span_type = $2)
+          AND ($3 IS NULL OR s.happened_at >= $3)
+          AND ($4 IS NULL OR LOWER(s.name) LIKE '%' || LOWER($4) || '%' OR LOWER(s.http_url) LIKE '%' || LOWER($4) || '%')
+          AND ($5 IS NULL OR s.duration_ms >= $5)
         ORDER BY {}
-        LIMIT ?6 OFFSET ?7
+        LIMIT $6 OFFSET $7
         "#,
         order_clause
     );
@@ -799,11 +825,11 @@ pub async fn count_traces_filtered(
         SELECT COUNT(*)
         FROM spans s
         WHERE s.parent_span_id IS NULL
-          AND (?1 IS NULL OR s.project_id = ?1)
-          AND (?2 IS NULL OR s.root_span_type = ?2)
-          AND (?3 IS NULL OR s.happened_at >= ?3)
-          AND (?4 IS NULL OR s.name LIKE '%' || ?4 || '%' OR s.http_url LIKE '%' || ?4 || '%')
-          AND (?5 IS NULL OR s.duration_ms >= ?5)
+          AND ($1 IS NULL OR s.project_id = $1)
+          AND ($2 IS NULL OR s.root_span_type = $2)
+          AND ($3 IS NULL OR s.happened_at >= $3)
+          AND ($4 IS NULL OR LOWER(s.name) LIKE '%' || LOWER($4) || '%' OR LOWER(s.http_url) LIKE '%' || LOWER($4) || '%')
+          AND ($5 IS NULL OR s.duration_ms >= $5)
         "#,
     )
     .bind(project_id)
@@ -839,7 +865,7 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
                duration_ms, start_time_unix_nano, status_code,
                http_method, http_status_code, db_operation, db_system, db_statement
         FROM spans
-        WHERE trace_id = ?1
+        WHERE trace_id = $1
         ORDER BY start_time_unix_nano ASC
         "#,
     )
@@ -936,7 +962,7 @@ pub async fn count_since(
     since: &str,
 ) -> anyhow::Result<i64> {
     let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM spans WHERE parent_span_id IS NULL AND (?1 IS NULL OR project_id = ?1) AND happened_at >= ?2",
+        "SELECT COUNT(*) FROM spans WHERE parent_span_id IS NULL AND ($1 IS NULL OR project_id = $1) AND happened_at >= $2",
     )
     .bind(project_id)
     .bind(since)
@@ -965,7 +991,7 @@ pub async fn latency_stats_since(
     since: &str,
 ) -> anyhow::Result<LatencyStats> {
     let values: Vec<f64> = sqlx::query_scalar(
-        "SELECT duration_ms FROM spans WHERE parent_span_id IS NULL AND happened_at >= ?1 AND (?2 IS NULL OR project_id = ?2) ORDER BY duration_ms ASC",
+        "SELECT duration_ms FROM spans WHERE parent_span_id IS NULL AND happened_at >= $1 AND ($2 IS NULL OR project_id = $2) ORDER BY duration_ms ASC",
     )
     .bind(since)
     .bind(project_id)
@@ -1011,10 +1037,10 @@ pub async fn slow_traces(
             strftime('%Y-%m-%d %H:%M', s.happened_at) as happened_at
         FROM spans s
         WHERE s.parent_span_id IS NULL
-          AND s.duration_ms >= ?1
-          AND (?2 IS NULL OR s.project_id = ?2)
+          AND s.duration_ms >= $1
+          AND ($2 IS NULL OR s.project_id = $2)
         ORDER BY s.duration_ms DESC
-        LIMIT ?3
+        LIMIT $3
         "#,
     )
     .bind(threshold_ms)
@@ -1053,8 +1079,8 @@ pub async fn hourly_stats(
             SUM(CASE WHEN status_code = 2 OR http_status_code >= 500 THEN 1 ELSE 0 END) as error_count
         FROM spans
         WHERE parent_span_id IS NULL
-          AND (?1 IS NULL OR project_id = ?1)
-          AND happened_at >= ?2
+          AND ($1 IS NULL OR project_id = $1)
+          AND happened_at >= $2
         GROUP BY strftime('%Y-%m-%d %H:00', happened_at)
         ORDER BY hour ASC
         "#,
@@ -1137,12 +1163,12 @@ pub async fn routes_summary(
         FROM spans
         WHERE parent_span_id IS NULL
           AND root_span_type = 'web'
-          AND (?1 IS NULL OR project_id = ?1)
-          AND happened_at >= ?2
-          AND (?3 IS NULL OR name LIKE '%' || ?3 || '%' OR http_url LIKE '%' || ?3 || '%')
+          AND ($1 IS NULL OR project_id = $1)
+          AND happened_at >= $2
+          AND ($3 IS NULL OR LOWER(name) LIKE '%' || LOWER($3) || '%' OR LOWER(http_url) LIKE '%' || LOWER($3) || '%')
         GROUP BY COALESCE(name, http_url, 'unknown'), COALESCE(http_method, 'GET')
         ORDER BY request_count DESC
-        LIMIT ?4
+        LIMIT $4
         "#,
     )
     .bind(project_id)
@@ -1211,9 +1237,9 @@ pub async fn routes_count(
         FROM spans
         WHERE parent_span_id IS NULL
           AND root_span_type = 'web'
-          AND (?1 IS NULL OR project_id = ?1)
-          AND happened_at >= ?2
-          AND (?3 IS NULL OR name LIKE '%' || ?3 || '%' OR http_url LIKE '%' || ?3 || '%')
+          AND ($1 IS NULL OR project_id = $1)
+          AND happened_at >= $2
+          AND ($3 IS NULL OR LOWER(name) LIKE '%' || LOWER($3) || '%' OR LOWER(http_url) LIKE '%' || LOWER($3) || '%')
         "#,
     )
     .bind(project_id)
@@ -1235,9 +1261,9 @@ async fn route_durations(
         SELECT COALESCE(name, http_url, 'unknown') AS path, duration_ms
         FROM spans
         WHERE parent_span_id IS NULL
-          AND (?1 IS NULL OR project_id = ?1)
-          AND happened_at >= ?2
-          AND COALESCE(name, http_url, 'unknown') IN (SELECT value FROM json_each(?3))
+          AND ($1 IS NULL OR project_id = $1)
+          AND happened_at >= $2
+          AND COALESCE(name, http_url, 'unknown') IN (SELECT value FROM json_each($3))
         ORDER BY duration_ms ASC
         "#,
     )
@@ -1266,9 +1292,9 @@ async fn route_db_stats(
             SELECT trace_id, COALESCE(name, http_url, 'unknown') AS path
             FROM spans
             WHERE parent_span_id IS NULL
-              AND (?1 IS NULL OR project_id = ?1)
-              AND happened_at >= ?2
-              AND COALESCE(name, http_url, 'unknown') IN (SELECT value FROM json_each(?3))
+              AND ($1 IS NULL OR project_id = $1)
+              AND happened_at >= $2
+              AND COALESCE(name, http_url, 'unknown') IN (SELECT value FROM json_each($3))
         ),
         db AS (
             SELECT s.trace_id, SUM(s.duration_ms) AS db_ms, COUNT(*) AS db_count
@@ -1277,7 +1303,7 @@ async fn route_db_stats(
             WHERE s.span_category = 'db'
             GROUP BY s.trace_id
         )
-        SELECT roots.path, AVG(db.db_ms), AVG(db.db_count)
+        SELECT roots.path, AVG(db.db_ms), AVG(CAST(db.db_count AS DOUBLE PRECISION))
         FROM roots
         JOIN db ON db.trace_id = roots.trace_id
         GROUP BY roots.path
@@ -1395,9 +1421,9 @@ pub async fn has_n_plus_1(pool: &DbPool, trace_id: &str) -> bool {
         SELECT COUNT(*) FROM (
             SELECT db_statement, COUNT(*) as cnt
             FROM spans
-            WHERE trace_id = ?1 AND span_category = 'db' AND db_statement IS NOT NULL
+            WHERE trace_id = $1 AND span_category = 'db' AND db_statement IS NOT NULL
             GROUP BY db_statement
-            HAVING cnt >= ?2
+            HAVING cnt >= $2
         )
         "#,
     )

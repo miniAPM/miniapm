@@ -56,14 +56,14 @@ async fn test_records_requests_jobs_queries_and_errors() {
         let traces: Vec<(String, String, String)> = sqlx::query_as(
             "SELECT r.name, r.root_span_type, c.db_statement FROM spans r
              JOIN spans c ON c.trace_id = r.trace_id AND c.parent_span_id = r.span_id
-             WHERE r.project_id = ?1 AND r.parent_span_id IS NULL ORDER BY r.name",
+             WHERE r.project_id = $1 AND r.parent_span_id IS NULL ORDER BY r.name",
         )
         .bind(project.id)
         .fetch_all(&pool)
         .await
         .unwrap();
         let errors: Vec<String> = sqlx::query_scalar(
-            "SELECT message FROM errors WHERE project_id = ?1 AND exception_class = ?2",
+            "SELECT message FROM errors WHERE project_id = $1 AND exception_class = $2",
         )
         .bind(project.id)
         .bind(module_path!())

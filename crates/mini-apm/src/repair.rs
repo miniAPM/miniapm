@@ -13,7 +13,7 @@ const OTLP_IDS: &str = "repair.otlp_hex_ids";
 /// turning 32 and 16 character ids into 48 and 24 characters. Encoding the
 /// stored bytes back to base64 restores the text the client sent.
 pub async fn otlp_ids(pool: &DbPool) -> anyhow::Result<u64> {
-    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = ?1")
+    let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = $1")
         .bind(OTLP_IDS)
         .fetch_optional(pool)
         .await?;
@@ -31,7 +31,7 @@ pub async fn otlp_ids(pool: &DbPool) -> anyhow::Result<u64> {
     let mut repaired = 0;
     for (id, trace_id, span_id, parent_span_id) in spans {
         let result = sqlx::query(
-            "UPDATE OR IGNORE spans SET trace_id = ?1, span_id = ?2, parent_span_id = ?3 WHERE id = ?4",
+            "UPDATE OR IGNORE spans SET trace_id = $1, span_id = $2, parent_span_id = $3 WHERE id = $4",
         )
         .bind(restore(&trace_id, 48))
         .bind(restore(&span_id, 24))
@@ -48,19 +48,21 @@ pub async fn otlp_ids(pool: &DbPool) -> anyhow::Result<u64> {
     .fetch_all(&mut *tx)
     .await?;
     for (id, request_id) in occurrences {
-        sqlx::query("UPDATE error_occurrences SET request_id = ?1 WHERE id = ?2")
+        sqlx::query("UPDATE error_occurrences SET request_id = $1 WHERE id = $2")
             .bind(restore(&request_id, 48))
             .bind(id)
             .execute(&mut *tx)
             .await?;
     }
 
-    sqlx::query("INSERT OR IGNORE INTO settings (key, value, updated_at) VALUES (?1, ?2, ?3)")
-        .bind(OTLP_IDS)
-        .bind(repaired.to_string())
-        .bind(time::now_rfc3339())
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query(
+        "INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+    )
+    .bind(OTLP_IDS)
+    .bind(repaired.to_string())
+    .bind(time::now_rfc3339())
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
     Ok(repaired)
 }

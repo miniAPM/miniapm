@@ -13,10 +13,10 @@ async fn cleanup_applies_each_retention_policy_and_preserves_recent_data() -> an
     let old_span = time::rfc3339(time::days_ago(3));
     let old_error = time::rfc3339(time::days_ago(6));
     let old_deploy = time::rfc3339(time::days_ago(91));
-    let error_id = sqlx::query(
+    let error_id: i64 = sqlx::query_scalar(
         "INSERT INTO errors (fingerprint, exception_class, message, first_seen_at, last_seen_at, occurrence_count, status)
-         VALUES ('fp', 'Error', 'failure', ?1, ?1, 2, 'open')",
-    ).bind(&old_error).execute(&pool).await?.last_insert_rowid();
+         VALUES ('fp', 'Error', 'failure', $1, $1, 2, 'open') RETURNING id",
+    ).bind(&old_error).fetch_one(&pool).await?;
 
     for (name, span_time, error_time, deploy_time) in [
         ("old", &old_span, &old_error, &old_deploy),
@@ -24,12 +24,12 @@ async fn cleanup_applies_each_retention_policy_and_preserves_recent_data() -> an
     ] {
         sqlx::query(
             "INSERT INTO spans (trace_id, span_id, name, start_time_unix_nano, end_time_unix_nano, span_category, happened_at)
-             VALUES (?1, ?1, 'test', 1000000000, 2000000000, 'http_server', ?2)",
+             VALUES ($1, $1, 'test', 1000000000, 2000000000, 'http_server', $2)",
         ).bind(name).bind(span_time).execute(&pool).await?;
         sqlx::query(
-            "INSERT INTO error_occurrences (error_id, request_id, backtrace, happened_at) VALUES (?1, ?2, '[]', ?3)",
+            "INSERT INTO error_occurrences (error_id, request_id, backtrace, happened_at) VALUES ($1, $2, '[]', $3)",
         ).bind(error_id).bind(name).bind(error_time).execute(&pool).await?;
-        sqlx::query("INSERT INTO deploys (git_sha, deployed_at) VALUES (?1, ?2)")
+        sqlx::query("INSERT INTO deploys (git_sha, deployed_at) VALUES ($1, $2)")
             .bind(name)
             .bind(deploy_time)
             .execute(&pool)
@@ -38,7 +38,7 @@ async fn cleanup_applies_each_retention_policy_and_preserves_recent_data() -> an
     for (username, days) in [("expired", 1), ("valid", -1)] {
         sqlx::query(
             "INSERT INTO users (username, is_admin, invite_token, invite_expires_at, created_at)
-             VALUES (?1, 0, ?1, ?2, ?3)",
+             VALUES ($1, FALSE, $1, $2, $3)",
         )
         .bind(username)
         .bind(time::rfc3339(time::days_ago(days)))

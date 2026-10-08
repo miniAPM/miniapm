@@ -62,7 +62,7 @@ pub async fn delete_before(
     before: &str,
 ) -> anyhow::Result<u64> {
     let sql: Arc<str> = format!(
-        "DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {column} < ?1 LIMIT ?2)"
+        "DELETE FROM {table} WHERE id IN (SELECT id FROM {table} WHERE {column} < $1 LIMIT $2)"
     )
     .into();
     let mut total = 0;

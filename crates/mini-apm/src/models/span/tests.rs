@@ -141,8 +141,7 @@ fn classification_respects_attribute_precedence_and_name_fallbacks() {
 }
 
 #[tokio::test]
-async fn batch_is_all_or_nothing_and_records_exceptions_only_once_committed() -> anyhow::Result<()>
-{
+async fn batches_are_atomic_and_resent_spans_update_in_place() -> anyhow::Result<()> {
     let pool = crate::db::test_pool().await;
     sqlx::query(
         "CREATE TRIGGER reject_poison BEFORE INSERT ON spans WHEN NEW.name = 'poison'
@@ -175,6 +174,7 @@ async fn batch_is_all_or_nothing_and_records_exceptions_only_once_committed() ->
     for (names, inserted, spans, errors) in [
         (&["ok", "poison"][..], None, 0, 0),
         (&["ok", "fine"][..], Some(2), 2, 2),
+        (&["ok", "renamed"][..], Some(2), 2, 3),
     ] {
         assert_eq!(
             insert_otlp_batch(&pool, &batch(names)?, None).await.ok(),
@@ -189,5 +189,9 @@ async fn batch_is_all_or_nothing_and_records_exceptions_only_once_committed() ->
             assert_eq!(count, expected, "{query} after {names:?}");
         }
     }
+    let rows: Vec<(i64, String)> = sqlx::query_as("SELECT id, name FROM spans ORDER BY span_id")
+        .fetch_all(&pool)
+        .await?;
+    assert_eq!(rows, [(1, "ok".into()), (2, "renamed".into())]);
     Ok(())
 }
