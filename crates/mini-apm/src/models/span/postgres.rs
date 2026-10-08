@@ -1,6 +1,8 @@
-use super::{SPAN_COLUMNS, SPAN_UPSERT, SpanRow, TimeSeriesPoint};
+use super::{LatencyStats, SPAN_COLUMNS, SPAN_UPSERT, SpanRow, TimeSeriesPoint};
 use crate::DbPool;
+use crate::db;
 use crate::time::Stamp;
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 pub async fn hourly_stats(
@@ -108,4 +110,64 @@ pub(super) async fn insert_spans(
         .execute(pool)
         .await?;
     Ok(())
+}
+
+/// A duration as whole ms, rounded half away from zero as `percentile_ms` does
+fn ms(duration: Option<f64>) -> i64 {
+    duration.map_or(0, |d| d.round() as i64)
+}
+
+/// Average and nearest-rank p95/p99 of root span durations since `since`
+pub async fn latency_stats_since(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: Stamp,
+) -> anyhow::Result<LatencyStats> {
+    let (avg, p95, p99): (Option<f64>, Option<f64>, Option<f64>) = sqlx::query_as(
+        "SELECT AVG(duration_ms),
+                percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms),
+                percentile_disc(0.99) WITHIN GROUP (ORDER BY duration_ms)
+         FROM spans
+         WHERE parent_span_id IS NULL AND happened_at >= $1 AND ($2 IS NULL OR project_id = $2)",
+    )
+    .bind(since)
+    .bind(project_id)
+    .fetch_one(pool)
+    .await?;
+    Ok(LatencyStats {
+        avg_ms: ms(avg),
+        p95_ms: ms(p95),
+        p99_ms: ms(p99),
+    })
+}
+
+/// Nearest-rank p95 and p99 of each route in `paths`
+pub(super) async fn route_percentiles(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: Stamp,
+    paths: &[String],
+) -> anyhow::Result<HashMap<String, (i64, i64)>> {
+    let rows: Vec<(String, Option<f64>, Option<f64>)> =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT name,
+                percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms),
+                percentile_disc(0.99) WITHIN GROUP (ORDER BY duration_ms)
+         FROM spans
+         WHERE parent_span_id IS NULL
+           AND ($1 IS NULL OR project_id = $1)
+           AND happened_at >= $2
+           AND name {}
+         GROUP BY name",
+            db::in_text_list(3)
+        )))
+        .bind(project_id)
+        .bind(since)
+        .bind(db::text_list(paths))
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(path, p95, p99)| (path, (ms(p95), ms(p99))))
+        .collect())
 }

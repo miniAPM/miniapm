@@ -38,27 +38,6 @@ fn sql_normalization_groups_queries_that_differ_only_in_literals() {
 }
 
 #[test]
-fn percentiles_pick_the_nearest_rank() {
-    for (n, percent, expected) in [
-        (1, 95, 1),
-        (3, 95, 3),
-        (4, 50, 2),
-        (20, 95, 19),
-        (32, 95, 31),
-        (100, 95, 95),
-        (100, 99, 99),
-        (101, 99, 100),
-    ] {
-        let sorted: Vec<f64> = (1..=n).map(f64::from).collect();
-        assert_eq!(
-            percentile_ms(&sorted, percent),
-            i64::from(expected),
-            "n={n} p{percent}"
-        );
-    }
-}
-
-#[test]
 fn trace_names_resolve_http_paths_with_span_name_fallbacks() {
     for (name, method, url, expected) in [
         (
@@ -223,6 +202,31 @@ async fn batches_are_atomic_and_resent_spans_update_in_place() -> anyhow::Result
     Ok(())
 }
 
+async fn insert_span(
+    pool: &DbPool,
+    id: usize,
+    parent: Option<&str>,
+    duration_ms: f64,
+    status_code: i32,
+    at: Stamp,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "INSERT INTO spans (trace_id, span_id, parent_span_id, start_time_unix_nano,
+            end_time_unix_nano, duration_ms, name, status_code, span_category, root_span_type,
+            happened_at)
+         VALUES ('trace', $1, $2, 0, 1, $3, 'GET /', $4, 'http_server',
+            CASE WHEN $2 IS NULL THEN 'web' END, $5)",
+    )
+    .bind(format!("{id:016x}"))
+    .bind(parent)
+    .bind(duration_ms)
+    .bind(status_code)
+    .bind(at)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn hourly_stats_bucket_root_spans_inside_the_window() -> anyhow::Result<()> {
     let pool = crate::db::test_pool().await;
@@ -236,18 +240,8 @@ async fn hourly_stats_bucket_root_spans_inside_the_window() -> anyhow::Result<()
     .into_iter()
     .enumerate()
     {
-        sqlx::query(
-            "INSERT INTO spans (trace_id, span_id, parent_span_id, start_time_unix_nano,
-                end_time_unix_nano, duration_ms, name, status_code, span_category, happened_at)
-             VALUES ('trace', $1, $2, 0, 1, $3, 'GET /', $4, 'http_server', $5)",
-        )
-        .bind(format!("{i:016x}"))
-        .bind(parent)
-        .bind(duration_ms)
-        .bind(status_code)
-        .bind(crate::time::hours_ago(hours))
-        .execute(&pool)
-        .await?;
+        let at = crate::time::hours_ago(hours);
+        insert_span(&pool, i, parent, duration_ms, status_code, at).await?;
     }
     let label = |hours| crate::time::hours_ago(hours).hour_label();
 
@@ -260,5 +254,24 @@ async fn hourly_stats_bucket_root_spans_inside_the_window() -> anyhow::Result<()
     assert_eq!(by_hour[&label(0)], (1, 10.0, 0));
     assert_eq!(by_hour[&label(2)], (2, 25.0, 1));
     assert_eq!(points.iter().map(|p| p.count).sum::<i64>(), 3);
+    Ok(())
+}
+
+#[tokio::test]
+async fn latency_percentiles_use_the_nearest_rank() -> anyhow::Result<()> {
+    let pool = crate::db::test_pool().await;
+    for i in 1..=32 {
+        insert_span(&pool, i, None, i as f64, 0, Stamp::now()).await?;
+    }
+    let since = crate::time::hours_ago(1);
+
+    let stats = latency_stats_since(&pool, None, since).await?;
+    assert_eq!((stats.avg_ms, stats.p95_ms, stats.p99_ms), (17, 31, 32));
+    let routes = routes_summary(&pool, None, since, None, "requests", 10).await?;
+    let percentiles: Vec<_> = routes
+        .iter()
+        .map(|r| (r.path.as_str(), r.p95_ms, r.p99_ms))
+        .collect();
+    assert_eq!(percentiles, [("GET /", 31, 32)]);
     Ok(())
 }

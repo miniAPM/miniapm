@@ -21,7 +21,7 @@ cfg_select! {
     }
 }
 
-pub use backend::hourly_stats;
+pub use backend::{hourly_stats, latency_stats_since};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -946,51 +946,11 @@ pub async fn count_since(
     .await?)
 }
 
-/// The nearest-rank `percent`th percentile of `sorted` (ascending), rounded to
-/// the nearest ms: the smallest sample that at least `percent`% of samples are
-/// at or below, as SQL `percentile_disc` picks it. `sorted` must be non-empty.
-fn percentile_ms(sorted: &[f64], percent: usize) -> i64 {
-    let rank = (percent * sorted.len())
-        .div_ceil(100)
-        .clamp(1, sorted.len());
-    sorted[rank - 1].round() as i64
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct LatencyStats {
     pub avg_ms: i64,
     pub p95_ms: i64,
     pub p99_ms: i64,
-}
-
-pub async fn latency_stats_since(
-    pool: &DbPool,
-    project_id: Option<i64>,
-    since: Stamp,
-) -> anyhow::Result<LatencyStats> {
-    let values: Vec<f64> = sqlx::query_scalar(
-        "SELECT duration_ms FROM spans WHERE parent_span_id IS NULL AND happened_at >= $1 AND ($2 IS NULL OR project_id = $2) ORDER BY duration_ms ASC",
-    )
-    .bind(since)
-    .bind(project_id)
-    .fetch_all(pool)
-    .await?;
-
-    if values.is_empty() {
-        return Ok(LatencyStats {
-            avg_ms: 0,
-            p95_ms: 0,
-            p99_ms: 0,
-        });
-    }
-
-    let avg = values.iter().sum::<f64>() / values.len() as f64;
-
-    Ok(LatencyStats {
-        avg_ms: avg.round() as i64,
-        p95_ms: percentile_ms(&values, 95),
-        p99_ms: percentile_ms(&values, 99),
-    })
 }
 
 pub async fn slow_traces(
@@ -1080,7 +1040,7 @@ pub async fn routes_summary(
         sqlx::query_as(sqlx::AssertSqlSafe(format!(
         r#"
         SELECT
-            COALESCE(name, http_url, 'unknown') as path,
+            name AS path,
             COALESCE(http_method, 'GET') as method,
             COUNT(*) as request_count,
             AVG(duration_ms) as avg_ms,
@@ -1089,7 +1049,7 @@ pub async fn routes_summary(
             SUM(CASE WHEN status_code = 2 OR http_status_code >= 500 THEN 1 ELSE 0 END) as error_count
         FROM spans
         {ROUTE_FILTER}
-        GROUP BY COALESCE(name, http_url, 'unknown'), COALESCE(http_method, 'GET')
+        GROUP BY name, COALESCE(http_method, 'GET')
         ORDER BY request_count DESC
         LIMIT $4
         "#
@@ -1102,15 +1062,12 @@ pub async fn routes_summary(
     .await?;
 
     let paths: Vec<String> = routes.iter().map(|r| r.0.clone()).collect();
-    let durations = route_durations(pool, project_id, since, &paths).await?;
+    let percentiles = backend::route_percentiles(pool, project_id, since, &paths).await?;
     let db_stats = route_db_stats(pool, project_id, since, &paths).await?;
 
     let mut result = Vec::new();
     for (path, method, request_count, avg_ms, max_ms, min_ms, error_count) in routes {
-        let (p95, p99) = durations
-            .get(&path)
-            .map(|d| (percentile_ms(d, 95), percentile_ms(d, 99)))
-            .unwrap_or((0, 0));
+        let (p95, p99) = percentiles.get(&path).copied().unwrap_or((0, 0));
         let (avg_db_ms, avg_db_count) = db_stats.get(&path).copied().unwrap_or((0, 0));
         let error_rate = if request_count > 0 {
             (error_count as f64 / request_count as f64) * 100.0
@@ -1155,7 +1112,7 @@ pub async fn routes_count(
     search: Option<&str>,
 ) -> anyhow::Result<i64> {
     let sql = format!(
-        "SELECT COUNT(DISTINCT COALESCE(name, http_url, 'unknown') || COALESCE(http_method, 'GET'))
+        "SELECT COUNT(DISTINCT name || COALESCE(http_method, 'GET'))
          FROM spans {ROUTE_FILTER}"
     );
     Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
@@ -1164,37 +1121,6 @@ pub async fn routes_count(
         .bind(search)
         .fetch_one(pool)
         .await?)
-}
-
-async fn route_durations(
-    pool: &DbPool,
-    project_id: Option<i64>,
-    since: Stamp,
-    paths: &[String],
-) -> anyhow::Result<HashMap<String, Vec<f64>>> {
-    let in_paths = db::in_text_list(3);
-    let rows: Vec<(String, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        r#"
-        SELECT COALESCE(name, http_url, 'unknown') AS path, duration_ms
-        FROM spans
-        WHERE parent_span_id IS NULL
-          AND ($1 IS NULL OR project_id = $1)
-          AND happened_at >= $2
-          AND COALESCE(name, http_url, 'unknown') {in_paths}
-        ORDER BY duration_ms ASC
-        "#
-    )))
-    .bind(project_id)
-    .bind(since)
-    .bind(db::text_list(paths))
-    .fetch_all(pool)
-    .await?;
-
-    let mut durations: HashMap<String, Vec<f64>> = HashMap::new();
-    for (path, duration) in rows {
-        durations.entry(path).or_default().push(duration);
-    }
-    Ok(durations)
 }
 
 async fn route_db_stats(
@@ -1207,12 +1133,12 @@ async fn route_db_stats(
     let rows: Vec<(String, f64, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         r#"
         WITH roots AS (
-            SELECT trace_id, COALESCE(name, http_url, 'unknown') AS path
+            SELECT trace_id, name AS path
             FROM spans
             WHERE parent_span_id IS NULL
               AND ($1 IS NULL OR project_id = $1)
               AND happened_at >= $2
-              AND COALESCE(name, http_url, 'unknown') {in_paths}
+              AND name {in_paths}
         ),
         db AS (
             SELECT s.trace_id, SUM(s.duration_ms) AS db_ms, COUNT(*) AS db_count

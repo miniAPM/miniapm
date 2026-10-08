@@ -1,7 +1,8 @@
-use super::{SPAN_COLUMNS, SPAN_UPSERT, SpanRow, TimeSeriesPoint};
+use super::{LatencyStats, SPAN_COLUMNS, SPAN_UPSERT, SpanRow, TimeSeriesPoint};
 use crate::DbPool;
 use crate::db;
-use crate::time;
+use crate::time::{self, Stamp};
+use std::collections::HashMap;
 use std::sync::LazyLock;
 
 pub async fn hourly_stats(
@@ -118,3 +119,91 @@ pub(super) async fn insert_spans(
     tx.commit().await?;
     Ok(())
 }
+
+/// The nearest-rank `percent`th percentile of `sorted` (ascending), rounded to
+/// the nearest ms: the smallest sample that at least `percent`% of samples are
+/// at or below, as SQL `percentile_disc` picks it. `sorted` must be non-empty.
+fn percentile_ms(sorted: &[f64], percent: usize) -> i64 {
+    let rank = (percent * sorted.len())
+        .div_ceil(100)
+        .clamp(1, sorted.len());
+    sorted[rank - 1].round() as i64
+}
+
+pub async fn latency_stats_since(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: Stamp,
+) -> anyhow::Result<LatencyStats> {
+    let values: Vec<f64> = sqlx::query_scalar(
+        "SELECT duration_ms FROM spans WHERE parent_span_id IS NULL AND happened_at >= $1 AND ($2 IS NULL OR project_id = $2) ORDER BY duration_ms ASC",
+    )
+    .bind(since)
+    .bind(project_id)
+    .fetch_all(pool)
+    .await?;
+
+    if values.is_empty() {
+        return Ok(LatencyStats {
+            avg_ms: 0,
+            p95_ms: 0,
+            p99_ms: 0,
+        });
+    }
+
+    let avg = values.iter().sum::<f64>() / values.len() as f64;
+
+    Ok(LatencyStats {
+        avg_ms: avg.round() as i64,
+        p95_ms: percentile_ms(&values, 95),
+        p99_ms: percentile_ms(&values, 99),
+    })
+}
+
+/// p95 and p99 of each route in `paths`, computed from its root span durations
+pub(super) async fn route_percentiles(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: Stamp,
+    paths: &[String],
+) -> anyhow::Result<HashMap<String, (i64, i64)>> {
+    Ok(route_durations(pool, project_id, since, paths)
+        .await?
+        .into_iter()
+        .map(|(path, d)| (path, (percentile_ms(&d, 95), percentile_ms(&d, 99))))
+        .collect())
+}
+
+async fn route_durations(
+    pool: &DbPool,
+    project_id: Option<i64>,
+    since: Stamp,
+    paths: &[String],
+) -> anyhow::Result<HashMap<String, Vec<f64>>> {
+    let in_paths = db::in_text_list(3);
+    let rows: Vec<(String, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        r#"
+        SELECT name AS path, duration_ms
+        FROM spans
+        WHERE parent_span_id IS NULL
+          AND ($1 IS NULL OR project_id = $1)
+          AND happened_at >= $2
+          AND name {in_paths}
+        ORDER BY duration_ms ASC
+        "#
+    )))
+    .bind(project_id)
+    .bind(since)
+    .bind(db::text_list(paths))
+    .fetch_all(pool)
+    .await?;
+
+    let mut durations: HashMap<String, Vec<f64>> = HashMap::new();
+    for (path, duration) in rows {
+        durations.entry(path).or_default().push(duration);
+    }
+    Ok(durations)
+}
+
+#[cfg(test)]
+mod tests;
