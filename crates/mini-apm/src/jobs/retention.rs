@@ -2,6 +2,7 @@ use crate::time;
 use crate::{DbPool, config::Config, db, models::user};
 
 pub async fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
+    db::maintain(pool).await?;
     for (table, column, days) in [
         ("spans", "happened_at", config.retention_days_spans),
         (
@@ -11,9 +12,7 @@ pub async fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
         ),
         ("deploys", "deployed_at", 90),
     ] {
-        let cutoff = time::days_ago(days);
-        let deleted = db::delete_before(pool, table, column, cutoff).await?;
-        tracing::info!("Deleted {} old rows from {}", deleted, table);
+        db::expire(pool, table, column, time::days_ago(days)).await?;
     }
 
     // Delete expired invite tokens (users who never activated)

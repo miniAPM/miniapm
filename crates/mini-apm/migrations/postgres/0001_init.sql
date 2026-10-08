@@ -51,16 +51,22 @@ CREATE TABLE errors (
 CREATE INDEX errors_last_seen_at ON errors (last_seen_at DESC);
 CREATE INDEX errors_status ON errors (status);
 
+-- spans and error_occurrences are partitioned by day on happened_at, so
+-- retention drops whole days; see create_day_partition and
+-- drop_partitions_before. A key must include the partition column.
 CREATE TABLE error_occurrences (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id BIGINT GENERATED ALWAYS AS IDENTITY,
     error_id BIGINT NOT NULL REFERENCES errors (id) ON DELETE CASCADE,
     request_id TEXT,
     user_id TEXT,
     backtrace JSONB NOT NULL,
     params JSONB,
     happened_at TIMESTAMPTZ NOT NULL,
-    source_context JSONB
-);
+    source_context JSONB,
+    PRIMARY KEY (id, happened_at)
+) PARTITION BY RANGE (happened_at);
+
+CREATE TABLE error_occurrences_default PARTITION OF error_occurrences DEFAULT;
 
 CREATE INDEX error_occurrences_error_id ON error_occurrences (error_id, happened_at DESC);
 CREATE INDEX error_occurrences_happened_at ON error_occurrences USING brin (happened_at);
@@ -80,7 +86,7 @@ CREATE INDEX deploys_project_id ON deploys (project_id, deployed_at DESC);
 CREATE INDEX deploys_deployed_at ON deploys (deployed_at);
 
 CREATE TABLE spans (
-    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    id BIGINT GENERATED ALWAYS AS IDENTITY,
     project_id BIGINT REFERENCES projects (id) ON DELETE CASCADE,
     trace_id TEXT NOT NULL,
     span_id TEXT NOT NULL,
@@ -108,8 +114,11 @@ CREATE TABLE spans (
     events_json JSONB,
     resource_attributes_json JSONB,
     happened_at TIMESTAMPTZ NOT NULL,
-    UNIQUE (trace_id, span_id)
-);
+    PRIMARY KEY (id, happened_at),
+    UNIQUE (trace_id, span_id, happened_at)
+) PARTITION BY RANGE (happened_at);
+
+CREATE TABLE spans_default PARTITION OF spans DEFAULT;
 
 CREATE INDEX spans_project_id ON spans (project_id, happened_at);
 CREATE INDEX spans_happened_at ON spans USING brin (happened_at);
@@ -180,5 +189,85 @@ BEGIN
          p_source_context::jsonb);
 
     RETURN recorded;
+END
+$$;
+
+-- Create the partition of `parent` holding UTC day `day`, named
+-- <parent>_pYYYYMMDD. Rows of that day already in the default partition move
+-- into it, as Postgres refuses a partition whose rows sit in the default one.
+CREATE FUNCTION create_day_partition(parent regclass, day date)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    schema_name text;
+    table_name text;
+    part text;
+    lo timestamptz := day::timestamp AT TIME ZONE 'UTC';
+    hi timestamptz := (day + 1)::timestamp AT TIME ZONE 'UTC';
+BEGIN
+    SELECT n.nspname, c.relname INTO schema_name, table_name
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.oid = parent;
+    part := format('%I.%I', schema_name, table_name || '_p' || to_char(day, 'YYYYMMDD'));
+    IF to_regclass(part) IS NOT NULL THEN
+        RETURN;
+    END IF;
+
+    EXECUTE format('CREATE TEMP TABLE moved_rows (LIKE %s)', parent);
+    EXECUTE format(
+        'WITH moved AS (DELETE FROM %I.%I WHERE happened_at >= %L AND happened_at < %L RETURNING *)
+         INSERT INTO moved_rows SELECT * FROM moved',
+        schema_name, table_name || '_default', lo, hi);
+    EXECUTE format('CREATE TABLE %s PARTITION OF %s FOR VALUES FROM (%L) TO (%L)', part, parent, lo, hi);
+    EXECUTE format('INSERT INTO %s OVERRIDING SYSTEM VALUE SELECT * FROM moved_rows', parent);
+    DROP TABLE moved_rows;
+END
+$$;
+
+-- Create the day partitions of `parent` from yesterday to `days_ahead` days ahead
+CREATE FUNCTION create_day_partitions(parent regclass, days_ahead integer)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    today date := (now() AT TIME ZONE 'UTC')::date;
+BEGIN
+    FOR offset_days IN -1 .. days_ahead LOOP
+        PERFORM create_day_partition(parent, today + offset_days);
+    END LOOP;
+END
+$$;
+
+-- Drop the day partitions of `parent` that end by `cutoff` and delete older
+-- rows from its default partition. The partition straddling `cutoff` stays
+-- until its whole day has expired.
+CREATE FUNCTION drop_partitions_before(parent regclass, cutoff timestamptz)
+RETURNS TABLE (dropped integer, deleted bigint)
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    part regclass;
+BEGIN
+    dropped := 0;
+    FOR part IN
+        SELECT c.oid::regclass
+          FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
+         WHERE i.inhparent = parent
+           AND c.relname ~ '_p[0-9]{8}$'
+           AND (to_date(right(c.relname, 8), 'YYYYMMDD') + 1)::timestamp AT TIME ZONE 'UTC' <= cutoff
+    LOOP
+        EXECUTE format('DROP TABLE %s', part);
+        dropped := dropped + 1;
+    END LOOP;
+
+    EXECUTE format(
+        'DELETE FROM %s WHERE happened_at < $1',
+        (SELECT format('%I.%I', n.nspname, c.relname || '_default')
+           FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE c.oid = parent))
+    USING cutoff;
+    GET DIAGNOSTICS deleted = ROW_COUNT;
+    RETURN NEXT;
 END
 $$;

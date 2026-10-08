@@ -45,6 +45,10 @@ pub async fn hourly_stats(
         .collect())
 }
 
+/// The unique key a resent span is matched on, which on a table partitioned
+/// by `happened_at` has to include it
+pub(super) const SPAN_KEY: &[&str] = &["trace_id", "span_id", "happened_at"];
+
 /// One statement for the whole batch: each column arrives as an array and
 /// `unnest` turns them back into rows. A span repeated in the batch keeps its
 /// last copy, as `ON CONFLICT` may not touch the same row twice.

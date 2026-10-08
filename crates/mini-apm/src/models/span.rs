@@ -546,12 +546,15 @@ static SPAN_UPSERT: LazyLock<String> = LazyLock::new(|| {
         .chain(
             SPAN_COLUMNS
                 .into_iter()
-                .filter(|c| !matches!(*c, "trace_id" | "span_id")),
+                .filter(|c| !backend::SPAN_KEY.contains(c)),
         )
         .map(|c| format!("{c} = excluded.{c}"))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("ON CONFLICT (trace_id, span_id) DO UPDATE SET {set}")
+    format!(
+        "ON CONFLICT ({}) DO UPDATE SET {set}",
+        backend::SPAN_KEY.join(", ")
+    )
 });
 
 /// One `spans` row, the [`SPAN_COLUMNS`] after `project_id`

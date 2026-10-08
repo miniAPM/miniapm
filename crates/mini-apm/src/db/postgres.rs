@@ -1,9 +1,14 @@
 use super::{DbPool, DbTransaction};
 use crate::config::Config;
+use crate::time::Stamp;
 use anyhow::Context;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 
 const MIN_SERVER_VERSION: i32 = 180_000;
+
+/// Tables partitioned by UTC day on `happened_at`
+const PARTITIONED: [&str; 2] = ["spans", "error_occurrences"];
+const PARTITION_DAYS_AHEAD: i32 = 7;
 
 pub async fn init(config: &Config) -> anyhow::Result<DbPool> {
     let url = config
@@ -62,6 +67,43 @@ pub fn in_text_list(param: u8) -> String {
 /// Bind value for [`in_text_list`]
 pub fn text_list(items: &[String]) -> &[String] {
     items
+}
+
+/// Create day partitions from yesterday to a week ahead, so retention can
+/// drop whole days
+pub async fn maintain(pool: &DbPool) -> anyhow::Result<()> {
+    for table in PARTITIONED {
+        sqlx::query("SELECT create_day_partitions($1::regclass, $2)")
+            .bind(table)
+            .bind(PARTITION_DAYS_AHEAD)
+            .execute(pool)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Remove the rows of `table` whose `column` is before `cutoff`. Partitioned
+/// tables drop the days that ended by then, so rows can outlive `cutoff` by
+/// up to a day.
+pub async fn expire(
+    pool: &DbPool,
+    table: &'static str,
+    column: &'static str,
+    cutoff: Stamp,
+) -> anyhow::Result<()> {
+    if PARTITIONED.contains(&table) {
+        let (dropped, deleted): (i32, i64) =
+            sqlx::query_as("SELECT dropped, deleted FROM drop_partitions_before($1::regclass, $2)")
+                .bind(table)
+                .bind(cutoff)
+                .fetch_one(pool)
+                .await?;
+        tracing::info!("Dropped {dropped} day partitions and {deleted} old rows from {table}");
+    } else {
+        let deleted = super::delete_before(pool, table, column, cutoff).await?;
+        tracing::info!("Deleted {deleted} old rows from {table}");
+    }
+    Ok(())
 }
 
 pub async fn begin_write(pool: &DbPool) -> sqlx::Result<DbTransaction> {

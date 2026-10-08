@@ -65,6 +65,9 @@ pub async fn hourly_stats(
     Ok(points)
 }
 
+/// The unique key a resent span is matched on
+pub(super) const SPAN_KEY: &[&str] = &["trace_id", "span_id"];
+
 static INSERT_SPAN: LazyLock<String> = LazyLock::new(|| {
     let values = (1..=SPAN_COLUMNS.len() + 1)
         .map(|i| format!("${i}"))

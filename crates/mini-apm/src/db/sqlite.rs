@@ -1,5 +1,6 @@
 use super::{DbPool, DbTransaction};
 use crate::config::Config;
+use crate::time::Stamp;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::fs;
 use std::path::Path;
@@ -51,6 +52,23 @@ pub fn in_text_list(param: u8) -> String {
 /// Bind value for [`in_text_list`]: SQLite has no arrays, so a JSON array
 pub fn text_list(items: &[String]) -> String {
     serde_json::to_string(items).expect("a list of strings serializes")
+}
+
+/// Periodic upkeep of the schema; SQLite needs none
+pub async fn maintain(_pool: &DbPool) -> anyhow::Result<()> {
+    Ok(())
+}
+
+/// Delete the rows of `table` whose `column` is before `cutoff`
+pub async fn expire(
+    pool: &DbPool,
+    table: &'static str,
+    column: &'static str,
+    cutoff: Stamp,
+) -> anyhow::Result<()> {
+    let deleted = super::delete_before(pool, table, column, cutoff).await?;
+    tracing::info!("Deleted {deleted} old rows from {table}");
+    Ok(())
 }
 
 /// Open a transaction that takes SQLite's write lock up front, so a batch
