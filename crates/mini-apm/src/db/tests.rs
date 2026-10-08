@@ -51,3 +51,27 @@ async fn migrations_create_schema_and_preserve_data_when_reapplied() -> anyhow::
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn delete_before_drains_old_rows_across_chunk_boundaries() -> anyhow::Result<()> {
+    for old in [0, DELETE_CHUNK_ROWS, DELETE_CHUNK_ROWS + 1] {
+        let pool = test_pool().await;
+        sqlx::query(
+            "WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i + 1 FROM n WHERE i < ?1)
+             INSERT INTO deploys (git_sha, deployed_at)
+             SELECT i, IIF(i < ?1, '2000-01-01T00:00:00Z', '2100-01-01T00:00:00Z') FROM n",
+        )
+        .bind(old)
+        .execute(&pool)
+        .await?;
+
+        let deleted =
+            delete_before(&pool, "deploys", "deployed_at", "2050-01-01T00:00:00Z").await?;
+        let remaining: Vec<String> = sqlx::query_scalar("SELECT deployed_at FROM deploys")
+            .fetch_all(&pool)
+            .await?;
+        assert_eq!(deleted, old.cast_unsigned(), "old rows: {old}");
+        assert_eq!(remaining, ["2100-01-01T00:00:00Z"], "old rows: {old}");
+    }
+    Ok(())
+}

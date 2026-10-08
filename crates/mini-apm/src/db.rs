@@ -3,9 +3,13 @@ use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub type DbPool = SqlitePool;
+
+const DELETE_CHUNK_ROWS: i64 = 5_000;
+const WRITE_LOCK_HANDOFF: Duration = Duration::from_millis(200);
 
 pub async fn init(config: &Config) -> anyhow::Result<DbPool> {
     let is_memory = config.sqlite_path == ":memory:";
@@ -21,7 +25,7 @@ pub async fn init(config: &Config) -> anyhow::Result<DbPool> {
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
-        .busy_timeout(Duration::from_millis(100))
+        .busy_timeout(Duration::from_secs(5))
         .foreign_keys(true);
 
     // A shared, on-disk pool wants several connections; an in-memory database
@@ -53,12 +57,24 @@ pub async fn delete_before(
     column: &'static str,
     before: &str,
 ) -> anyhow::Result<u64> {
-    let sql = format!("DELETE FROM {table} WHERE {column} < ?1");
-    let result = sqlx::query(sqlx::AssertSqlSafe(sql))
-        .bind(before)
-        .execute(pool)
-        .await?;
-    Ok(result.rows_affected())
+    let sql: Arc<str> = format!(
+        "DELETE FROM {table} WHERE rowid IN (SELECT rowid FROM {table} WHERE {column} < ?1 LIMIT ?2)"
+    )
+    .into();
+    let mut total = 0;
+    loop {
+        let deleted = sqlx::query(sqlx::AssertSqlSafe(Arc::clone(&sql)))
+            .bind(before)
+            .bind(DELETE_CHUNK_ROWS)
+            .execute(pool)
+            .await?
+            .rows_affected();
+        total += deleted;
+        if deleted < DELETE_CHUNK_ROWS.cast_unsigned() {
+            return Ok(total);
+        }
+        tokio::time::sleep(WRITE_LOCK_HANDOFF).await;
+    }
 }
 
 pub async fn get_db_size(pool: &DbPool) -> anyhow::Result<f64> {

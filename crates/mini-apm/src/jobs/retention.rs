@@ -1,6 +1,5 @@
 use crate::time;
 use crate::{DbPool, config::Config, db, models::user};
-use jiff::Timestamp;
 
 pub async fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
     for (table, column, days) in [
@@ -26,12 +25,6 @@ pub async fn cleanup(pool: &DbPool, config: &Config) -> anyhow::Result<()> {
     let deleted_invites = user::delete_expired_invites(pool).await?;
     if deleted_invites > 0 {
         tracing::info!("Deleted {} expired invite tokens", deleted_invites);
-    }
-
-    // Vacuum on Sundays
-    if Timestamp::now().strftime("%u").to_string() == "7" {
-        sqlx::query("VACUUM").execute(pool).await?;
-        tracing::info!("Database vacuumed");
     }
 
     Ok(())
