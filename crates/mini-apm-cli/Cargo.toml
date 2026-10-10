@@ -1,6 +1,7 @@
 [package]
 name = "mini-apm-cli"
 edition.workspace = true
+rust-version.workspace = true
 version.workspace = true
 publish = false
 
