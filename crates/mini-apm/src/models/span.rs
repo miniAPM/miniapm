@@ -5,8 +5,9 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::Row;
+use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 mod proto;
 
@@ -148,13 +149,10 @@ pub enum SpanCategory {
 }
 
 impl SpanCategory {
-    pub fn from_attributes(name: &str, kind: i32, attributes: &HashMap<String, String>) -> Self {
+    pub fn from_attributes(name: &str, kind: i32, attributes: &Attributes<'_>) -> Self {
         // Check for database spans first
         if attributes.contains_key("db.system") || attributes.contains_key("db.statement") {
-            let db_system = attributes
-                .get("db.system")
-                .map(|s| s.as_str())
-                .unwrap_or("");
+            let db_system = attributes.get("db.system").map_or("", |s| s.as_ref());
             if db_system == "elasticsearch" || db_system == "opensearch" {
                 return SpanCategory::Search;
             }
@@ -421,34 +419,41 @@ pub struct SpanDisplay {
     pub db_statement: Option<String>,
 }
 
-fn parse_attributes(attrs: &Option<Vec<KeyValue>>) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-    if let Some(attrs) = attrs {
-        for kv in attrs {
-            let value = if let Some(ref v) = kv.value.string_value {
-                v.clone()
-            } else if let Some(ref v) = kv.value.int_value {
-                v.clone()
-            } else if let Some(v) = kv.value.double_value {
-                v.to_string()
-            } else if let Some(v) = kv.value.bool_value {
-                v.to_string()
+/// Attribute values as text, borrowed from the request unless they are numbers
+pub type Attributes<'a> = HashMap<&'a str, Cow<'a, str>>;
+
+fn parse_attributes(attrs: Option<&[KeyValue]>) -> Attributes<'_> {
+    attrs
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|kv| {
+            let value = &kv.value;
+            let text = if let Some(v) = &value.string_value {
+                Cow::Borrowed(v.as_str())
+            } else if let Some(v) = &value.int_value {
+                Cow::Borrowed(v.as_str())
+            } else if let Some(v) = value.double_value {
+                Cow::Owned(v.to_string())
             } else {
-                continue;
+                Cow::Borrowed(if value.bool_value? { "true" } else { "false" })
             };
-            map.insert(kv.key.clone(), value);
-        }
-    }
-    map
+            Some((kv.key.as_str(), text))
+        })
+        .collect()
 }
 
-fn decode_id(s: &str) -> String {
+/// A trace or span id as lowercase hex, whether sent as hex or base64
+fn decode_id(s: &str) -> Cow<'_, str> {
     if s.len().is_multiple_of(2) && s.bytes().all(|b| b.is_ascii_hexdigit()) {
-        s.to_ascii_lowercase()
+        if s.bytes().any(|b| b.is_ascii_uppercase()) {
+            Cow::Owned(s.to_ascii_lowercase())
+        } else {
+            Cow::Borrowed(s)
+        }
     } else if let Ok(bytes) = STANDARD.decode(s) {
-        hex::encode(bytes)
+        Cow::Owned(hex::encode(bytes))
     } else {
-        s.to_string()
+        Cow::Borrowed(s)
     }
 }
 
@@ -458,42 +463,38 @@ use sha2::{Digest, Sha256};
 /// Extract exception events from OTLP span and insert as errors
 async fn extract_and_insert_errors(
     pool: &DbPool,
-    events: &Option<Vec<SpanEvent>>,
+    events: &[SpanEvent],
     trace_id: &str,
     happened_at: Stamp,
     project_id: Option<i64>,
 ) {
-    let events = match events {
-        Some(e) => e,
-        None => return,
-    };
-
     for event in events {
         if event.name != "exception" {
             continue;
         }
 
-        let attrs = parse_attributes(&event.attributes);
-        let exception_type = match attrs.get("exception.type") {
-            Some(t) => t.clone(),
-            None => continue,
+        let mut attrs = parse_attributes(event.attributes.as_deref());
+        let Some(exception_type) = attrs.remove("exception.type") else {
+            continue;
         };
-        let message = attrs.get("exception.message").cloned().unwrap_or_default();
-        let stacktrace = attrs
+        let message = attrs.remove("exception.message").unwrap_or_default();
+        let backtrace: Vec<String> = attrs
             .get("exception.stacktrace")
-            .cloned()
-            .unwrap_or_default();
-        let backtrace: Vec<String> = stacktrace.lines().map(|s| s.to_string()).collect();
+            .map_or("", |s| s.as_ref())
+            .lines()
+            .map(str::to_owned)
+            .collect();
 
         // Generate fingerprint from exception type + first backtrace line
-        let first_line = backtrace.first().map(|s| s.as_str()).unwrap_or("");
         let mut hasher = Sha256::new();
-        hasher.update(format!("{}:{}", exception_type, first_line));
-        let fingerprint = format!("{:x}", hasher.finalize());
+        hasher.update(exception_type.as_bytes());
+        hasher.update(b":");
+        hasher.update(backtrace.first().map_or("", String::as_str).as_bytes());
+        let fingerprint = hex::encode(hasher.finalize());
 
         let incoming_error = app_error::IncomingError {
-            exception_class: exception_type,
-            message,
+            exception_class: exception_type.into_owned(),
+            message: message.into_owned(),
             backtrace,
             fingerprint,
             request_id: Some(trace_id.to_string()),
@@ -557,33 +558,34 @@ static SPAN_UPSERT: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// One `spans` row, the [`SPAN_COLUMNS`] after `project_id`
-struct SpanRow {
-    trace_id: String,
-    span_id: String,
-    parent_span_id: Option<String>,
+/// One `spans` row, the [`SPAN_COLUMNS`] after `project_id`, borrowing what
+/// it can from the request it was read from
+struct SpanRow<'a> {
+    trace_id: Cow<'a, str>,
+    span_id: Cow<'a, str>,
+    parent_span_id: Option<Cow<'a, str>>,
     start_time_unix_nano: i64,
     end_time_unix_nano: i64,
     duration_ms: f64,
-    name: String,
+    name: &'a str,
     kind: i32,
     status_code: i32,
-    status_message: Option<String>,
+    status_message: Option<&'a str>,
     span_category: &'static str,
     root_span_type: Option<&'static str>,
-    service_name: Option<String>,
-    http_method: Option<String>,
-    http_url: Option<String>,
+    service_name: Option<Cow<'a, str>>,
+    http_method: Option<Cow<'a, str>>,
+    http_url: Option<Cow<'a, str>>,
     http_status_code: Option<i32>,
-    db_system: Option<String>,
-    db_statement: Option<String>,
-    db_operation: Option<String>,
-    messaging_system: Option<String>,
-    messaging_operation: Option<String>,
-    request_id: Option<String>,
+    db_system: Option<Cow<'a, str>>,
+    db_statement: Option<Cow<'a, str>>,
+    db_operation: Option<Cow<'a, str>>,
+    messaging_system: Option<Cow<'a, str>>,
+    messaging_operation: Option<Cow<'a, str>>,
+    request_id: Option<Cow<'a, str>>,
     attributes_json: String,
     events_json: Option<String>,
-    resource_attributes_json: String,
+    resource_attributes_json: Arc<str>,
     happened_at: Stamp,
 }
 
@@ -597,13 +599,13 @@ pub async fn insert_otlp_batch(
 
     for resource_span in &request.resource_spans {
         let resource_attrs = parse_attributes(
-            &resource_span
+            resource_span
                 .resource
                 .as_ref()
-                .and_then(|r| r.attributes.clone()),
+                .and_then(|r| r.attributes.as_deref()),
         );
         let service_name = resource_attrs.get("service.name").cloned();
-        let resource_json = serde_json::to_string(&resource_attrs)?;
+        let resource_json: Arc<str> = serde_json::to_string(&resource_attrs)?.into();
 
         let scope_spans = match &resource_span.scope_spans {
             Some(ss) => ss,
@@ -612,7 +614,7 @@ pub async fn insert_otlp_batch(
 
         for scope_span in scope_spans {
             for otlp_span in &scope_span.spans {
-                let attrs = parse_attributes(&otlp_span.attributes);
+                let mut attrs = parse_attributes(otlp_span.attributes.as_deref());
                 let kind = otlp_span.kind.unwrap_or(0);
                 let category = SpanCategory::from_attributes(&otlp_span.name, kind, &attrs);
 
@@ -631,7 +633,8 @@ pub async fn insert_otlp_batch(
                 let start_nano = otlp_span.start_time_unix_nano;
                 let end_nano = otlp_span.end_time_unix_nano;
                 let happened_at = Stamp(Timestamp::from_nanosecond(start_nano.into())?);
-                let attr = |keys: &[&str]| keys.iter().find_map(|k| attrs.get(*k)).cloned();
+                let attributes_json = serde_json::to_string(&attrs)?;
+                let mut attr = |keys: &[&str]| keys.iter().find_map(|k| attrs.remove(*k));
 
                 let row = SpanRow {
                     trace_id: decode_id(&otlp_span.trace_id),
@@ -644,10 +647,10 @@ pub async fn insert_otlp_batch(
                     start_time_unix_nano: start_nano,
                     end_time_unix_nano: end_nano,
                     duration_ms: (end_nano - start_nano) as f64 / 1_000_000.0,
-                    name: otlp_span.name.clone(),
+                    name: &otlp_span.name,
                     kind,
                     status_code: otlp_span.status.as_ref().and_then(|s| s.code).unwrap_or(0),
-                    status_message: otlp_span.status.as_ref().and_then(|s| s.message.clone()),
+                    status_message: otlp_span.status.as_ref().and_then(|s| s.message.as_deref()),
                     span_category: category.as_str(),
                     root_span_type: root_span_type.map(|r| r.as_str()),
                     service_name: service_name.clone(),
@@ -664,30 +667,31 @@ pub async fn insert_otlp_batch(
                         "messaging.destination.name",
                     ]),
                     request_id: attr(&["http.request_id", "request_id"]),
-                    attributes_json: serde_json::to_string(&attrs)?,
+                    attributes_json,
                     events_json: otlp_span
                         .events
                         .as_ref()
                         .map(serde_json::to_string)
                         .transpose()?,
-                    resource_attributes_json: resource_json.clone(),
+                    resource_attributes_json: Arc::clone(&resource_json),
                     happened_at,
                 };
 
-                if otlp_span.events.is_some() {
-                    events_by_span.push((&otlp_span.events, row.trace_id.clone(), happened_at));
+                if let Some(events) = &otlp_span.events {
+                    events_by_span.push((events, row.trace_id.clone(), happened_at));
                 }
                 rows.push(row);
             }
         }
     }
-    backend::insert_spans(pool, project_id, &rows).await?;
+    let count = rows.len();
+    backend::insert_spans(pool, project_id, rows).await?;
 
     for (events, trace_id, happened_at) in events_by_span {
         extract_and_insert_errors(pool, events, &trace_id, happened_at, project_id).await;
     }
 
-    Ok(rows.len())
+    Ok(count)
 }
 
 pub async fn list_traces(

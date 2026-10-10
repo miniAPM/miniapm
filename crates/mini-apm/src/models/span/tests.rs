@@ -130,7 +130,7 @@ fn classification_respects_attribute_precedence_and_name_fallbacks() {
     ] {
         let attributes = attributes
             .into_iter()
-            .map(|(k, v)| (k.into(), v.into()))
+            .map(|(k, v)| (k, Cow::Borrowed(v)))
             .collect();
         assert_eq!(
             SpanCategory::from_attributes(name, kind, &attributes),

@@ -94,27 +94,28 @@ static INSERT_SPANS: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-fn column<'r, T>(rows: &'r [SpanRow], field: impl Fn(&'r SpanRow) -> T) -> Vec<T> {
+fn column<'r, 'a, T>(rows: &'r [SpanRow<'a>], field: impl Fn(&'r SpanRow<'a>) -> T) -> Vec<T> {
     rows.iter().map(field).collect()
 }
 
 pub(super) async fn insert_spans(
     pool: &DbPool,
     project_id: Option<i64>,
-    rows: &[SpanRow],
+    rows: Vec<SpanRow<'_>>,
 ) -> anyhow::Result<()> {
+    let rows = rows.as_slice();
     sqlx::query(sqlx::AssertSqlSafe(INSERT_SPANS.as_str()))
         .bind(project_id)
-        .bind(column(rows, |r| r.trace_id.as_str()))
-        .bind(column(rows, |r| r.span_id.as_str()))
+        .bind(column(rows, |r| r.trace_id.as_ref()))
+        .bind(column(rows, |r| r.span_id.as_ref()))
         .bind(column(rows, |r| r.parent_span_id.as_deref()))
         .bind(column(rows, |r| r.start_time_unix_nano))
         .bind(column(rows, |r| r.end_time_unix_nano))
         .bind(column(rows, |r| r.duration_ms))
-        .bind(column(rows, |r| r.name.as_str()))
+        .bind(column(rows, |r| r.name))
         .bind(column(rows, |r| r.kind))
         .bind(column(rows, |r| r.status_code))
-        .bind(column(rows, |r| r.status_message.as_deref()))
+        .bind(column(rows, |r| r.status_message))
         .bind(column(rows, |r| r.span_category))
         .bind(column(rows, |r| r.root_span_type))
         .bind(column(rows, |r| r.service_name.as_deref()))
@@ -129,7 +130,7 @@ pub(super) async fn insert_spans(
         .bind(column(rows, |r| r.request_id.as_deref()))
         .bind(column(rows, |r| r.attributes_json.as_str()))
         .bind(column(rows, |r| r.events_json.as_deref()))
-        .bind(column(rows, |r| r.resource_attributes_json.as_str()))
+        .bind(column(rows, |r| r.resource_attributes_json.as_ref()))
         .bind(column(rows, |r| r.happened_at))
         .execute(pool)
         .await?;

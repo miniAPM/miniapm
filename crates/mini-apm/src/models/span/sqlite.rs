@@ -95,41 +95,42 @@ static INSERT_SPAN: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// Upsert `rows` one statement each, inside a single write transaction
+/// Upsert `rows` one statement each, inside a single write transaction. The
+/// rows are consumed so their owned text moves into the statement uncopied.
 pub(super) async fn insert_spans(
     pool: &DbPool,
     project_id: Option<i64>,
-    rows: &[SpanRow],
+    rows: Vec<SpanRow<'_>>,
 ) -> anyhow::Result<()> {
     let mut tx = db::begin_write(pool).await?;
     for row in rows {
         sqlx::query(sqlx::AssertSqlSafe(INSERT_SPAN.as_str()))
             .bind(project_id)
-            .bind(&row.trace_id)
-            .bind(&row.span_id)
-            .bind(row.parent_span_id.as_deref())
+            .bind(row.trace_id)
+            .bind(row.span_id)
+            .bind(row.parent_span_id)
             .bind(row.start_time_unix_nano)
             .bind(row.end_time_unix_nano)
             .bind(row.duration_ms)
-            .bind(&row.name)
+            .bind(row.name)
             .bind(row.kind)
             .bind(row.status_code)
-            .bind(row.status_message.as_deref())
+            .bind(row.status_message)
             .bind(row.span_category)
             .bind(row.root_span_type)
-            .bind(row.service_name.as_deref())
-            .bind(row.http_method.as_deref())
-            .bind(row.http_url.as_deref())
+            .bind(row.service_name)
+            .bind(row.http_method)
+            .bind(row.http_url)
             .bind(row.http_status_code)
-            .bind(row.db_system.as_deref())
-            .bind(row.db_statement.as_deref())
-            .bind(row.db_operation.as_deref())
-            .bind(row.messaging_system.as_deref())
-            .bind(row.messaging_operation.as_deref())
-            .bind(row.request_id.as_deref())
-            .bind(&row.attributes_json)
-            .bind(row.events_json.as_deref())
-            .bind(&row.resource_attributes_json)
+            .bind(row.db_system)
+            .bind(row.db_statement)
+            .bind(row.db_operation)
+            .bind(row.messaging_system)
+            .bind(row.messaging_operation)
+            .bind(row.request_id)
+            .bind(row.attributes_json)
+            .bind(row.events_json)
+            .bind(row.resource_attributes_json)
             .bind(row.happened_at)
             .execute(&mut *tx)
             .await?;
