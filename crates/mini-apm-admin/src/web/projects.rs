@@ -1,6 +1,7 @@
 use askama::Template;
 use rama::http::service::web::extract::{Form, Query, State};
 use rama::http::service::web::response::{IntoResponse, Redirect};
+use rama::http::{HeaderValue, Response, StatusCode};
 use serde::Deserialize;
 
 use crate::cookies::set_cookie_header;
@@ -44,14 +45,23 @@ pub struct SwitchForm {
     pub slug: String,
 }
 
-pub async fn switch_project(Form(form): Form<SwitchForm>) -> impl IntoResponse {
-    let cookie_header = set_cookie_header(PROJECT_COOKIE, &form.slug, 365 * 86400);
-    rama::http::Response::builder()
-        .status(rama::http::StatusCode::SEE_OTHER)
-        .header("set-cookie", cookie_header)
-        .header("location", "/")
-        .body(rama::http::Body::empty())
-        .unwrap()
+/// Remember the chosen project in a cookie. Slugs are lowercase words joined
+/// by `-`; anything else is refused before it reaches the header.
+pub async fn switch_project(Form(form): Form<SwitchForm>) -> Response {
+    let slug_ok = !form.slug.is_empty()
+        && form
+            .slug
+            .chars()
+            .all(|c| c == '-' || (c.is_alphanumeric() && !c.is_uppercase()));
+    let cookie = HeaderValue::try_from(set_cookie_header(PROJECT_COOKIE, &form.slug, 365 * 86400));
+    match cookie {
+        Ok(cookie) if slug_ok => {
+            let mut response = Redirect::to("/").into_response();
+            response.headers_mut().insert("set-cookie", cookie);
+            response
+        }
+        _ => (StatusCode::BAD_REQUEST, "Invalid project").into_response(),
+    }
 }
 
 #[derive(Deserialize)]

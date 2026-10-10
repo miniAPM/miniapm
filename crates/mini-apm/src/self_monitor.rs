@@ -69,7 +69,8 @@ impl SelfMonitor {
     }
 
     fn record(&self, record: Record) {
-        let _ = self.tx.try_send(record);
+        // A full queue drops the record: monitoring must never slow the app
+        self.tx.try_send(record).ok();
     }
 
     pub async fn trace_job<F, T>(&self, name: &str, job: F) -> anyhow::Result<T>

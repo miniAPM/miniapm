@@ -181,12 +181,14 @@ pub async fn authenticate(
                 .is_some_and(|h| verify_password(password, h)) =>
         {
             // Update last login time
-            let now = Stamp::now();
-            let _ = sqlx::query("UPDATE users SET last_login_at = $1 WHERE id = $2")
-                .bind(now)
+            if let Err(e) = sqlx::query("UPDATE users SET last_login_at = $1 WHERE id = $2")
+                .bind(Stamp::now())
                 .bind(u.id)
                 .execute(pool)
-                .await;
+                .await
+            {
+                tracing::warn!("Failed to record the login of user {}: {e:#}", u.id);
+            }
             Ok(user)
         }
         _ => Ok(None),

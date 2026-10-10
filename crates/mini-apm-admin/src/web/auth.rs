@@ -1,8 +1,8 @@
 use askama::Template;
-use rama::http::Response;
 use rama::http::StatusCode;
 use rama::http::service::web::extract::{Form, Path, State};
-use rama::http::service::web::response::{IntoResponse, Redirect};
+use rama::http::service::web::response::{Html, IntoResponse, Redirect};
+use rama::http::{HeaderValue, Response};
 use serde::Deserialize;
 
 use mini_apm::api::extract::Extension;
@@ -128,11 +128,10 @@ pub async fn login_submit(State(pool): State<DbPool>, Form(form): Form<LoginForm
 }
 
 pub async fn logout() -> Response {
-    let delete_header = delete_cookie_header(SESSION_COOKIE);
+    let delete_header = HeaderValue::try_from(delete_cookie_header(SESSION_COOKIE))
+        .expect("the session cookie name is a header-safe constant");
     let mut response = Redirect::to("/auth/login").into_response();
-    response
-        .headers_mut()
-        .insert("set-cookie", delete_header.parse().unwrap());
+    response.headers_mut().insert("set-cookie", delete_header);
     response
 }
 
@@ -346,13 +345,13 @@ pub struct InviteForm {
 
 /// Rendered when an invite token is missing, unknown, or expired.
 fn invalid_invite_response() -> Response {
-    rama::http::Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .header("content-type", "text/html; charset=utf-8")
-        .body(rama::http::Body::from(
+    (
+        StatusCode::NOT_FOUND,
+        Html(
             "<h1>Invalid or expired invite link</h1><p><a href=\"/auth/login\">Go to login</a></p>",
-        ))
-        .unwrap()
+        ),
+    )
+        .into_response()
 }
 
 async fn find_invited(pool: &DbPool, token: &str) -> Option<models::User> {

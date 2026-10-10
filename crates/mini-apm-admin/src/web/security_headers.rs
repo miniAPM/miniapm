@@ -1,5 +1,5 @@
 use rama::Layer;
-use rama::http::{Request, Response};
+use rama::http::{HeaderValue, Request, Response};
 use rama::service::Service;
 
 /// Layer that adds security headers to all responses
@@ -45,32 +45,38 @@ where
         let headers = response.headers_mut();
 
         // Prevent MIME type sniffing
-        headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
+        headers.insert(
+            "X-Content-Type-Options",
+            HeaderValue::from_static("nosniff"),
+        );
 
         // Prevent clickjacking
-        headers.insert("X-Frame-Options", "DENY".parse().unwrap());
+        headers.insert("X-Frame-Options", HeaderValue::from_static("DENY"));
 
         // XSS protection (legacy but still useful)
-        headers.insert("X-XSS-Protection", "1; mode=block".parse().unwrap());
+        headers.insert(
+            "X-XSS-Protection",
+            HeaderValue::from_static("1; mode=block"),
+        );
 
         // Control referrer information
         headers.insert(
             "Referrer-Policy",
-            "strict-origin-when-cross-origin".parse().unwrap(),
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
         );
 
         // Content Security Policy
         // Allow 'unsafe-inline' for styles and scripts since we use inline styles in templates
         headers.insert(
             "Content-Security-Policy",
-            "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'".parse().unwrap(),
+            HeaderValue::from_static("default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'"),
         );
 
         // Prevent caching of sensitive pages
         if !has_cache_control {
             headers.insert(
                 "Cache-Control",
-                "no-store, no-cache, must-revalidate".parse().unwrap(),
+                HeaderValue::from_static("no-store, no-cache, must-revalidate"),
             );
         }
 

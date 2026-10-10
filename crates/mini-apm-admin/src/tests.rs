@@ -120,12 +120,22 @@ async fn test_pages_follow_selected_project() {
 }
 
 #[tokio::test]
-async fn test_form_posts_redirect_with_see_other() {
+async fn test_form_posts_redirect_with_see_other_and_reject_malformed_input() {
     let app = app().await;
-    for (uri, form) in [
-        ("/projects/switch", "slug=default"),
-        ("/errors/1/status", "status=resolved"),
-        ("/auth/logout", ""),
+    for (uri, form, expected) in [
+        ("/projects/switch", "slug=default", StatusCode::SEE_OTHER),
+        ("/errors/1/status", "status=resolved", StatusCode::SEE_OTHER),
+        ("/auth/logout", "", StatusCode::SEE_OTHER),
+        (
+            "/projects/switch",
+            "slug=bad%0Aslug",
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            "/projects/switch",
+            "slug=x%3B%20Domain%3Devil",
+            StatusCode::BAD_REQUEST,
+        ),
     ] {
         let mut req = request(uri, "203.0.113.1", None);
         *req.method_mut() = rama::http::Method::POST;
@@ -135,8 +145,10 @@ async fn test_form_posts_redirect_with_see_other() {
         );
         *req.body_mut() = Body::from(form);
         let res = app.serve(req).await.unwrap();
-        assert_eq!(res.status(), StatusCode::SEE_OTHER, "{uri}");
-        if uri == "/projects/switch" {
+        assert_eq!(res.status(), expected, "{uri} {form}");
+        if expected == StatusCode::BAD_REQUEST {
+            assert!(res.headers().get("set-cookie").is_none(), "{form}");
+        } else if uri == "/projects/switch" {
             assert_eq!(res.headers().get("location").unwrap(), "/");
             assert_eq!(
                 res.headers().get("set-cookie").unwrap(),
