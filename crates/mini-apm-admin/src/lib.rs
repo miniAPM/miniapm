@@ -138,6 +138,10 @@ fn static_dir() -> PathBuf {
 /// the local network, then the client address the proxy appended to
 /// X-Forwarded-For. Earlier entries are client-supplied and ignored.
 /// IPv6 clients share a bucket per /64 so they cannot rotate addresses.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "rama's rate limit key function returns a Result"
+)]
 fn client_rate_key(req: &Request) -> Result<Option<IpAddr>, BoxError> {
     let Some(peer) = req
         .extensions()
@@ -157,12 +161,12 @@ fn client_rate_key(req: &Request) -> Result<Option<IpAddr>, BoxError> {
     };
 
     Ok(Some(match client {
-        IpAddr::V6(v6) => IpAddr::V6(Ipv6Addr::from_bits(v6.to_bits() & !(u64::MAX as u128))),
-        v4 => v4,
+        IpAddr::V6(v6) => IpAddr::V6(Ipv6Addr::from_bits(v6.to_bits() & !u128::from(u64::MAX))),
+        IpAddr::V4(v4) => IpAddr::V4(v4),
     }))
 }
 
-fn is_local(ip: IpAddr) -> bool {
+const fn is_local(ip: IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => v4.is_loopback() || v4.is_private(),
         IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local(),

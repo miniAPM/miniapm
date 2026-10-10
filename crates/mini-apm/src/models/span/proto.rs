@@ -44,8 +44,8 @@ fn span(s: trace::Span) -> OtlpSpan {
         parent_span_id: (!s.parent_span_id.is_empty()).then(|| hex::encode(s.parent_span_id)),
         name: s.name,
         kind: Some(s.kind),
-        start_time_unix_nano: s.start_time_unix_nano as i64,
-        end_time_unix_nano: s.end_time_unix_nano as i64,
+        start_time_unix_nano: s.start_time_unix_nano.cast_signed(),
+        end_time_unix_nano: s.end_time_unix_nano.cast_signed(),
         attributes: Some(attributes(s.attributes)),
         events: Some(
             s.events
@@ -90,7 +90,7 @@ fn value(v: Option<common::AnyValue>) -> AttributeValue {
         Some(Value::ArrayValue(a)) => {
             out.array_value = Some(ArrayValue {
                 values: Some(a.values.into_iter().map(|v| value(Some(v))).collect()),
-            })
+            });
         }
         Some(Value::KvlistValue(_) | Value::StringValueStrindex(_)) | None => {}
     }

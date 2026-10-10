@@ -34,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
 async fn run(pool: DbPool, port: u16) -> anyhow::Result<()> {
     let app = make_app(pool.clone());
 
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("0.0.0.0:{port}");
     tracing::info!("MiniAPM Admin listening on http://{}", addr);
 
     serve_with_graceful_shutdown(addr, app).await

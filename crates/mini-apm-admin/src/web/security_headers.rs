@@ -7,7 +7,7 @@ use rama::service::Service;
 pub struct SecurityHeadersMiddleware;
 
 impl SecurityHeadersMiddleware {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self
     }
 }

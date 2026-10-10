@@ -46,7 +46,7 @@ pub async fn index(
         "https"
     };
 
-    let base_url = format!("{}://{}", scheme, host);
+    let base_url = format!("{scheme}://{host}");
 
     HtmlTemplate(DeploysTemplate {
         deploys,

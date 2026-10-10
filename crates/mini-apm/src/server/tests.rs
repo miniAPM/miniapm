@@ -1,12 +1,13 @@
 use super::*;
 use crate::db;
+use crate::models::span::{self, RootSpanType};
 use rama::http::{Body, Method, StatusCode};
 
 fn post_error(authorization: Option<&str>, message: &str) -> Request {
     post_json(
         "/ingest/errors",
         authorization,
-        serde_json::json!({
+        &serde_json::json!({
             "exception_class": "E",
             "message": message,
             "backtrace": [],
@@ -15,7 +16,7 @@ fn post_error(authorization: Option<&str>, message: &str) -> Request {
     )
 }
 
-fn post_json(uri: &str, authorization: Option<&str>, payload: serde_json::Value) -> Request {
+fn post_json(uri: &str, authorization: Option<&str>, payload: &serde_json::Value) -> Request {
     let mut req = Request::builder()
         .method(Method::POST)
         .uri(uri)
@@ -112,7 +113,7 @@ async fn test_errors_from_one_location_share_a_group() {
 #[tokio::test]
 async fn test_routes_and_traces_summarize_filter_and_count() {
     let (app, pool, project) = setup().await;
-    let now = jiff::Timestamp::now().as_nanosecond() as i64;
+    let now = i64::try_from(jiff::Timestamp::now().as_nanosecond()).unwrap();
     let span = |trace: u32, id: u32, parent: Option<u32>, name: &str, ms: i64| {
         let (kind, attribute, parent) = match parent {
             Some(p) => (
@@ -175,7 +176,6 @@ async fn test_routes_and_traces_summarize_filter_and_count() {
         ]
     );
 
-    use models::span::{self, RootSpanType};
     for (search, expected) in [(None, 2), (Some("/A"), 1), (Some("nothing"), 0)] {
         let listed = span::routes_summary(&pool, Some(project.id), since, search, "requests", 10)
             .await
@@ -184,7 +184,7 @@ async fn test_routes_and_traces_summarize_filter_and_count() {
             .await
             .unwrap();
         assert_eq!(
-            (listed.len() as i64, count),
+            (i64::try_from(listed.len()).unwrap(), count),
             (expected, expected),
             "{search:?}"
         );
@@ -207,7 +207,7 @@ async fn test_routes_and_traces_summarize_filter_and_count() {
                 .await
                 .unwrap();
         assert_eq!(
-            (listed.len() as i64, count),
+            (i64::try_from(listed.len()).unwrap(), count),
             (expected, expected),
             "{filter:?}"
         );
@@ -304,7 +304,7 @@ async fn test_ingest_otlp_protobuf_and_grpc() {
     };
     let grpc_frame = |message: Vec<u8>| {
         let mut frame = vec![0];
-        frame.extend((message.len() as u32).to_be_bytes());
+        frame.extend(u32::try_from(message.len()).unwrap().to_be_bytes());
         frame.extend(message);
         frame
     };
@@ -452,7 +452,7 @@ async fn error_ingestion_persists_occurrence_details_and_source_context() -> any
     let request = post_json(
         "/ingest/errors",
         Some(&format!("Bearer {}", project.api_key)),
-        json!({
+        &json!({
             "exception_class": "NoMethodError",
             "message": "undefined method 'foo'",
             "fingerprint": "source-context",
@@ -522,7 +522,7 @@ async fn error_batches_handle_empty_partial_and_total_storage_failures() -> anyh
             .serve(post_json(
                 "/ingest/errors/batch",
                 Some(&format!("Bearer {}", project.api_key)),
-                json!({"errors": errors}),
+                &json!({"errors": errors}),
             ))
             .await?;
         assert_eq!(response.status(), expected_status, "{classes:?}");
@@ -544,7 +544,7 @@ async fn empty_trace_batches_are_accepted_without_creating_spans() -> anyhow::Re
         .serve(post_json(
             "/ingest/v1/traces",
             Some(&format!("Bearer {}", project.api_key)),
-            serde_json::json!({"resourceSpans": []}),
+            &serde_json::json!({"resourceSpans": []}),
         ))
         .await?;
     assert_eq!(response.status(), StatusCode::ACCEPTED);

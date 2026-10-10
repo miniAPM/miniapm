@@ -31,7 +31,7 @@ pub struct WebAuthMiddleware {
 }
 
 impl WebAuthMiddleware {
-    pub fn new(state: AppState) -> Self {
+    pub const fn new(state: AppState) -> Self {
         Self { state }
     }
 }
@@ -100,9 +100,8 @@ where
             }
 
             // Get session token from cookie
-            let token = match get_cookie(&req, SESSION_COOKIE) {
-                Some(token) => token,
-                None => return Ok(Redirect::to("/auth/login").into_response()),
+            let Some(token) = get_cookie(&req, SESSION_COOKIE) else {
+                return Ok(Redirect::to("/auth/login").into_response());
             };
 
             // Validate session

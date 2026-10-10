@@ -8,13 +8,13 @@ use crate::time;
 pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec<i64>> {
     // Get occurrence counts per hour for the last 24 hours
     let rows: Vec<(String, i64)> = sqlx::query_as(
-        r#"
+        r"
         SELECT strftime('%Y-%m-%d %H', happened_at) as hour, COUNT(*) as cnt
         FROM error_occurrences
         WHERE error_id = $1 AND happened_at >= $2
         GROUP BY hour
         ORDER BY hour ASC
-        "#,
+        ",
     )
     .bind(error_id)
     .bind(time::hours_ago(24))
@@ -41,7 +41,7 @@ pub async fn hourly_error_stats(
 ) -> anyhow::Result<Vec<ErrorTrendPoint>> {
     // Collect data into a HashMap for lookup
     let rows: Vec<(String, i64)> = sqlx::query_as(
-        r#"
+        r"
         SELECT strftime('%Y-%m-%d %H:00', eo.happened_at) as hour_label, COUNT(*) as cnt
         FROM error_occurrences eo
         JOIN errors e ON e.id = eo.error_id
@@ -49,7 +49,7 @@ pub async fn hourly_error_stats(
           AND ($1 IS NULL OR e.project_id = $1)
         GROUP BY strftime('%Y-%m-%d %H', eo.happened_at)
         ORDER BY eo.happened_at ASC
-        "#,
+        ",
     )
     .bind(project_id)
     .bind(time::hours_ago(hours))
@@ -59,14 +59,14 @@ pub async fn hourly_error_stats(
     let mut data_points: std::collections::HashMap<String, i64> = rows.into_iter().collect();
 
     // Fill in all hours with zeros for missing data
-    let mut points = Vec::with_capacity(hours as usize);
-    for i in (0..hours).rev() {
-        let hour_key = time::hours_ago(i).hour_label();
-        points.push(ErrorTrendPoint {
-            count: data_points.remove(&hour_key).unwrap_or(0),
-            hour: hour_key,
-        });
-    }
+    let points = (0..hours)
+        .rev()
+        .map(|i| {
+            let hour = time::hours_ago(i).hour_label();
+            let count = data_points.remove(&hour).unwrap_or(0);
+            ErrorTrendPoint { hour, count }
+        })
+        .collect();
 
     Ok(points)
 }

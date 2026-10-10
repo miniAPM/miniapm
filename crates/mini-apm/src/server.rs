@@ -70,7 +70,7 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
 
     let app = make_app(AppState { pool, config });
 
-    let addr = format!("0.0.0.0:{}", port);
+    let addr = format!("0.0.0.0:{port}");
     tracing::info!("MiniAPM collector listening on http://{} (API only)", addr);
 
     serve_with_graceful_shutdown(addr, app).await
@@ -142,7 +142,7 @@ where
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received Ctrl+C, starting graceful shutdown...");
         }
-        _ = async {
+        () = async {
             #[cfg(unix)]
             {
                 let mut sigterm = tokio::signal::unix::signal(
@@ -162,7 +162,7 @@ where
     graceful
         .shutdown_with_limit(Duration::from_secs(30))
         .await
-        .map_err(|e| anyhow::anyhow!("Graceful shutdown failed: {:?}", e))?;
+        .map_err(|e| anyhow::anyhow!("Graceful shutdown failed: {e:?}"))?;
 
     tracing::info!("Server shutdown complete");
     Ok(())

@@ -24,7 +24,7 @@ pub struct HealthResponse {
 }
 
 pub async fn health_handler(State(pool): State<DbPool>) -> (StatusCode, Json<HealthResponse>) {
-    let uptime_seconds = START_TIME.get().map(|t| t.elapsed().as_secs()).unwrap_or(0);
+    let uptime_seconds = START_TIME.get().map_or(0, |t| t.elapsed().as_secs());
 
     // Actually verify database connectivity
     let db_ok = sqlx::query("SELECT 1").execute(&pool).await.is_ok();

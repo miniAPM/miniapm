@@ -28,13 +28,10 @@ pub fn get_cookie_from_headers(headers: &HeaderMap, name: &str) -> Option<String
 
 /// Generate a Set-Cookie header value
 pub fn set_cookie_header(name: &str, value: &str, max_age: i64) -> String {
-    format!(
-        "{}={}; Max-Age={}; Path=/; HttpOnly; SameSite=Lax",
-        name, value, max_age
-    )
+    format!("{name}={value}; Max-Age={max_age}; Path=/; HttpOnly; SameSite=Lax")
 }
 
 /// Generate a Set-Cookie header to delete a cookie
 pub fn delete_cookie_header(name: &str) -> String {
-    format!("{}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax", name)
+    format!("{name}=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax")
 }

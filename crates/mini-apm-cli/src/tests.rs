@@ -1,15 +1,15 @@
 use super::*;
 
 fn parse(args: &[&str]) -> Result<(String, Vec<Option<String>>), cli::Exit> {
-    let argv: Vec<String> = std::iter::once("miniapm-cli")
+    let command_line: Vec<String> = std::iter::once("miniapm-cli")
         .chain(args.iter().copied())
         .map(String::from)
         .collect();
-    let out = cli::parse(USAGE, &argv)?;
+    let out = cli::parse(USAGE, &command_line)?;
     let values = ["project", "username", "password"]
         .map(|n| cli::value(&out, n).map(String::from))
         .to_vec();
-    Ok((out.cmd.name.clone(), values))
+    Ok((out.cmd.name, values))
 }
 
 #[test]

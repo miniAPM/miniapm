@@ -189,7 +189,7 @@ pub async fn change_password_submit(
         .await
         .inspect_err(|e| tracing::error!("Failed to change password: {e:#}"))
     {
-        Ok(_) => Redirect::to("/").into_response(),
+        Ok(()) => Redirect::to("/").into_response(),
         Err(_) => fail("Failed to change password"),
     }
 }
@@ -321,7 +321,7 @@ pub async fn delete_user(
         .await
         .inspect_err(|e| tracing::error!("Failed to delete user: {e:#}"))
     {
-        Ok(_) => {
+        Ok(()) => {
             render_users_page(
                 &pool,
                 current_user.id,

@@ -1,4 +1,4 @@
-//! MiniAPM monitoring itself. Requests and errors of the collector and the
+//! `MiniAPM` monitoring itself. Requests and errors of the collector and the
 //! admin are recorded into the `self` project through the regular ingest
 //! code, handed over in-process instead of over HTTP.
 
@@ -64,7 +64,7 @@ impl SelfMonitor {
         }
     }
 
-    pub fn global() -> Option<&'static SelfMonitor> {
+    pub fn global() -> Option<&'static Self> {
         GLOBAL.get()
     }
 
@@ -79,13 +79,13 @@ impl SelfMonitor {
     {
         let trace = Trace::start();
         let result = job.instrument(trace.span.clone()).await;
-        self.record_trace(trace, name.to_string(), 5, vec![], result.is_err());
+        self.record_trace(&trace, name.to_string(), 5, vec![], result.is_err());
         result
     }
 
     fn record_trace(
         &self,
-        trace: Trace,
+        trace: &Trace,
         name: String,
         kind: i32,
         attributes: Vec<span::KeyValue>,
@@ -188,10 +188,14 @@ struct Query {
 }
 
 fn nanos(ts: Timestamp) -> i64 {
-    ts.as_nanosecond() as i64
+    i64::try_from(ts.as_nanosecond()).unwrap_or(i64::MAX)
 }
 
 /// Collapse ids and tokens in a path so requests group by route
+#[expect(
+    clippy::literal_string_with_formatting_args,
+    reason = "{id} is a route placeholder"
+)]
 fn route_of(path: &str) -> String {
     path.split('/')
         .map(|segment| {
@@ -263,7 +267,7 @@ pub struct SelfMonitorLayer {
 }
 
 impl SelfMonitorLayer {
-    pub fn new(monitor: Option<SelfMonitor>) -> Self {
+    pub const fn new(monitor: Option<SelfMonitor>) -> Self {
         Self { monitor }
     }
 
@@ -316,7 +320,7 @@ where
         let res = self.inner.serve(req).instrument(trace.span.clone()).await?;
         let status = res.status().as_u16();
         monitor.record_trace(
-            trace,
+            &trace,
             format!("{method} {}", route_of(&path)),
             2,
             vec![
@@ -381,7 +385,7 @@ where
             }
             return;
         }
-        if *meta.level() != Level::ERROR || WRITING.try_with(|_| ()).is_ok() {
+        if *meta.level() != Level::ERROR || WRITING.try_with(|()| ()).is_ok() {
             return;
         }
         let Some(monitor) = self.monitor.get() else {

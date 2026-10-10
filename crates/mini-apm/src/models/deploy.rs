@@ -43,11 +43,11 @@ pub async fn insert(
     let timestamp = Stamp(deploy.timestamp.unwrap_or_else(Timestamp::now));
 
     let id = sqlx::query_scalar(
-        r#"
+        r"
         INSERT INTO deploys (project_id, git_sha, version, env, deployed_at, description, deployer)
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
-        "#,
+        ",
     )
     .bind(project_id)
     .bind(&deploy.git_sha)

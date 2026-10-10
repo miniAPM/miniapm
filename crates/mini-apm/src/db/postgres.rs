@@ -69,11 +69,11 @@ pub fn in_text_list(param: u8) -> String {
 }
 
 /// Bind value for [`in_text_list`]
-pub fn text_list<'a>(items: &'a [&'a str]) -> &'a [&'a str] {
+pub const fn text_list<'a>(items: &'a [&'a str]) -> &'a [&'a str] {
     items
 }
 
-/// Run `job` unless another MiniAPM instance on this database is running the
+/// Run `job` unless another `MiniAPM` instance on this database is running the
 /// job called `name`, and say whether it ran. The advisory lock lives on one
 /// connection, so a crashed instance releases it.
 pub async fn exclusively(

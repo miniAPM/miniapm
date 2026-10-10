@@ -6,7 +6,7 @@ use std::time::Duration;
 use tokio::time::interval;
 
 const HOUR: Duration = Duration::from_secs(3600);
-const DAY: Duration = Duration::from_secs(86400);
+const DAY: Duration = Duration::from_hours(24);
 
 pub fn start(pool: DbPool, config: Config) {
     let p = pool.clone();

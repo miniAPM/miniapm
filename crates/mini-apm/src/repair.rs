@@ -10,9 +10,11 @@ mod tests;
 
 const OTLP_IDS: &str = "repair.otlp_hex_ids";
 
-/// Span and trace ids sent as hex were decoded as base64 before storing,
-/// turning 32 and 16 character ids into 48 and 24 characters. Encoding the
-/// stored bytes back to base64 restores the text the client sent.
+/// Restore span and trace ids that an earlier version stored mangled.
+///
+/// Ids sent as hex were decoded as base64 before storing, turning 32 and 16
+/// character ids into 48 and 24 characters. Encoding the stored bytes back
+/// to base64 restores the text the client sent.
 pub async fn otlp_ids(pool: &DbPool) -> anyhow::Result<u64> {
     let done: Option<String> = sqlx::query_scalar("SELECT value FROM settings WHERE key = $1")
         .bind(OTLP_IDS)
@@ -78,6 +80,8 @@ fn restore(stored: &str, mangled_len: usize) -> String {
         .map(|bytes| STANDARD.encode(bytes))
         .ok()
         .filter(|original| original.bytes().all(|b| b.is_ascii_hexdigit()))
-        .map(|original| original.to_ascii_lowercase())
-        .unwrap_or_else(|| stored.to_string())
+        .map_or_else(
+            || stored.to_string(),
+            |original| original.to_ascii_lowercase(),
+        )
 }

@@ -6,6 +6,7 @@ use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize};
 use sqlx::Row;
 use std::borrow::Cow;
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
@@ -113,8 +114,8 @@ enum Int64 {
 impl Int64 {
     fn into_i64<E: serde::de::Error>(self) -> Result<i64, E> {
         match self {
-            Int64::Number(n) => Ok(n),
-            Int64::String(s) => s.parse().map_err(E::custom),
+            Self::Number(n) => Ok(n),
+            Self::String(s) => s.parse().map_err(E::custom),
         }
     }
 }
@@ -135,7 +136,7 @@ pub struct SpanStatus {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SpanCategory {
     HttpServer,
@@ -154,9 +155,9 @@ impl SpanCategory {
         if attributes.contains_key("db.system") || attributes.contains_key("db.statement") {
             let db_system = attributes.get("db.system").map_or("", |s| s.as_ref());
             if db_system == "elasticsearch" || db_system == "opensearch" {
-                return SpanCategory::Search;
+                return Self::Search;
             }
-            return SpanCategory::Db;
+            return Self::Db;
         }
 
         // Check for HTTP spans
@@ -168,10 +169,10 @@ impl SpanCategory {
         if has_http {
             // kind: 2 = SERVER, 3 = CLIENT
             if kind == 3 {
-                return SpanCategory::HttpClient;
+                return Self::HttpClient;
             }
             if kind == 2 {
-                return SpanCategory::HttpServer;
+                return Self::HttpServer;
             }
         }
 
@@ -184,18 +185,18 @@ impl SpanCategory {
             || name.contains(".slim")
             || name.contains("ActionView")
         {
-            return SpanCategory::View;
+            return Self::View;
         }
 
         // Check for messaging/job spans
         // kind: 4 = PRODUCER, 5 = CONSUMER
         if kind == 4 || kind == 5 {
-            return SpanCategory::Job;
+            return Self::Job;
         }
         if attributes.contains_key("messaging.system")
             || attributes.contains_key("messaging.destination.name")
         {
-            return SpanCategory::Job;
+            return Self::Job;
         }
 
         // Check by name patterns
@@ -205,7 +206,7 @@ impl SpanCategory {
             || name_lower.contains("active_job")
             || name_lower.contains("perform")
         {
-            return SpanCategory::Job;
+            return Self::Job;
         }
 
         // Command runners: rake, thor, make, etc.
@@ -215,40 +216,40 @@ impl SpanCategory {
             || name_lower.starts_with("thor:")
             || name_lower.starts_with("make:")
         {
-            return SpanCategory::Command;
+            return Self::Command;
         }
 
-        SpanCategory::Internal
+        Self::Internal
     }
 
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            SpanCategory::HttpServer => "http_server",
-            SpanCategory::HttpClient => "http_client",
-            SpanCategory::Db => "db",
-            SpanCategory::View => "view",
-            SpanCategory::Search => "search",
-            SpanCategory::Job => "job",
-            SpanCategory::Command => "command",
-            SpanCategory::Internal => "internal",
+            Self::HttpServer => "http_server",
+            Self::HttpClient => "http_client",
+            Self::Db => "db",
+            Self::View => "view",
+            Self::Search => "search",
+            Self::Job => "job",
+            Self::Command => "command",
+            Self::Internal => "internal",
         }
     }
 
     pub fn parse(s: &str) -> Self {
         match s {
-            "http_server" => SpanCategory::HttpServer,
-            "http_client" => SpanCategory::HttpClient,
-            "db" => SpanCategory::Db,
-            "view" => SpanCategory::View,
-            "search" => SpanCategory::Search,
-            "job" => SpanCategory::Job,
-            "command" => SpanCategory::Command,
-            _ => SpanCategory::Internal,
+            "http_server" => Self::HttpServer,
+            "http_client" => Self::HttpClient,
+            "db" => Self::Db,
+            "view" => Self::View,
+            "search" => Self::Search,
+            "job" => Self::Job,
+            "command" => Self::Command,
+            _ => Self::Internal,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RootSpanType {
     Web,
@@ -257,28 +258,28 @@ pub enum RootSpanType {
 }
 
 impl RootSpanType {
-    pub fn from_category(category: SpanCategory) -> Option<Self> {
+    pub const fn from_category(category: SpanCategory) -> Option<Self> {
         match category {
-            SpanCategory::HttpServer => Some(RootSpanType::Web),
-            SpanCategory::Job => Some(RootSpanType::Job),
-            SpanCategory::Command => Some(RootSpanType::Command),
+            SpanCategory::HttpServer => Some(Self::Web),
+            SpanCategory::Job => Some(Self::Job),
+            SpanCategory::Command => Some(Self::Command),
             _ => None,
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
-            RootSpanType::Web => "web",
-            RootSpanType::Job => "job",
-            RootSpanType::Command => "command",
+            Self::Web => "web",
+            Self::Job => "job",
+            Self::Command => "command",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "web" => Some(RootSpanType::Web),
-            "job" => Some(RootSpanType::Job),
-            "command" => Some(RootSpanType::Command),
+            "web" => Some(Self::Web),
+            "job" => Some(Self::Job),
+            "command" => Some(Self::Command),
             _ => None,
         }
     }
@@ -300,8 +301,8 @@ pub struct TraceSummary {
 }
 
 /// Map a row with the canonical trace summary column order:
-/// trace_id, root_span_name, root_span_type, duration_ms, span_count,
-/// status_code, service_name, http_method, http_url, http_status_code, happened_at
+/// `trace_id`, `root_span_name`, `root_span_type`, `duration_ms`, `span_count`,
+/// `status_code`, `service_name`, `http_method`, `http_url`, `http_status_code`, `happened_at`
 fn map_trace_summary_row(row: &DbRow) -> Result<TraceSummary, sqlx::Error> {
     Ok(TraceSummary {
         trace_id: row.try_get(0)?,
@@ -350,7 +351,7 @@ impl TraceSummary {
                     }
                 });
 
-            format!("{} {}", method, path)
+            format!("{method} {path}")
         } else {
             // For jobs/rake tasks, just use the span name as-is
             self.root_span_name.clone()
@@ -358,7 +359,7 @@ impl TraceSummary {
     }
 
     /// Returns a CSS class for the status
-    pub fn status_class(&self) -> &'static str {
+    pub const fn status_class(&self) -> &'static str {
         if let Some(code) = self.http_status_code {
             if code >= 500 {
                 "status-error"
@@ -386,8 +387,8 @@ impl TraceSummary {
     }
 
     /// Returns duration in ms rounded to nearest integer
-    pub fn duration_ms_rounded(&self) -> i64 {
-        self.duration_ms.round() as i64
+    pub const fn duration_ms_rounded(&self) -> i64 {
+        round_i64(self.duration_ms)
     }
 }
 
@@ -607,9 +608,8 @@ pub async fn insert_otlp_batch(
         let service_name = resource_attrs.get("service.name").cloned();
         let resource_json: Arc<str> = serde_json::to_string(&resource_attrs)?.into();
 
-        let scope_spans = match &resource_span.scope_spans {
-            Some(ss) => ss,
-            None => continue,
+        let Some(scope_spans) = &resource_span.scope_spans else {
+            continue;
         };
 
         for scope_span in scope_spans {
@@ -622,8 +622,7 @@ pub async fn insert_otlp_batch(
                     || otlp_span
                         .parent_span_id
                         .as_ref()
-                        .map(|s| s.is_empty())
-                        .unwrap_or(true);
+                        .is_none_or(std::string::String::is_empty);
                 let root_span_type = if is_root {
                     RootSpanType::from_category(category)
                 } else {
@@ -767,7 +766,7 @@ pub async fn list_traces_paginated(
     };
 
     let sql = format!(
-        r#"
+        r"
         SELECT
             s.trace_id,
             s.name as root_span_name,
@@ -784,7 +783,7 @@ pub async fn list_traces_paginated(
         {TRACE_FILTER}
         ORDER BY {order_clause}
         LIMIT $6 OFFSET $7
-        "#
+        "
     );
 
     let root_type_str = root_type_filter.map(|r| r.as_str());
@@ -826,6 +825,23 @@ pub async fn count_traces_filtered(
         .await?)
 }
 
+/// How deep `span_id` sits below its trace's root, memoized in `depths`
+fn compute_depth<'a>(
+    span_id: &'a str,
+    parents: &HashMap<&'a str, Option<&'a str>>,
+    depths: &mut HashMap<&'a str, i32>,
+) -> i32 {
+    if let Some(&cached) = depths.get(span_id) {
+        return cached;
+    }
+    let depth = match parents.get(span_id).copied().flatten() {
+        Some(parent_id) => compute_depth(parent_id, parents, depths) + 1,
+        None => 0,
+    };
+    depths.insert(span_id, depth);
+    depth
+}
+
 pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<TraceDetail>> {
     #[allow(clippy::type_complexity)]
     let spans: Vec<(
@@ -843,14 +859,14 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
         Option<String>,
         Option<String>,
     )> = sqlx::query_as(
-        r#"
+        r"
         SELECT id, span_id, parent_span_id, name, span_category,
                duration_ms, start_time_unix_nano, status_code,
                http_method, http_status_code, db_operation, db_system, db_statement
         FROM spans
         WHERE trace_id = $1
         ORDER BY start_time_unix_nano ASC
-        "#,
+        ",
     )
     .bind(trace_id)
     .fetch_all(pool)
@@ -864,7 +880,7 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
     let trace_start = spans.iter().map(|s| s.6).min().unwrap_or(0);
     let trace_end = spans
         .iter()
-        .map(|s| s.6 + (s.5 * 1_000_000.0) as i64)
+        .map(|s| s.6 + round_i64(s.5 * 1_000_000.0))
         .max()
         .unwrap_or(0);
     let total_duration_ms = (trace_end - trace_start) as f64 / 1_000_000.0;
@@ -874,22 +890,6 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
         .iter()
         .map(|s| (s.1.as_str(), s.2.as_deref()))
         .collect();
-
-    fn compute_depth<'a>(
-        span_id: &'a str,
-        parents: &HashMap<&'a str, Option<&'a str>>,
-        depths: &mut HashMap<&'a str, i32>,
-    ) -> i32 {
-        if let Some(&cached) = depths.get(span_id) {
-            return cached;
-        }
-        let depth = match parents.get(span_id).copied().flatten() {
-            Some(parent_id) => compute_depth(parent_id, parents, depths) + 1,
-            None => 0,
-        };
-        depths.insert(span_id, depth);
-        depth
-    }
 
     let mut depths = HashMap::new();
     let span_depths: Vec<i32> = spans
@@ -901,8 +901,7 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
         .into_iter()
         .zip(span_depths)
         .map(|(s, depth)| {
-            let offset_ns = s.6 - trace_start;
-            let offset_ms = offset_ns as f64 / 1_000_000.0;
+            let offset_ms = (s.6 - trace_start) as f64 / 1_000_000.0;
             let offset_percent = if total_duration_ms > 0.0 {
                 (offset_ms / total_duration_ms) * 100.0
             } else {
@@ -944,6 +943,15 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
     }))
 }
 
+/// A duration rounded to the nearest whole unit
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "durations are far inside i64"
+)]
+pub(crate) const fn round_i64(duration: f64) -> i64 {
+    duration.round() as i64
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct LatencyStats {
     pub avg_ms: i64,
@@ -958,7 +966,7 @@ pub async fn slow_traces(
     limit: i64,
 ) -> anyhow::Result<Vec<TraceSummary>> {
     let rows = sqlx::query(
-        r#"
+        r"
         SELECT
             s.trace_id,
             s.name as root_span_name,
@@ -977,7 +985,7 @@ pub async fn slow_traces(
           AND ($2 IS NULL OR s.project_id = $2)
         ORDER BY s.duration_ms DESC
         LIMIT $3
-        "#,
+        ",
     )
     .bind(threshold_ms)
     .bind(project_id)
@@ -1036,7 +1044,7 @@ pub async fn routes_summary(
     // Get unique routes with basic stats
     let routes: Vec<(String, String, i64, f64, f64, f64, i64)> =
         sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        r#"
+        r"
         SELECT
             name AS path,
             COALESCE(http_method, 'GET') as method,
@@ -1050,7 +1058,7 @@ pub async fn routes_summary(
         GROUP BY name, COALESCE(http_method, 'GET')
         ORDER BY request_count DESC
         LIMIT $4
-        "#
+        "
     )))
     .bind(project_id)
     .bind(since)
@@ -1076,11 +1084,11 @@ pub async fn routes_summary(
             path,
             method,
             request_count,
-            avg_ms: avg_ms.round() as i64,
+            avg_ms: round_i64(avg_ms),
             p95_ms: p95,
             p99_ms: p99,
-            max_ms: max_ms.round() as i64,
-            min_ms: min_ms.round() as i64,
+            max_ms: round_i64(max_ms),
+            min_ms: round_i64(min_ms),
             avg_db_ms,
             avg_db_count,
             error_count,
@@ -1089,7 +1097,6 @@ pub async fn routes_summary(
     }
 
     // Sort by requested field
-    use std::cmp::Reverse;
     match sort {
         "avg" => result.sort_by_key(|r| Reverse(r.avg_ms)),
         "p95" => result.sort_by_key(|r| Reverse(r.p95_ms)),
@@ -1129,7 +1136,7 @@ async fn route_db_stats(
 ) -> anyhow::Result<HashMap<String, (i64, i64)>> {
     let in_paths = db::in_text_list(3);
     let rows: Vec<(String, f64, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        r#"
+        r"
         WITH roots AS (
             SELECT trace_id, name AS path
             FROM spans
@@ -1149,7 +1156,7 @@ async fn route_db_stats(
         FROM roots
         JOIN db ON db.trace_id = roots.trace_id
         GROUP BY roots.path
-        "#
+        "
     )))
     .bind(project_id)
     .bind(since)
@@ -1159,11 +1166,11 @@ async fn route_db_stats(
 
     Ok(rows
         .into_iter()
-        .map(|(path, db_ms, db_count)| (path, (db_ms.round() as i64, db_count.round() as i64)))
+        .map(|(path, db_ms, db_count)| (path, (round_i64(db_ms), round_i64(db_count))))
         .collect())
 }
 
-const N_PLUS_1_THRESHOLD: usize = 5;
+const N_PLUS_1_THRESHOLD: u8 = 5;
 
 /// Normalize a SQL statement by replacing literal values with placeholders
 /// This helps group similar queries together
@@ -1196,8 +1203,7 @@ fn normalize_sql(sql: &str) -> String {
             // Skip numbers that appear to be values
             while chars
                 .peek()
-                .map(|ch| ch.is_ascii_digit() || *ch == '.')
-                .unwrap_or(false)
+                .is_some_and(|ch| ch.is_ascii_digit() || *ch == '.')
             {
                 chars.next();
             }
@@ -1239,7 +1245,7 @@ pub fn detect_n_plus_1(spans: &[SpanDisplay]) -> Vec<NPlus1Issue> {
 
     let mut issues: Vec<NPlus1Issue> = pattern_counts
         .into_iter()
-        .filter(|(_, (count, _, _))| *count >= N_PLUS_1_THRESHOLD)
+        .filter(|(_, (count, _, _))| *count >= usize::from(N_PLUS_1_THRESHOLD))
         .map(
             |(pattern, (count, total_duration_ms, span_ids))| NPlus1Issue {
                 pattern,
@@ -1259,7 +1265,7 @@ pub fn detect_n_plus_1(spans: &[SpanDisplay]) -> Vec<NPlus1Issue> {
 pub async fn has_n_plus_1(pool: &DbPool, trace_id: &str) -> bool {
     // Count DB spans grouped by normalized statement pattern
     let result: Result<i64, _> = sqlx::query_scalar(
-        r#"
+        r"
         SELECT COUNT(*) FROM (
             SELECT db_statement, COUNT(*) as cnt
             FROM spans
@@ -1267,10 +1273,10 @@ pub async fn has_n_plus_1(pool: &DbPool, trace_id: &str) -> bool {
             GROUP BY db_statement
             HAVING cnt >= $2
         )
-        "#,
+        ",
     )
     .bind(trace_id)
-    .bind(N_PLUS_1_THRESHOLD as i64)
+    .bind(i64::from(N_PLUS_1_THRESHOLD))
     .fetch_one(pool)
     .await;
 

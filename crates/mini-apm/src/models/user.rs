@@ -35,7 +35,7 @@ pub struct Session {
 }
 
 /// Validation error for username
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UsernameValidationError {
     TooShort,
     TooLong,
@@ -93,15 +93,14 @@ pub fn hash_password(password: &str) -> anyhow::Result<String> {
     let argon2 = Argon2::default();
     let hash = argon2
         .hash_password(password.as_bytes(), &salt)
-        .map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to hash password: {e}"))?;
     Ok(hash.to_string())
 }
 
 /// Verify a password against a hash
 pub fn verify_password(password: &str, hash: &str) -> bool {
-    let parsed_hash = match PasswordHash::new(hash) {
-        Ok(h) => h,
-        Err(_) => return false,
+    let Ok(parsed_hash) = PasswordHash::new(hash) else {
+        return false;
     };
     Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)
@@ -121,8 +120,8 @@ fn random_hex<const N: usize>() -> String {
 
 /// Generate a random password (16 alphanumeric characters)
 fn generate_random_password() -> String {
-    let mut rng = rand::thread_rng();
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::thread_rng();
     (0..16)
         .map(|_| {
             let idx = rng.gen_range(0..CHARSET.len());
@@ -219,13 +218,13 @@ pub async fn get_user_from_session(pool: &DbPool, token: &str) -> anyhow::Result
     let now = Stamp::now();
 
     let user: Option<User> = sqlx::query_as(
-        r#"
+        r"
         SELECT u.id, u.username, u.password_hash, u.is_admin, u.must_change_password,
                u.invite_token, u.invite_expires_at, u.created_at, u.last_login_at
         FROM users u
         JOIN sessions s ON s.user_id = u.id
         WHERE s.token = $1 AND s.expires_at > $2
-        "#,
+        ",
     )
     .bind(token)
     .bind(now)
@@ -245,22 +244,22 @@ pub async fn delete_session(pool: &DbPool, token: &str) -> anyhow::Result<()> {
 }
 
 /// Delete expired sessions (cleanup)
-pub async fn delete_expired_sessions(pool: &DbPool) -> anyhow::Result<usize> {
+pub async fn delete_expired_sessions(pool: &DbPool) -> anyhow::Result<u64> {
     let now = Stamp::now();
     let result = sqlx::query("DELETE FROM sessions WHERE expires_at < $1")
         .bind(now)
         .execute(pool)
         .await?;
-    Ok(result.rows_affected() as usize)
+    Ok(result.rows_affected())
 }
 
 /// List all users (admin only)
 pub async fn list_all(pool: &DbPool) -> anyhow::Result<Vec<User>> {
     let users = sqlx::query_as::<_, User>(
-        r#"SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at,
+        r"SELECT id, username, password_hash, is_admin, must_change_password, invite_token, invite_expires_at,
                   created_at,
                   last_login_at
-           FROM users ORDER BY username"#,
+           FROM users ORDER BY username",
     )
     .fetch_all(pool)
     .await?;
@@ -353,7 +352,7 @@ pub async fn reset_password(
     .await?;
 
     if result.rows_affected() == 0 {
-        anyhow::bail!("User '{}' not found", username);
+        anyhow::bail!("User '{username}' not found");
     }
 
     Ok(())
@@ -431,7 +430,7 @@ pub async fn accept_invite(pool: &DbPool, user_id: i64, password: &str) -> anyho
 }
 
 /// Delete users with expired invite tokens who never activated their account
-pub async fn delete_expired_invites(pool: &DbPool) -> anyhow::Result<usize> {
+pub async fn delete_expired_invites(pool: &DbPool) -> anyhow::Result<u64> {
     let now = Stamp::now();
 
     let result = sqlx::query(
@@ -441,7 +440,7 @@ pub async fn delete_expired_invites(pool: &DbPool) -> anyhow::Result<usize> {
     .execute(pool)
     .await?;
 
-    Ok(result.rows_affected() as usize)
+    Ok(result.rows_affected())
 }
 
 #[cfg(test)]

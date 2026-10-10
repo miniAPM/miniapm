@@ -19,3 +19,6 @@ mini-apm = { workspace = true }
 usage-lib = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
+
+[lints]
+workspace = true

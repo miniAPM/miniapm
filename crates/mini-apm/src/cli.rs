@@ -1,4 +1,4 @@
-//! Command-line parsing from usage specs (https://usage.jdx.dev)
+//! Command-line parsing from usage specs (<https://usage.jdx.dev>)
 
 use usage::parse::{ParseOutput, ParseValue};
 use usage::{Parser, Spec};

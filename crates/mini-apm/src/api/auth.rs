@@ -29,7 +29,7 @@ pub struct ProjectKeyAuthorizer {
 }
 
 impl ProjectKeyAuthorizer {
-    pub fn new(pool: DbPool) -> Self {
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 

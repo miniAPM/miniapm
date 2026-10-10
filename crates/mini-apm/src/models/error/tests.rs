@@ -74,7 +74,7 @@ fn error_location_prefers_application_frames_and_falls_back_to_dependencies() {
         ),
         (vec![], None),
     ] {
-        let backtrace = frames.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let backtrace: Vec<String> = frames.iter().copied().map(String::from).collect();
         assert_eq!(extract_error_location(&backtrace), expected, "{frames:?}");
     }
 }
@@ -188,7 +188,7 @@ async fn filtered_error_lists_agree_with_their_counts() -> anyhow::Result<()> {
         .await?;
         let count = count_filtered(&pool, Some(project.id), status, search, since).await?;
         assert_eq!(
-            (listed.len() as i64, count),
+            (i64::try_from(listed.len())?, count),
             (expected, expected),
             "{status:?} {search:?} {since:?}"
         );
@@ -213,4 +213,20 @@ async fn a_failed_occurrence_leaves_its_group_untouched() -> anyhow::Result<()> 
         .await?;
     assert_eq!(count, 1);
     Ok(())
+}
+
+#[test]
+fn source_context_numbers_the_lines_around_the_error() {
+    let context = SourceContext {
+        file: "app/models/user.rb".into(),
+        lineno: 10,
+        pre_context: vec!["def find".into(), "  load".into()],
+        context_line: "  raise".into(),
+        post_context: vec!["end".into()],
+    };
+    assert_eq!(
+        context.pre_context_with_lines(),
+        [(8, "def find"), (9, "  load")]
+    );
+    assert_eq!(context.post_context_with_lines(), [(11, "end")]);
 }

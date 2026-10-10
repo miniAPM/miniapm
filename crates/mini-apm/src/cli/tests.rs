@@ -3,11 +3,11 @@ use super::*;
 const COLLECTOR: &str = include_str!("../bin/server/miniapm.usage.kdl");
 
 fn parse_collector(args: &[&str]) -> Result<ParseOutput, Exit> {
-    let argv: Vec<String> = std::iter::once("miniapm")
+    let command_line: Vec<String> = std::iter::once("miniapm")
         .chain(args.iter().copied())
         .map(String::from)
         .collect();
-    parse(COLLECTOR, &argv)
+    parse(COLLECTOR, &command_line)
 }
 
 #[test]

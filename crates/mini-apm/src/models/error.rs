@@ -55,22 +55,18 @@ pub struct SourceContext {
 }
 
 impl SourceContext {
-    /// Returns pre_context lines with their line numbers
+    /// Returns `pre_context` lines with their line numbers
     pub fn pre_context_with_lines(&self) -> Vec<(i64, &str)> {
-        let start = self.lineno - self.pre_context.len() as i64;
-        self.pre_context
-            .iter()
-            .enumerate()
-            .map(|(idx, line)| (start + idx as i64, line.as_str()))
+        let lines = i64::try_from(self.pre_context.len()).unwrap_or(i64::MAX);
+        (self.lineno.saturating_sub(lines)..)
+            .zip(self.pre_context.iter().map(String::as_str))
             .collect()
     }
 
-    /// Returns post_context lines with their line numbers
+    /// Returns `post_context` lines with their line numbers
     pub fn post_context_with_lines(&self) -> Vec<(i64, &str)> {
-        self.post_context
-            .iter()
-            .enumerate()
-            .map(|(idx, line)| (self.lineno + 1 + idx as i64, line.as_str()))
+        (self.lineno + 1..)
+            .zip(self.post_context.iter().map(String::as_str))
             .collect()
     }
 }

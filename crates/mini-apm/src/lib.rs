@@ -1,3 +1,6 @@
+// The unit-test harness is an executable that calls none of the public API
+#![cfg_attr(test, allow(dead_code_pub_in_binary))]
+
 pub mod api;
 pub mod cli;
 pub mod config;

@@ -39,10 +39,10 @@ async fn main() -> anyhow::Result<()> {
             let pool = db::init(&config).await?;
             match models::user::reset_password(&pool, username, password).await {
                 Ok(()) => {
-                    println!("Password reset successfully for user: {}", username);
+                    println!("Password reset successfully for user: {username}");
                 }
                 Err(e) => {
-                    eprintln!("Failed to reset password: {}", e);
+                    eprintln!("Failed to reset password: {e}");
                     std::process::exit(1);
                 }
             }

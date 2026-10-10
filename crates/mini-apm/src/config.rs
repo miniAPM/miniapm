@@ -1,3 +1,4 @@
+use rand::Rng;
 use std::env;
 use std::path::Path;
 
@@ -15,9 +16,7 @@ pub struct Config {
 }
 
 pub fn env_flag(name: &str) -> bool {
-    env::var(name)
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+    env::var(name).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
 fn env_positive<T: std::str::FromStr + PartialOrd + Default>(name: &str, default: T) -> T {
@@ -44,12 +43,9 @@ impl Config {
 
         // Warn if using default secret in development
         let session_secret = session_secret.unwrap_or_else(|| {
-            if enable_user_accounts {
-                // This shouldn't happen due to the check above, but just in case
-                panic!("SESSION_SECRET is required");
-            }
+            // This shouldn't happen due to the check above, but just in case
+            assert!(!enable_user_accounts, "SESSION_SECRET is required");
             // In single-user mode, generate a random secret per run
-            use rand::Rng;
             let bytes: [u8; 32] = rand::thread_rng().r#gen();
             hex::encode(bytes)
         });

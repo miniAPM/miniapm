@@ -39,7 +39,7 @@ impl WebProjectContext {
     }
 
     /// Returns true if project selector should be shown (more than 1 project)
-    pub fn show_selector(&self) -> bool {
+    pub const fn show_selector(&self) -> bool {
         self.projects.len() > 1
     }
 }

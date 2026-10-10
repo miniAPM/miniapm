@@ -11,7 +11,7 @@ pub async fn hourly_stats(
     hours: i64,
 ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
     let rows: Vec<(String, i64, f64, i64)> = sqlx::query_as(
-        r#"
+        r"
         SELECT
             to_char(b.hour, 'YYYY-MM-DD HH24:00'),
             COALESCE(SUM(r.requests), 0)::bigint,
@@ -22,7 +22,7 @@ pub async fn hourly_stats(
             ON r.hour = b.hour AND ($1::bigint IS NULL OR r.project_id = $1)
         GROUP BY b.hour
         ORDER BY b.hour
-        "#,
+        ",
     )
     .bind(project_id)
     .bind(Stamp::now())
@@ -139,7 +139,7 @@ pub(super) async fn insert_spans(
 
 /// A duration as whole ms, rounded half away from zero as `percentile_ms` does
 fn ms(duration: Option<f64>) -> i64 {
-    duration.map_or(0, |d| d.round() as i64)
+    duration.map_or(0, super::round_i64)
 }
 
 /// Average and nearest-rank p95/p99 of root span durations since `since`

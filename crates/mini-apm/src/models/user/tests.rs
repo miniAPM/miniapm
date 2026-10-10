@@ -5,7 +5,7 @@ use crate::db::test_pool;
 fn username_validation_handles_boundaries_and_character_rules() {
     use UsernameValidationError::*;
     for (username, expected) in [
-        ("".to_string(), Err(Empty)),
+        (String::new(), Err(Empty)),
         ("   ".to_string(), Err(Empty)),
         ("ab".to_string(), Err(TooShort)),
         ("abc".to_string(), Ok(())),

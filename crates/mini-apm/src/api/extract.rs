@@ -18,18 +18,23 @@ where
 {
     type Rejection = StatusCode;
 
-    async fn from_parts_state_ref_pair(parts: &Parts, _state: &S) -> Result<Self, Self::Rejection> {
-        parts
-            .extensions
-            .get_ref::<T>()
-            .cloned()
-            .map(Self)
-            .ok_or_else(|| {
-                tracing::error!(
-                    "Missing request extension {} (is its middleware applied?)",
-                    std::any::type_name::<T>()
-                );
-                StatusCode::INTERNAL_SERVER_ERROR
-            })
+    fn from_parts_state_ref_pair(
+        parts: &Parts,
+        _state: &S,
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        std::future::ready(
+            parts
+                .extensions
+                .get_ref::<T>()
+                .cloned()
+                .map(Self)
+                .ok_or_else(|| {
+                    tracing::error!(
+                        "Missing request extension {} (is its middleware applied?)",
+                        std::any::type_name::<T>()
+                    );
+                    StatusCode::INTERNAL_SERVER_ERROR
+                }),
+        )
     }
 }

@@ -33,7 +33,7 @@ fn slugify(name: &str) -> String {
 }
 
 /// Ensure default project exists when projects are enabled
-/// Slug of the project MiniAPM records its own requests and errors into
+/// Slug of the project `MiniAPM` records its own requests and errors into
 pub const SELF_SLUG: &str = "self";
 
 pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
@@ -79,7 +79,7 @@ pub async fn ensure_default_project(pool: &DbPool) -> anyhow::Result<Project> {
     Ok(project)
 }
 
-/// The project MiniAPM records itself into. It cannot be deleted and its
+/// The project `MiniAPM` records itself into. It cannot be deleted and its
 /// API key is refused by the collector: data only arrives in-process.
 pub async fn ensure_self_project(pool: &DbPool) -> anyhow::Result<Project> {
     sqlx::query(

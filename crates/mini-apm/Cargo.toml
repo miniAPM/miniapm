@@ -36,3 +36,6 @@ tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 argon2 = { workspace = true }
 state-machines = { workspace = true }
+
+[lints]
+workspace = true

@@ -58,7 +58,7 @@ pub struct OtlpTraceService {
 }
 
 impl OtlpTraceService {
-    pub fn new(pool: DbPool) -> Self {
+    pub const fn new(pool: DbPool) -> Self {
         Self { pool }
     }
 }

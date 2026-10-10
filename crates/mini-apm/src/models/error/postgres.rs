@@ -6,7 +6,7 @@ use crate::time::Stamp;
 /// Occurrence counts of one error for each of the last 24 hours, oldest first
 pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec<i64>> {
     Ok(sqlx::query_scalar(
-        r#"
+        r"
         SELECT COUNT(eo.id)
         FROM hour_buckets($2, 24) AS hour
         LEFT JOIN error_occurrences eo
@@ -16,7 +16,7 @@ pub async fn error_trend_24h(pool: &DbPool, error_id: i64) -> anyhow::Result<Vec
            AND eo.happened_at >= $2::timestamptz - interval '24 hours'
         GROUP BY hour
         ORDER BY hour
-        "#,
+        ",
     )
     .bind(error_id)
     .bind(Stamp::now())
@@ -31,7 +31,7 @@ pub async fn hourly_error_stats(
     hours: i64,
 ) -> anyhow::Result<Vec<ErrorTrendPoint>> {
     let rows: Vec<(String, i64)> = sqlx::query_as(
-        r#"
+        r"
         SELECT to_char(hour, 'YYYY-MM-DD HH24:00'), COUNT(eo.id)
         FROM hour_buckets($2, $3::int) AS hour
         LEFT JOIN (
@@ -43,7 +43,7 @@ pub async fn hourly_error_stats(
            AND eo.happened_at >= $2::timestamptz - make_interval(hours => $3::int)
         GROUP BY hour
         ORDER BY hour
-        "#,
+        ",
     )
     .bind(project_id)
     .bind(Stamp::now())

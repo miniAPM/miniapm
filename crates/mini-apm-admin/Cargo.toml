@@ -30,3 +30,6 @@ tokio = { workspace = true }
 [dev-dependencies]
 mini-apm = { workspace = true, features = ["test-support"] }
 sqlx = { workspace = true }
+
+[lints]
+workspace = true

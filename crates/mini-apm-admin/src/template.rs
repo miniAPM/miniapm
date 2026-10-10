@@ -1,13 +1,13 @@
 //! Template rendering helpers for rama + askama integration
 //!
-//! Provides an HtmlTemplate wrapper that implements IntoResponse
-//! to replace askama_axum functionality.
+//! Provides an `HtmlTemplate` wrapper that implements `IntoResponse`
+//! to replace `askama_axum` functionality.
 
 use askama::Template;
 use rama::http::service::web::response::{Html, IntoResponse};
 use rama::http::{Response, StatusCode};
 
-/// Wrapper for askama templates that implements rama's IntoResponse
+/// Wrapper for askama templates that implements rama's `IntoResponse`
 pub struct HtmlTemplate<T: Template>(pub T);
 
 impl<T: Template> IntoResponse for HtmlTemplate<T> {
