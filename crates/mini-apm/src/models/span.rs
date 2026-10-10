@@ -542,6 +542,14 @@ const SPAN_COLUMNS: [&str; 26] = [
     "happened_at",
 ];
 
+/// `$from, ..` placeholders for the `count` parameters starting at `from`
+fn placeholders(from: usize, count: usize) -> String {
+    (from..from + count)
+        .map(|i| format!("${i}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// `ON CONFLICT` clause updating a resent span in place, keeping its id
 static SPAN_UPSERT: LazyLock<String> = LazyLock::new(|| {
     let set = std::iter::once("project_id")

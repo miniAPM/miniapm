@@ -1,4 +1,4 @@
-use super::{LatencyStats, SPAN_COLUMNS, SPAN_UPSERT, SpanRow, TimeSeriesPoint};
+use super::{LatencyStats, SPAN_COLUMNS, SPAN_UPSERT, SpanRow, TimeSeriesPoint, placeholders};
 use crate::DbPool;
 use crate::db;
 use crate::time::Stamp;
@@ -80,10 +80,7 @@ static INSERT_SPANS: LazyLock<String> = LazyLock::new(|| {
             _ => c.to_string(),
         })
         .join(", ");
-    let arrays = (2..=SPAN_COLUMNS.len() + 1)
-        .map(|i| format!("${i}"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let arrays = placeholders(2, SPAN_COLUMNS.len());
     format!(
         "INSERT INTO spans (project_id, {columns})
          SELECT DISTINCT ON (trace_id, span_id) $1, {values}

@@ -1,4 +1,4 @@
-use super::{LatencyStats, SPAN_COLUMNS, SPAN_UPSERT, SpanRow, TimeSeriesPoint};
+use super::{LatencyStats, SPAN_COLUMNS, SPAN_UPSERT, SpanRow, TimeSeriesPoint, placeholders};
 use crate::DbPool;
 use crate::db;
 use crate::time::{self, Stamp};
@@ -72,10 +72,7 @@ pub async fn count_since(
 pub(super) const SPAN_KEY: &[&str] = &["trace_id", "span_id"];
 
 static INSERT_SPAN: LazyLock<String> = LazyLock::new(|| {
-    let values = (1..=SPAN_COLUMNS.len() + 1)
-        .map(|i| format!("${i}"))
-        .collect::<Vec<_>>()
-        .join(", ");
+    let values = placeholders(1, SPAN_COLUMNS.len() + 1);
     format!(
         "INSERT INTO spans (project_id, {}) VALUES ({values}) {}",
         SPAN_COLUMNS.join(", "),

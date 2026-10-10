@@ -244,15 +244,18 @@ async fn hourly_stats_bucket_root_spans_inside_the_window() -> anyhow::Result<()
         insert_span(&pool, i, parent, duration_ms, status_code, at).await?;
     }
     let label = |hours| crate::time::hours_ago(hours).hour_label();
+    let by_hour = |points: &[TimeSeriesPoint]| -> HashMap<_, _> {
+        points
+            .iter()
+            .map(|p| (p.hour.clone(), (p.count, p.avg_ms, p.error_count)))
+            .collect()
+    };
 
     let points = hourly_stats(&pool, None, 24).await?;
-    let by_hour: HashMap<_, _> = points
-        .iter()
-        .map(|p| (p.hour.clone(), (p.count, p.avg_ms, p.error_count)))
-        .collect();
+    let counts = by_hour(&points);
     assert_eq!(points.len(), 24);
-    assert_eq!(by_hour[&label(0)], (1, 10.0, 0));
-    assert_eq!(by_hour[&label(2)], (2, 25.0, 1));
+    assert_eq!(counts[&label(0)], (1, 10.0, 0));
+    assert_eq!(counts[&label(2)], (2, 25.0, 1));
     assert_eq!(points.iter().map(|p| p.count).sum::<i64>(), 3);
 
     for statement in [
@@ -261,13 +264,9 @@ async fn hourly_stats_bucket_root_spans_inside_the_window() -> anyhow::Result<()
     ] {
         sqlx::query(statement).execute(&pool).await?;
     }
-    let points = hourly_stats(&pool, None, 24).await?;
-    let by_hour: HashMap<_, _> = points
-        .iter()
-        .map(|p| (p.hour.clone(), (p.count, p.avg_ms, p.error_count)))
-        .collect();
-    assert_eq!(by_hour[&label(0)], (1, 50.0, 1));
-    assert_eq!(by_hour[&label(2)], (1, 20.0, 0));
+    let counts = by_hour(&hourly_stats(&pool, None, 24).await?);
+    assert_eq!(counts[&label(0)], (1, 50.0, 1));
+    assert_eq!(counts[&label(2)], (1, 20.0, 0));
     Ok(())
 }
 
