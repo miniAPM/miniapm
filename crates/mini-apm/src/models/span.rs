@@ -870,30 +870,37 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
     let total_duration_ms = (trace_end - trace_start) as f64 / 1_000_000.0;
 
     // Build span hierarchy for depth calculation
-    let parent_map: HashMap<String, Option<String>> =
-        spans.iter().map(|s| (s.1.clone(), s.2.clone())).collect();
+    let parents: HashMap<&str, Option<&str>> = spans
+        .iter()
+        .map(|s| (s.1.as_str(), s.2.as_deref()))
+        .collect();
 
-    fn compute_depth(
-        span_id: &str,
-        parent_map: &HashMap<String, Option<String>>,
-        depth_cache: &mut HashMap<String, i32>,
+    fn compute_depth<'a>(
+        span_id: &'a str,
+        parents: &HashMap<&'a str, Option<&'a str>>,
+        depths: &mut HashMap<&'a str, i32>,
     ) -> i32 {
-        if let Some(&cached) = depth_cache.get(span_id) {
+        if let Some(&cached) = depths.get(span_id) {
             return cached;
         }
-        let depth = match parent_map.get(span_id).and_then(|p| p.as_ref()) {
-            Some(parent_id) => compute_depth(parent_id, parent_map, depth_cache) + 1,
+        let depth = match parents.get(span_id).copied().flatten() {
+            Some(parent_id) => compute_depth(parent_id, parents, depths) + 1,
             None => 0,
         };
-        depth_cache.insert(span_id.to_string(), depth);
+        depths.insert(span_id, depth);
         depth
     }
 
-    let mut depth_cache = HashMap::new();
+    let mut depths = HashMap::new();
+    let span_depths: Vec<i32> = spans
+        .iter()
+        .map(|s| compute_depth(&s.1, &parents, &mut depths))
+        .collect();
 
     let display_spans: Vec<SpanDisplay> = spans
-        .iter()
-        .map(|s| {
+        .into_iter()
+        .zip(span_depths)
+        .map(|(s, depth)| {
             let offset_ns = s.6 - trace_start;
             let offset_ms = offset_ns as f64 / 1_000_000.0;
             let offset_percent = if total_duration_ms > 0.0 {
@@ -906,13 +913,11 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
             } else {
                 100.0
             };
-            let depth = compute_depth(&s.1, &parent_map, &mut depth_cache);
-
             SpanDisplay {
                 id: s.0,
-                span_id: s.1.clone(),
-                parent_span_id: s.2.clone(),
-                name: s.3.clone(),
+                span_id: s.1,
+                parent_span_id: s.2,
+                name: s.3,
                 category: SpanCategory::parse(&s.4),
                 duration_ms: s.5,
                 offset_ms,
@@ -920,11 +925,11 @@ pub async fn get_trace(pool: &DbPool, trace_id: &str) -> anyhow::Result<Option<T
                 width_percent,
                 depth,
                 status_code: s.7,
-                http_method: s.8.clone(),
+                http_method: s.8,
                 http_status_code: s.9,
-                db_operation: s.10.clone(),
-                db_system: s.11.clone(),
-                db_statement: s.12.clone(),
+                db_operation: s.10,
+                db_system: s.11,
+                db_statement: s.12,
             }
         })
         .collect();
@@ -1054,7 +1059,7 @@ pub async fn routes_summary(
     .fetch_all(pool)
     .await?;
 
-    let paths: Vec<String> = routes.iter().map(|r| r.0.clone()).collect();
+    let paths: Vec<&str> = routes.iter().map(|r| r.0.as_str()).collect();
     let percentiles = backend::route_percentiles(pool, project_id, since, &paths).await?;
     let db_stats = route_db_stats(pool, project_id, since, &paths).await?;
 
@@ -1120,7 +1125,7 @@ async fn route_db_stats(
     pool: &DbPool,
     project_id: Option<i64>,
     since: Stamp,
-    paths: &[String],
+    paths: &[&str],
 ) -> anyhow::Result<HashMap<String, (i64, i64)>> {
     let in_paths = db::in_text_list(3);
     let rows: Vec<(String, f64, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(

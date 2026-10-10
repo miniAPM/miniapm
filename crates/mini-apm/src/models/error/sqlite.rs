@@ -56,15 +56,15 @@ pub async fn hourly_error_stats(
     .fetch_all(pool)
     .await?;
 
-    let data_points: std::collections::HashMap<String, i64> = rows.into_iter().collect();
+    let mut data_points: std::collections::HashMap<String, i64> = rows.into_iter().collect();
 
     // Fill in all hours with zeros for missing data
     let mut points = Vec::with_capacity(hours as usize);
     for i in (0..hours).rev() {
         let hour_key = time::hours_ago(i).hour_label();
         points.push(ErrorTrendPoint {
-            hour: hour_key.clone(),
-            count: *data_points.get(&hour_key).unwrap_or(&0),
+            count: data_points.remove(&hour_key).unwrap_or(0),
+            hour: hour_key,
         });
     }
 

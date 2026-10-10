@@ -75,11 +75,7 @@ fn error_location_prefers_application_frames_and_falls_back_to_dependencies() {
         (vec![], None),
     ] {
         let backtrace = frames.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert_eq!(
-            extract_error_location(&backtrace).as_deref(),
-            expected,
-            "{frames:?}"
-        );
+        assert_eq!(extract_error_location(&backtrace), expected, "{frames:?}");
     }
 }
 

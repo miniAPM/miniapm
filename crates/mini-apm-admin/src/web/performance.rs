@@ -36,7 +36,7 @@ pub async fn index(
 
     let period = query.period.unwrap_or_else(|| "24h".to_string());
     let sort = query.sort.unwrap_or_else(|| "requests".to_string());
-    let search = query.search.clone().filter(|s| !s.is_empty());
+    let search = query.search.filter(|s| !s.is_empty());
 
     let since = match period.as_str() {
         "1h" => time::hours_ago(1),

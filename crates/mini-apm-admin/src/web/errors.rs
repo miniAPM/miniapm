@@ -44,7 +44,7 @@ pub async fn index(
 
     let period = query.period.unwrap_or_else(|| "all".to_string());
     let sort = query.sort.unwrap_or_else(|| "last_seen".to_string());
-    let search = query.search.clone().filter(|s| !s.is_empty());
+    let search = query.search.filter(|s| !s.is_empty());
     let page = query.page.unwrap_or(1).max(1);
 
     let since = super::period_start(&period);

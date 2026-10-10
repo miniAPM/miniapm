@@ -50,7 +50,7 @@ pub fn in_text_list(param: u8) -> String {
 }
 
 /// Bind value for [`in_text_list`]: SQLite has no arrays, so a JSON array
-pub fn text_list(items: &[String]) -> String {
+pub fn text_list(items: &[&str]) -> String {
     serde_json::to_string(items).expect("a list of strings serializes")
 }
 

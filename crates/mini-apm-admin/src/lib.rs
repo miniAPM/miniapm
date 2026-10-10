@@ -97,7 +97,7 @@ pub fn make_app(
     let app = ErrorHandlerLayer::new().into_layer(app);
 
     // Auth middleware checks authentication
-    let auth_layer = web::auth_middleware::WebAuthMiddleware::new(state.clone());
+    let auth_layer = web::auth_middleware::WebAuthMiddleware::new(state);
     let with_auth = auth_layer.layer(app);
 
     // Security headers middleware adds security headers to all responses

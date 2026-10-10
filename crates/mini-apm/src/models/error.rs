@@ -387,16 +387,15 @@ pub struct ErrorTrendPoint {
 
 /// Calculate text similarity using word-based Jaccard similarity (0.0 to 1.0)
 fn text_similarity(a: &str, b: &str) -> f64 {
-    let normalize = |s: &str| -> HashSet<String> {
-        s.to_lowercase()
-            .split(|c: char| !c.is_alphanumeric())
+    fn words(s: &str) -> HashSet<&str> {
+        s.split(|c: char| !c.is_alphanumeric())
             .filter(|w| !w.is_empty())
-            .map(|w| w.to_string())
             .collect()
-    };
+    }
 
-    let words_a = normalize(a);
-    let words_b = normalize(b);
+    let (a, b) = (a.to_lowercase(), b.to_lowercase());
+    let words_a = words(&a);
+    let words_b = words(&b);
 
     if words_a.is_empty() && words_b.is_empty() {
         return 1.0;
@@ -416,7 +415,11 @@ fn text_similarity(a: &str, b: &str) -> f64 {
 }
 
 /// Extract first app frame from backtrace (skip library/framework frames)
-fn extract_error_location(backtrace: &[String]) -> Option<String> {
+fn extract_error_location(backtrace: &[String]) -> Option<&str> {
+    fn without_method(frame: &str) -> &str {
+        frame.rfind(":in ").map_or(frame, |pos| &frame[..pos])
+    }
+
     // Common patterns for library/framework code to skip
     let skip_patterns = [
         "/gems/",
@@ -440,30 +443,19 @@ fn extract_error_location(backtrace: &[String]) -> Option<String> {
     for frame in backtrace {
         let is_library = skip_patterns.iter().any(|p| frame.contains(p));
         if !is_library && !frame.trim().is_empty() {
-            // Extract file:line portion (strip method name if present)
-            // Format is usually "path/to/file.rb:123:in `method_name'"
-            if let Some(colon_pos) = frame.rfind(":in ") {
-                return Some(frame[..colon_pos].to_string());
-            }
-            // Or just "path/to/file.rb:123"
-            return Some(frame.to_string());
+            // "path/to/file.rb:123:in `method_name'" or just "path/to/file.rb:123"
+            return Some(without_method(frame));
         }
     }
 
     // Fallback to first frame if all look like library code
-    backtrace.first().map(|s| {
-        if let Some(colon_pos) = s.rfind(":in ") {
-            s[..colon_pos].to_string()
-        } else {
-            s.to_string()
-        }
-    })
+    backtrace.first().map(|frame| without_method(frame))
 }
 
 /// Generate a location-based fingerprint from exception class and backtrace
 fn generate_location_fingerprint(exception_class: &str, backtrace: &[String]) -> String {
     let location = extract_error_location(backtrace).unwrap_or_default();
-    format!("{}:{}", exception_class, location)
+    format!("{exception_class}:{location}")
 }
 
 #[cfg(test)]

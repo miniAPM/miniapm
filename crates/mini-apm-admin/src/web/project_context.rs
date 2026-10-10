@@ -62,7 +62,7 @@ impl FromPartsStateRefPair<AppState> for WebProjectContext {
             .iter()
             .find(|p| wanted.as_deref() == Some(p.slug.as_str()))
             .or_else(|| projects.iter().find(|p| p.slug == "default"))
-            .or(projects.first())
+            .or_else(|| projects.first())
             .cloned();
 
         Ok(Self {

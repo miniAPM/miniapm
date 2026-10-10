@@ -3,7 +3,7 @@
 //! code, handed over in-process instead of over HTTP.
 
 use std::convert::Infallible;
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::future::Future;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -102,7 +102,7 @@ impl SelfMonitor {
             end_time_unix_nano: nanos(q.end),
             attributes: Some(vec![
                 attribute("db.system", "sqlite"),
-                attribute("db.statement", &q.statement),
+                attribute("db.statement", q.statement),
             ]),
             events: None,
             status: None,
@@ -205,11 +205,11 @@ fn route_of(path: &str) -> String {
         .join("/")
 }
 
-fn attribute(key: &str, value: &str) -> span::KeyValue {
+fn attribute(key: &str, value: impl Into<String>) -> span::KeyValue {
     span::KeyValue {
         key: key.to_string(),
         value: span::AttributeValue {
-            string_value: Some(value.to_string()),
+            string_value: Some(value.into()),
             int_value: None,
             double_value: None,
             bool_value: None,
@@ -319,9 +319,9 @@ where
             format!("{method} {}", route_of(&path)),
             2,
             vec![
-                attribute("http.method", &method),
-                attribute("http.target", &path),
-                attribute("http.status_code", &status.to_string()),
+                attribute("http.method", method),
+                attribute("http.target", path),
+                attribute("http.status_code", status.to_string()),
             ],
             status >= 500,
         );
@@ -440,10 +440,13 @@ struct MessageVisitor(String);
 impl Visit for MessageVisitor {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         let separator = if self.0.is_empty() { "" } else { " " };
+        // A Debug impl that errors leaves the message cut short rather than
+        // panicking inside the tracing layer
         if field.name() == "message" {
-            self.0 = format!("{value:?}{separator}{}", self.0);
+            let fields = std::mem::take(&mut self.0);
+            write!(self.0, "{value:?}{separator}{fields}").ok();
         } else {
-            self.0 = format!("{}{separator}{}={value:?}", self.0, field.name());
+            write!(self.0, "{separator}{}={value:?}", field.name()).ok();
         }
     }
 }

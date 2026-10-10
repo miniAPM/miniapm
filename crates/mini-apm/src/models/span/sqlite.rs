@@ -30,37 +30,25 @@ pub async fn hourly_stats(
     .fetch_all(pool)
     .await?;
 
-    let data_points: std::collections::HashMap<String, TimeSeriesPoint> = rows
+    let mut data_points: HashMap<String, (i64, f64, i64)> = rows
         .into_iter()
-        .map(|(hour, count, avg_ms, error_count)| {
-            (
-                hour.clone(),
-                TimeSeriesPoint {
-                    hour,
-                    count,
-                    avg_ms,
-                    error_count,
-                },
-            )
-        })
+        .map(|(hour, count, avg_ms, error_count)| (hour, (count, avg_ms, error_count)))
         .collect();
 
     // Fill in all hours with zeros for missing data
-    let mut points = Vec::with_capacity(hours as usize);
-    for i in (0..hours).rev() {
-        let hour_key = time::hours_ago(i).hour_label();
-        points.push(
-            data_points
-                .get(&hour_key)
-                .cloned()
-                .unwrap_or(TimeSeriesPoint {
-                    hour: hour_key,
-                    count: 0,
-                    avg_ms: 0.0,
-                    error_count: 0,
-                }),
-        );
-    }
+    let points = (0..hours)
+        .rev()
+        .map(|i| {
+            let hour = time::hours_ago(i).hour_label();
+            let (count, avg_ms, error_count) = data_points.remove(&hour).unwrap_or_default();
+            TimeSeriesPoint {
+                hour,
+                count,
+                avg_ms,
+                error_count,
+            }
+        })
+        .collect();
 
     Ok(points)
 }
@@ -184,7 +172,7 @@ pub(super) async fn route_percentiles(
     pool: &DbPool,
     project_id: Option<i64>,
     since: Stamp,
-    paths: &[String],
+    paths: &[&str],
 ) -> anyhow::Result<HashMap<String, (i64, i64)>> {
     Ok(route_durations(pool, project_id, since, paths)
         .await?
@@ -197,7 +185,7 @@ async fn route_durations(
     pool: &DbPool,
     project_id: Option<i64>,
     since: Stamp,
-    paths: &[String],
+    paths: &[&str],
 ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
     let in_paths = db::in_text_list(3);
     let rows: Vec<(String, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(

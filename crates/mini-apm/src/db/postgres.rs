@@ -69,7 +69,7 @@ pub fn in_text_list(param: u8) -> String {
 }
 
 /// Bind value for [`in_text_list`]
-pub fn text_list(items: &[String]) -> &[String] {
+pub fn text_list<'a>(items: &'a [&'a str]) -> &'a [&'a str] {
     items
 }
 

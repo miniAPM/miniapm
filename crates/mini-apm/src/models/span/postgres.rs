@@ -171,7 +171,7 @@ pub(super) async fn route_percentiles(
     pool: &DbPool,
     project_id: Option<i64>,
     since: Stamp,
-    paths: &[String],
+    paths: &[&str],
 ) -> anyhow::Result<HashMap<String, (i64, i64)>> {
     let rows: Vec<(String, Option<f64>, Option<f64>)> =
         sqlx::query_as(sqlx::AssertSqlSafe(format!(

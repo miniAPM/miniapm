@@ -307,3 +307,23 @@ async fn latency_percentiles_use_the_nearest_rank() -> anyhow::Result<()> {
     assert_eq!(percentiles, [("GET /", 31, 32)]);
     Ok(())
 }
+
+#[tokio::test]
+async fn trace_detail_nests_spans_under_their_parents() -> anyhow::Result<()> {
+    let pool = crate::db::test_pool().await;
+    let id = |i: usize| format!("{i:016x}");
+    for (i, parent) in [(1, None), (2, Some(1)), (3, Some(2)), (4, Some(9))] {
+        insert_span(&pool, i, parent.map(id).as_deref(), 10.0, 0, Stamp::now()).await?;
+    }
+
+    let trace = get_trace(&pool, "trace").await?.expect("trace stored");
+    let mut depths: Vec<_> = trace
+        .spans
+        .iter()
+        .map(|s| (s.span_id.clone(), s.depth))
+        .collect();
+    depths.sort();
+    assert_eq!(depths, [(id(1), 0), (id(2), 1), (id(3), 2), (id(4), 1)]);
+    assert_eq!(trace.root_span.map(|s| s.span_id), Some(id(1)));
+    Ok(())
+}
