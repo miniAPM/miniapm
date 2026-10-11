@@ -19,7 +19,7 @@ use rama::extensions::ExtensionsRef;
 use rama::http::headers::HeaderMapExt;
 use rama::http::headers::forwarded::XForwardedFor;
 use rama::http::layer::error_handling::ErrorHandlerLayer;
-use rama::http::service::web::response::IntoResponse;
+use rama::http::service::web::response::{DatastarScript, IntoResponse};
 use rama::http::service::web::{Router, response::Html};
 use rama::http::{Request, Response, StatusCode};
 use rama::layer::LimitLayer;
@@ -66,6 +66,7 @@ pub fn make_app(
         .with_post("/auth/users/delete", web::auth::delete_user)
         // Protected Web UI routes
         .with_get("/", web::dashboard::index)
+        .with_get("/dashboard/live", web::dashboard::live)
         .with_get("/errors", web::errors::index)
         .with_get("/errors/{id}", web::errors::show)
         .with_post("/errors/{id}/status", web::errors::update_status)
@@ -81,6 +82,7 @@ pub fn make_app(
         .with_get("/api-key", web::api_key::index)
         .with_post("/api-key/regenerate", web::api_key::regenerate)
         // Static files
+        .with_get("/static/datastar.js", DatastarScript::new())
         .with_endpoint_service(
             "/static",
             rama::http::service::fs::ServeDir::new(static_dir()),

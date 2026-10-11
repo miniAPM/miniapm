@@ -5,7 +5,8 @@ use std::time::Duration;
 use rama::Layer;
 use rama::Service;
 use rama::conversion::FromRef;
-use rama::graceful::Shutdown;
+use rama::extensions::Extension;
+use rama::graceful::{Shutdown, WeakShutdownGuard};
 use rama::http::grpc::service::opentelemetry::proto::collector::trace::v1::trace_service_server::TraceServiceServer;
 use rama::http::header::CONTENT_TYPE;
 use rama::http::layer::body_limit::BodyLimitLayer;
@@ -15,6 +16,7 @@ use rama::http::server::HttpServer;
 use rama::http::service::web::response::IntoResponse;
 use rama::http::service::web::{Router, response::Html};
 use rama::http::{HeaderValue, Request, Response, StatusCode};
+use rama::layer::AddInputExtensionLayer;
 use rama::rt::Executor;
 
 use crate::self_monitor::{SelfMonitor, SelfMonitorLayer};
@@ -120,6 +122,19 @@ pub fn make_app(
     Arc::new(SelfMonitorLayer::global().into_layer(app))
 }
 
+/// Request extension that resolves once shutdown starts, without holding
+/// it back, so endless responses such as SSE streams can end in time
+#[derive(Debug, Clone)]
+pub struct ShutdownSignal(pub WeakShutdownGuard);
+
+impl Extension for ShutdownSignal {}
+
+impl ShutdownSignal {
+    pub async fn triggered(&self) {
+        self.0.cancelled().await;
+    }
+}
+
 /// Run an HTTP server on `addr` until Ctrl+C/SIGTERM, then drain in-flight
 /// connections (up to 30s) before returning.
 pub async fn serve_with_graceful_shutdown<S, Resp>(addr: String, app: S) -> anyhow::Result<()>
@@ -130,6 +145,7 @@ where
     let graceful = Shutdown::default();
 
     graceful.spawn_task_fn(move |guard| async move {
+        let app = AddInputExtensionLayer::new(ShutdownSignal(guard.clone_weak())).into_layer(app);
         let exec = Executor::graceful(guard);
 
         if let Err(e) = HttpServer::auto(exec).listen(&addr, app).await {

@@ -1,0 +1,100 @@
+{% macro chart(title, canvas) -%}
+<section class="card chart-card">
+    <h2>{{ title }}</h2>
+    <div class="chart-container">
+        <div class="chart-empty" data-show="$_idle"{% if requests_24h > 0 %} style="display: none"{% endif %}>No data yet</div>
+        <canvas id="{{ canvas }}" data-show="!$_idle"{% if requests_24h == 0 %} style="display: none"{% endif %}></canvas>
+    </div>
+</section>
+{%- endmacro -%}
+<div id="dashboard-live"
+     data-signals:_hourly='{{ hourly_stats|json|safe }}'
+     data-signals:_deploys='{{ deploy_hours|json|safe }}'
+     data-signals:_idle="{{ requests_24h == 0 }}">
+    <div class="stats-grid stats-grid-5">
+        <div class="stat-card">
+            <div class="stat-value">{{ requests_24h }}</div>
+            <div class="stat-label">Requests (24h)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ errors_24h }}</div>
+            <div class="stat-label">Errors (24h)</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ avg_ms }} ms</div>
+            <div class="stat-label">Avg Response</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ p95_ms }} ms</div>
+            <div class="stat-label">p95 Latency</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">{{ p99_ms }} ms</div>
+            <div class="stat-label">p99 Latency</div>
+        </div>
+    </div>
+
+    <div class="grid-2" data-ignore-morph data-effect="drawDashboardCharts($_hourly, $_deploys)">
+        {% call chart("Traffic (24h)", "trafficCanvas") %}{% endcall %}
+        {% call chart("Avg Latency (24h)", "latencyCanvas") %}{% endcall %}
+    </div>
+
+    <div class="grid-2">
+        <section class="card">
+            <h2>Recent Errors</h2>
+            {% if recent_errors.is_empty() %}
+            <p class="empty">No errors in the last 24 hours</p>
+            {% else %}
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Exception</th>
+                            <th class="num">Count</th>
+                            <th>Last Seen</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for error in recent_errors %}
+                        <tr>
+                            <td><a href="/errors/{{ error.id }}">{{ error.exception_class }}</a></td>
+                            <td class="num">{{ error.occurrence_count }}</td>
+                            <td>{{ error.last_seen_at }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </section>
+
+        <section class="card">
+            <h2>Slow Requests</h2>
+            {% if slow_requests.is_empty() %}
+            <p class="empty">No slow requests (>500ms)</p>
+            {% else %}
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Route</th>
+                            <th class="num">Time</th>
+                            <th>When</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for req in slow_requests %}
+                        <tr>
+                            <td class="route-cell"><a href="/traces/{{ req.trace_id }}">{{ req.display_name() }}</a></td>
+                            <td class="num">{{ req.duration_ms_rounded() }}ms</td>
+                            <td>{{ req.happened_at }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <a href="/traces?min_duration=500&sort=duration" class="card-link">View all slow requests</a>
+            {% endif %}
+        </section>
+    </div>
+</div>

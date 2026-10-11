@@ -5,126 +5,25 @@
 {% block content %}
 <h1>Dashboard</h1>
 
-<div class="stats-grid stats-grid-5">
-    <div class="stat-card">
-        <div class="stat-value">{{ requests_24h }}</div>
-        <div class="stat-label">Requests (24h)</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-value">{{ errors_24h }}</div>
-        <div class="stat-label">Errors (24h)</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-value">{{ avg_ms }} ms</div>
-        <div class="stat-label">Avg Response</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-value">{{ p95_ms }} ms</div>
-        <div class="stat-label">p95 Latency</div>
-    </div>
-    <div class="stat-card">
-        <div class="stat-value">{{ p99_ms }} ms</div>
-        <div class="stat-label">p99 Latency</div>
-    </div>
+<div data-init="@get('/dashboard/live', {retry: 'always'})">
+    {{ live|safe }}
 </div>
 
-<div class="grid-2">
-    <section class="card chart-card">
-        <h2>Traffic (24h)</h2>
-        <div class="chart-container" id="traffic-chart">
-            {% if requests_24h == 0 %}
-            <div class="chart-empty">No data yet</div>
-            {% else %}
-            <canvas id="trafficCanvas"></canvas>
-            {% endif %}
-        </div>
-    </section>
-    <section class="card chart-card">
-        <h2>Avg Latency (24h)</h2>
-        <div class="chart-container" id="latency-chart">
-            {% if requests_24h == 0 %}
-            <div class="chart-empty">No data yet</div>
-            {% else %}
-            <canvas id="latencyCanvas"></canvas>
-            {% endif %}
-        </div>
-    </section>
-</div>
-
-<div class="grid-2">
-    <section class="card">
-        <h2>Recent Errors</h2>
-        {% if recent_errors.is_empty() %}
-        <p class="empty">No errors in the last 24 hours</p>
-        {% else %}
-        <div class="table-wrapper">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Exception</th>
-                        <th class="num">Count</th>
-                        <th>Last Seen</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for error in recent_errors %}
-                    <tr>
-                        <td><a href="/errors/{{ error.id }}">{{ error.exception_class }}</a></td>
-                        <td class="num">{{ error.occurrence_count }}</td>
-                        <td>{{ error.last_seen_at }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% endif %}
-    </section>
-
-    <section class="card">
-        <h2>Slow Requests</h2>
-        {% if slow_requests.is_empty() %}
-        <p class="empty">No slow requests (>500ms)</p>
-        {% else %}
-        <div class="table-wrapper">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Route</th>
-                        <th class="num">Time</th>
-                        <th>When</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for req in slow_requests %}
-                    <tr>
-                        <td class="route-cell"><a href="/traces/{{ req.trace_id }}">{{ req.display_name() }}</a></td>
-                        <td class="num">{{ req.duration_ms_rounded() }}ms</td>
-                        <td>{{ req.happened_at }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        <a href="/traces?min_duration=500&sort=duration" class="card-link">View all slow requests</a>
-        {% endif %}
-    </section>
-</div>
-
-{% if requests_24h > 0 %}
 <script>
 (function() {
-    const data = {{ hourly_stats|json|safe }};
-    const deployHours = {{ deploy_hours|json|safe }};
+    let last = null;
 
-    const primaryColor = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#6b9fdb';
-    const warningColor = getComputedStyle(document.documentElement).getPropertyValue('--warning').trim() || '#e5b857';
-    const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b95a8';
-    const bgColor = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1f2e';
-    const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#e67e22';
+    function cssVar(name, fallback) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+    }
 
-    function drawChart(canvasId, values, color, unit, showDeploys = false) {
+    function drawChart(canvasId, data, values, color, unit, deployHours) {
         const canvas = document.getElementById(canvasId);
         if (!canvas || values.length === 0) return;
+
+        const textMuted = cssVar('--text-muted', '#8b95a8');
+        const bgColor = cssVar('--bg', '#1a1f2e');
+        const accentColor = cssVar('--accent', '#e67e22');
 
         const ctx = canvas.getContext('2d');
         const dpr = window.devicePixelRatio || 1;
@@ -204,7 +103,7 @@
         });
 
         // Draw deploy markers
-        if (showDeploys && deployHours.length > 0) {
+        if (deployHours.length > 0) {
             ctx.strokeStyle = accentColor;
             ctx.setLineDash([4, 4]);
             ctx.lineWidth = 1.5;
@@ -234,20 +133,18 @@
         }
     }
 
-    drawChart('trafficCanvas', data.map(d => d.count), primaryColor, '', true);
-    drawChart('latencyCanvas', data.map(d => d.avg_ms), warningColor, 'ms', true);
+    window.drawDashboardCharts = function(data, deployHours) {
+        last = [data, deployHours];
+        drawChart('trafficCanvas', data, data.map(d => d.count), cssVar('--primary', '#6b9fdb'), '', deployHours);
+        drawChart('latencyCanvas', data, data.map(d => d.avg_ms), cssVar('--warning', '#e5b857'), 'ms', deployHours);
+    };
 
     // Redraw on theme change
     const observer = new MutationObserver(() => {
-        setTimeout(() => {
-            drawChart('trafficCanvas', data.map(d => d.count),
-                getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#6b9fdb', '', true);
-            drawChart('latencyCanvas', data.map(d => d.avg_ms),
-                getComputedStyle(document.documentElement).getPropertyValue('--warning').trim() || '#e5b857', 'ms', true);
-        }, 50);
+        if (last) setTimeout(() => window.drawDashboardCharts(...last), 50);
     });
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 })();
 </script>
-{% endif %}
+<script type="module" src="/static/datastar.js"></script>
 {% endblock %}

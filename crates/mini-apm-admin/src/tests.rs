@@ -218,7 +218,46 @@ async fn test_dashboard_marks_deploys_on_their_chart_hour() {
     let html = html(&make_app(pool), "/").await;
     let hour = at.hour_label();
     assert!(html.contains(&format!(r#""hour":"{hour}""#)));
-    assert!(html.contains(&format!(r#"const deployHours = ["{hour}"];"#)));
+    assert!(html.contains(&format!(r#"data-signals:_deploys='["{hour}"]'"#)));
+}
+
+#[tokio::test]
+async fn test_dashboard_streams_live_patches_until_shutdown() {
+    use mini_apm::server::ShutdownSignal;
+    use rama::graceful::Shutdown;
+    use rama::http::body::util::BodyExt;
+
+    let app = app().await;
+    let page = html(&app, "/").await;
+    assert!(page.contains("@get('/dashboard/live'"));
+    assert!(page.contains(r#"src="/static/datastar.js""#));
+    let script = app
+        .serve(request("/static/datastar.js", "203.0.113.1", None))
+        .await
+        .unwrap();
+    assert_eq!(script.status(), StatusCode::OK);
+
+    let (trigger, signal) = tokio::sync::oneshot::channel::<()>();
+    let shutdown = Shutdown::new(signal);
+    let req = request("/dashboard/live", "203.0.113.1", None);
+    req.extensions()
+        .insert(ShutdownSignal(shutdown.guard_weak()));
+    let res = app.serve(req).await.unwrap();
+    assert_eq!(res.headers()["content-type"], "text/event-stream");
+
+    let mut body = res.into_body();
+    let frame = body.frame().await.unwrap().unwrap().into_data().unwrap();
+    let event = String::from_utf8(frame.to_vec()).unwrap();
+    assert!(
+        event.starts_with(
+            "event: datastar-patch-elements\ndata: elements <div id=\"dashboard-live\""
+        ),
+        "{event}"
+    );
+
+    trigger.send(()).unwrap();
+    let rest = tokio::time::timeout(Duration::from_secs(5), body.collect()).await;
+    assert!(rest.unwrap().unwrap().to_bytes().is_empty());
 }
 
 #[tokio::test]
