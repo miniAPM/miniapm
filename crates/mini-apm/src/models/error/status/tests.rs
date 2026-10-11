@@ -25,3 +25,9 @@ fn test_transitions() {
         [("resolved", "open")]
     );
 }
+
+#[test]
+fn test_schema_is_valid() {
+    let diagnostics = ErrorStatus::<(), Open>::schema().validate();
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}

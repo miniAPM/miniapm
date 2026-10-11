@@ -3578,6 +3578,9 @@ name = "state-machines-core"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8670360fdd500c432c75037680a88e6df0582689c1754093b78aa9f393993127"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "state-machines-macro"
