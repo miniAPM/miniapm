@@ -163,3 +163,18 @@ async fn test_form_posts_redirect_with_see_other_and_reject_malformed_input() {
         }
     }
 }
+
+#[tokio::test]
+async fn test_filter_links_carry_query_values_intact() {
+    use rama::http::body::util::BodyExt;
+
+    let app = app().await;
+    for path in ["/errors", "/traces", "/performance"] {
+        let uri = format!("{path}?search=a%26b%20%23c%2B&sort=x%3Dy");
+        let res = app.serve(request(&uri, "203.0.113.1", None)).await.unwrap();
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(html.contains("search=a%26b%20%23c%2B"), "{path}");
+        assert!(html.contains("sort=x%3Dy"), "{path}");
+    }
+}

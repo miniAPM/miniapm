@@ -138,30 +138,30 @@
     <div class="filter-group">
         <label>Status</label>
         <div class="filters">
-            <a href="?period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if status.is_none() %}active{% endif %}">All</a>
-            <a href="?status=open&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if status.as_deref() == Some("open") %}active{% endif %}">Open</a>
-            <a href="?status=resolved&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if status.as_deref() == Some("resolved") %}active{% endif %}">Resolved</a>
-            <a href="?status=ignored&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if status.as_deref() == Some("ignored") %}active{% endif %}">Ignored</a>
+            <a href="?period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if status.is_none() %}active{% endif %}">All</a>
+            <a href="?status=open&period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if status.as_deref() == Some("open") %}active{% endif %}">Open</a>
+            <a href="?status=resolved&period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if status.as_deref() == Some("resolved") %}active{% endif %}">Resolved</a>
+            <a href="?status=ignored&period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if status.as_deref() == Some("ignored") %}active{% endif %}">Ignored</a>
         </div>
     </div>
 
     <div class="filter-group">
         <label>Period</label>
         <div class="filters">
-            <a href="?period=all&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "all" %}active{% endif %}">All</a>
-            <a href="?period=1h&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "1h" %}active{% endif %}">1h</a>
-            <a href="?period=24h&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "24h" %}active{% endif %}">24h</a>
-            <a href="?period=7d&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "7d" %}active{% endif %}">7d</a>
-            <a href="?period=30d&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "30d" %}active{% endif %}">30d</a>
+            <a href="?period=all&sort={{ sort|urlencode }}{% if let Some(st) = status %}&status={{ st|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "all" %}active{% endif %}">All</a>
+            <a href="?period=1h&sort={{ sort|urlencode }}{% if let Some(st) = status %}&status={{ st|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "1h" %}active{% endif %}">1h</a>
+            <a href="?period=24h&sort={{ sort|urlencode }}{% if let Some(st) = status %}&status={{ st|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "24h" %}active{% endif %}">24h</a>
+            <a href="?period=7d&sort={{ sort|urlencode }}{% if let Some(st) = status %}&status={{ st|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "7d" %}active{% endif %}">7d</a>
+            <a href="?period=30d&sort={{ sort|urlencode }}{% if let Some(st) = status %}&status={{ st|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "30d" %}active{% endif %}">30d</a>
         </div>
     </div>
 
     <div class="filter-group">
         <label>Sort by</label>
         <div class="filters">
-            <a href="?period={{ period }}&sort=last_seen{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "last_seen" %}active{% endif %}">Last Seen</a>
-            <a href="?period={{ period }}&sort=first_seen{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "first_seen" %}active{% endif %}">First Seen</a>
-            <a href="?period={{ period }}&sort=count{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "count" %}active{% endif %}">Count</a>
+            <a href="?period={{ period|urlencode }}&sort=last_seen{% if let Some(st) = status %}&status={{ st|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "last_seen" %}active{% endif %}">Last Seen</a>
+            <a href="?period={{ period|urlencode }}&sort=first_seen{% if let Some(st) = status %}&status={{ st|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "first_seen" %}active{% endif %}">First Seen</a>
+            <a href="?period={{ period|urlencode }}&sort=count{% if let Some(st) = status %}&status={{ st|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "count" %}active{% endif %}">Count</a>
         </div>
     </div>
 
@@ -210,13 +210,13 @@
 {% if total_pages > 1 %}
 <div class="pagination">
     {% if page > 1 %}
-    <a href="?page={{ page - 1 }}&period={{ period }}&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="pagination-link">Previous</a>
+    <a href="?page={{ page - 1 }}&period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(st) = status %}&status={{ st|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="pagination-link">Previous</a>
     {% endif %}
 
     <span class="pagination-info">Page {{ page }} of {{ total_pages }}</span>
 
     {% if page < total_pages %}
-    <a href="?page={{ page + 1 }}&period={{ period }}&sort={{ sort }}{% if let Some(st) = status %}&status={{ st }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="pagination-link">Next</a>
+    <a href="?page={{ page + 1 }}&period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(st) = status %}&status={{ st|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="pagination-link">Next</a>
     {% endif %}
 </div>
 {% endif %}

@@ -24,23 +24,23 @@
     <div class="filter-group">
         <label>Period</label>
         <div class="filters">
-            <a href="?period=1h&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "1h" %}active{% endif %}">1h</a>
-            <a href="?period=24h&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "24h" %}active{% endif %}">24h</a>
-            <a href="?period=7d&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "7d" %}active{% endif %}">7d</a>
-            <a href="?period=30d&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if period == "30d" %}active{% endif %}">30d</a>
+            <a href="?period=1h&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "1h" %}active{% endif %}">1h</a>
+            <a href="?period=24h&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "24h" %}active{% endif %}">24h</a>
+            <a href="?period=7d&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "7d" %}active{% endif %}">7d</a>
+            <a href="?period=30d&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "30d" %}active{% endif %}">30d</a>
         </div>
     </div>
 
     <div class="filter-group">
         <label>Sort by</label>
         <div class="filters">
-            <a href="?period={{ period }}&sort=requests{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "requests" %}active{% endif %}">Requests</a>
-            <a href="?period={{ period }}&sort=avg{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "avg" %}active{% endif %}">Avg</a>
-            <a href="?period={{ period }}&sort=p95{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "p95" %}active{% endif %}">p95</a>
-            <a href="?period={{ period }}&sort=p99{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "p99" %}active{% endif %}">p99</a>
-            <a href="?period={{ period }}&sort=max{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "max" %}active{% endif %}">Max</a>
-            <a href="?period={{ period }}&sort=db{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "db" %}active{% endif %}">DB</a>
-            <a href="?period={{ period }}&sort=errors{% if let Some(s) = search %}&search={{ s }}{% endif %}" class="{% if sort == "errors" %}active{% endif %}">Errors</a>
+            <a href="?period={{ period|urlencode }}&sort=requests{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "requests" %}active{% endif %}">Requests</a>
+            <a href="?period={{ period|urlencode }}&sort=avg{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "avg" %}active{% endif %}">Avg</a>
+            <a href="?period={{ period|urlencode }}&sort=p95{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "p95" %}active{% endif %}">p95</a>
+            <a href="?period={{ period|urlencode }}&sort=p99{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "p99" %}active{% endif %}">p99</a>
+            <a href="?period={{ period|urlencode }}&sort=max{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "max" %}active{% endif %}">Max</a>
+            <a href="?period={{ period|urlencode }}&sort=db{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "db" %}active{% endif %}">DB</a>
+            <a href="?period={{ period|urlencode }}&sort=errors{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "errors" %}active{% endif %}">Errors</a>
         </div>
     </div>
 

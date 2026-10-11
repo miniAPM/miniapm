@@ -24,30 +24,30 @@
     <div class="filter-group">
         <label>Type</label>
         <div class="filters">
-            <a href="?period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if type_filter.is_none() %}active{% endif %}">All</a>
-            <a href="?type=web&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if type_filter.as_deref() == Some("web") %}active{% endif %}">Web</a>
-            <a href="?type=job&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if type_filter.as_deref() == Some("job") %}active{% endif %}">Jobs</a>
-            <a href="?type=command&period={{ period }}&sort={{ sort }}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if type_filter.as_deref() == Some("command") %}active{% endif %}">Commands</a>
+            <a href="?period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if type_filter.is_none() %}active{% endif %}">All</a>
+            <a href="?type=web&period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if type_filter.as_deref() == Some("web") %}active{% endif %}">Web</a>
+            <a href="?type=job&period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if type_filter.as_deref() == Some("job") %}active{% endif %}">Jobs</a>
+            <a href="?type=command&period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if type_filter.as_deref() == Some("command") %}active{% endif %}">Commands</a>
         </div>
     </div>
 
     <div class="filter-group">
         <label>Period</label>
         <div class="filters">
-            <a href="?period=all&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if period == "all" %}active{% endif %}">All</a>
-            <a href="?period=1h&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if period == "1h" %}active{% endif %}">1h</a>
-            <a href="?period=24h&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if period == "24h" %}active{% endif %}">24h</a>
-            <a href="?period=7d&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if period == "7d" %}active{% endif %}">7d</a>
-            <a href="?period=30d&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if period == "30d" %}active{% endif %}">30d</a>
+            <a href="?period=all&sort={{ sort|urlencode }}{% if let Some(t) = type_filter %}&type={{ t|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if period == "all" %}active{% endif %}">All</a>
+            <a href="?period=1h&sort={{ sort|urlencode }}{% if let Some(t) = type_filter %}&type={{ t|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if period == "1h" %}active{% endif %}">1h</a>
+            <a href="?period=24h&sort={{ sort|urlencode }}{% if let Some(t) = type_filter %}&type={{ t|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if period == "24h" %}active{% endif %}">24h</a>
+            <a href="?period=7d&sort={{ sort|urlencode }}{% if let Some(t) = type_filter %}&type={{ t|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if period == "7d" %}active{% endif %}">7d</a>
+            <a href="?period=30d&sort={{ sort|urlencode }}{% if let Some(t) = type_filter %}&type={{ t|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if period == "30d" %}active{% endif %}">30d</a>
         </div>
     </div>
 
     <div class="filter-group">
         <label>Sort by</label>
         <div class="filters">
-            <a href="?period={{ period }}&sort=recent{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if sort == "recent" %}active{% endif %}">Recent</a>
-            <a href="?period={{ period }}&sort=duration{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if sort == "duration" %}active{% endif %}">Duration</a>
-            <a href="?period={{ period }}&sort=spans{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="{% if sort == "spans" %}active{% endif %}">Spans</a>
+            <a href="?period={{ period|urlencode }}&sort=recent{% if let Some(t) = type_filter %}&type={{ t|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if sort == "recent" %}active{% endif %}">Recent</a>
+            <a href="?period={{ period|urlencode }}&sort=duration{% if let Some(t) = type_filter %}&type={{ t|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if sort == "duration" %}active{% endif %}">Duration</a>
+            <a href="?period={{ period|urlencode }}&sort=spans{% if let Some(t) = type_filter %}&type={{ t|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="{% if sort == "spans" %}active{% endif %}">Spans</a>
         </div>
     </div>
 
@@ -120,13 +120,13 @@
 {% if total_pages > 1 %}
 <div class="pagination">
     {% if page > 1 %}
-    <a href="?page={{ page - 1 }}&period={{ period }}&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="pagination-link">Previous</a>
+    <a href="?page={{ page - 1 }}&period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(t) = type_filter %}&type={{ t|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="pagination-link">Previous</a>
     {% endif %}
 
     <span class="pagination-info">Page {{ page }} of {{ total_pages }}</span>
 
     {% if page < total_pages %}
-    <a href="?page={{ page + 1 }}&period={{ period }}&sort={{ sort }}{% if let Some(t) = type_filter %}&type={{ t }}{% endif %}{% if let Some(s) = search %}&search={{ s }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d }}{% endif %}" class="pagination-link">Next</a>
+    <a href="?page={{ page + 1 }}&period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if let Some(t) = type_filter %}&type={{ t|urlencode }}{% endif %}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}{% if let Some(d) = min_duration %}&min_duration={{ d|urlencode }}{% endif %}" class="pagination-link">Next</a>
     {% endif %}
 </div>
 {% endif %}
