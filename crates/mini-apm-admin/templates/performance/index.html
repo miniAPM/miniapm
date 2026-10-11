@@ -1,5 +1,9 @@
 {% extends "layout.html" %}
 
+{% macro query(period=period, sort=sort, search=search.as_deref().unwrap_or_default()) -%}
+period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if !search.is_empty() %}&search={{ search|urlencode }}{% endif %}
+{%- endmacro %}
+
 {% block title %}Routes - MiniAPM{% endblock %}
 
 {% block project_selector %}
@@ -24,23 +28,23 @@
     <div class="filter-group">
         <label>Period</label>
         <div class="filters">
-            <a href="?period=1h&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "1h" %}active{% endif %}">1h</a>
-            <a href="?period=24h&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "24h" %}active{% endif %}">24h</a>
-            <a href="?period=7d&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "7d" %}active{% endif %}">7d</a>
-            <a href="?period=30d&sort={{ sort|urlencode }}{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if period == "30d" %}active{% endif %}">30d</a>
+            <a href="?{{ query(period = "1h") }}" class="{% if period == "1h" %}active{% endif %}">1h</a>
+            <a href="?{{ query(period = "24h") }}" class="{% if period == "24h" %}active{% endif %}">24h</a>
+            <a href="?{{ query(period = "7d") }}" class="{% if period == "7d" %}active{% endif %}">7d</a>
+            <a href="?{{ query(period = "30d") }}" class="{% if period == "30d" %}active{% endif %}">30d</a>
         </div>
     </div>
 
     <div class="filter-group">
         <label>Sort by</label>
         <div class="filters">
-            <a href="?period={{ period|urlencode }}&sort=requests{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "requests" %}active{% endif %}">Requests</a>
-            <a href="?period={{ period|urlencode }}&sort=avg{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "avg" %}active{% endif %}">Avg</a>
-            <a href="?period={{ period|urlencode }}&sort=p95{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "p95" %}active{% endif %}">p95</a>
-            <a href="?period={{ period|urlencode }}&sort=p99{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "p99" %}active{% endif %}">p99</a>
-            <a href="?period={{ period|urlencode }}&sort=max{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "max" %}active{% endif %}">Max</a>
-            <a href="?period={{ period|urlencode }}&sort=db{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "db" %}active{% endif %}">DB</a>
-            <a href="?period={{ period|urlencode }}&sort=errors{% if let Some(s) = search %}&search={{ s|urlencode }}{% endif %}" class="{% if sort == "errors" %}active{% endif %}">Errors</a>
+            <a href="?{{ query(sort = "requests") }}" class="{% if sort == "requests" %}active{% endif %}">Requests</a>
+            <a href="?{{ query(sort = "avg") }}" class="{% if sort == "avg" %}active{% endif %}">Avg</a>
+            <a href="?{{ query(sort = "p95") }}" class="{% if sort == "p95" %}active{% endif %}">p95</a>
+            <a href="?{{ query(sort = "p99") }}" class="{% if sort == "p99" %}active{% endif %}">p99</a>
+            <a href="?{{ query(sort = "max") }}" class="{% if sort == "max" %}active{% endif %}">Max</a>
+            <a href="?{{ query(sort = "db") }}" class="{% if sort == "db" %}active{% endif %}">DB</a>
+            <a href="?{{ query(sort = "errors") }}" class="{% if sort == "errors" %}active{% endif %}">Errors</a>
         </div>
     </div>
 
