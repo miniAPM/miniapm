@@ -22,7 +22,7 @@ period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if !status.is_empty() 
 
 {% block content %}
 <h1>Errors</h1>
-<p class="subtitle">{{ total_count }} error{% if total_count != 1 %}s{% endif %} found</p>
+<p class="subtitle">{{ total_count }} error{{ total_count|pluralize }} found</p>
 
 {% if !hourly_errors.is_empty() %}
 <div class="card chart-card" style="margin-bottom: 1.5rem;">

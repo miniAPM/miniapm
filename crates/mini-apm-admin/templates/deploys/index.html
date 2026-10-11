@@ -46,12 +46,12 @@
             <tbody>
                 {% for deploy in deploys %}
                 <tr>
-                    <td>{{ deploy.version.as_deref().unwrap_or("-") }}</td>
+                    <td>{{ deploy.version|assigned_or("-") }}</td>
                     <td><code>{{ deploy.short_sha() }}</code></td>
-                    <td>{{ deploy.env.as_deref().unwrap_or("-") }}</td>
-                    <td>{{ deploy.deployer.as_deref().unwrap_or("-") }}</td>
+                    <td>{{ deploy.env|assigned_or("-") }}</td>
+                    <td>{{ deploy.deployer|assigned_or("-") }}</td>
                     <td>{{ deploy.deployed_at }}</td>
-                    <td>{{ deploy.description.as_deref().unwrap_or("-") }}</td>
+                    <td>{{ deploy.description|assigned_or("-") }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

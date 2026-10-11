@@ -22,7 +22,7 @@ period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if !search.is_empty() 
 
 {% block content %}
 <h1>Routes</h1>
-<p class="subtitle">{{ total_count }} route{% if total_count != 1 %}s{% endif %} found</p>
+<p class="subtitle">{{ total_count }} route{{ total_count|pluralize }} found</p>
 
 <div class="filter-bar">
     <div class="filter-group">
