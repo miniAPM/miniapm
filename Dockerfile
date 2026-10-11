@@ -27,9 +27,6 @@ COPY --from=builder /app/target/release/miniapm /usr/local/bin/
 COPY --from=builder /app/target/release/miniapm-admin /usr/local/bin/
 COPY --from=builder /app/target/release/miniapm-cli /usr/local/bin/
 
-# Admin UI assets (for miniapm-admin)
-COPY --from=builder /app/crates/mini-apm-admin/static ./static
-
 ENV SQLITE_PATH=/data/miniapm.db
 # Note: Don't use VOLUME here - let Docker Swarm/CapRover manage volume mounts
 

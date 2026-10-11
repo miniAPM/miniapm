@@ -8,7 +8,6 @@ mod tests;
 
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv6Addr};
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -19,6 +18,7 @@ use rama::extensions::ExtensionsRef;
 use rama::http::headers::HeaderMapExt;
 use rama::http::headers::forwarded::XForwardedFor;
 use rama::http::layer::error_handling::ErrorHandlerLayer;
+use rama::http::service::fs::ServeDir;
 use rama::http::service::web::response::{DatastarScript, IntoResponse};
 use rama::http::service::web::{Router, response::Html};
 use rama::http::{Request, Response, StatusCode};
@@ -27,10 +27,14 @@ use rama::layer::limit::policy::RateLimitReached;
 use rama::net::rate::KeyedRatePolicy;
 use rama::net::stream::SocketInfo;
 use rama::service::Service;
+use rama::utils::include_dir::{Dir, include_dir};
 use rama::utils::rate::Rate;
 
 use mini_apm::DbPool;
 use mini_apm::self_monitor::SelfMonitorLayer;
+
+/// Admin UI assets, built into the binary so it serves them from any directory
+const STATIC_ASSETS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/static");
 
 /// Combined state for routes that need pool
 #[derive(Clone)]
@@ -83,10 +87,7 @@ pub fn make_app(
         .with_post("/api-key/regenerate", web::api_key::regenerate)
         // Static files
         .with_get("/static/datastar.js", DatastarScript::new())
-        .with_endpoint_service(
-            "/static",
-            rama::http::service::fs::ServeDir::new(static_dir()),
-        )
+        .with_endpoint_service("/static", ServeDir::new_embedded(STATIC_ASSETS))
         // 404 handler
         .with_not_found((
             StatusCode::NOT_FOUND,
@@ -123,17 +124,6 @@ pub fn make_app(
     let with_rate_limit = rate_limit.into_layer(with_security);
 
     Arc::new(SelfMonitorLayer::global().into_layer(with_rate_limit))
-}
-
-/// Admin UI assets: `./static` when deployed (see Dockerfile), else the
-/// crate's own copy so running from source works from any directory
-fn static_dir() -> PathBuf {
-    let deployed = Path::new("./static");
-    if deployed.is_dir() {
-        deployed.to_path_buf()
-    } else {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("static")
-    }
 }
 
 /// Rate limit key: the socket peer, unless that peer is a reverse proxy on

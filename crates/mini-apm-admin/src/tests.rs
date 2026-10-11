@@ -35,6 +35,9 @@ async fn test_health_and_not_found() {
     let app = app().await;
     for (uri, expected) in [
         ("/health", StatusCode::OK),
+        ("/static/style.css", StatusCode::OK),
+        ("/static/images/logo.png", StatusCode::OK),
+        ("/static/missing.css", StatusCode::NOT_FOUND),
         ("/nope", StatusCode::NOT_FOUND),
         ("/auth/users", StatusCode::NOT_FOUND),
         ("/auth/change-password", StatusCode::NOT_FOUND),
