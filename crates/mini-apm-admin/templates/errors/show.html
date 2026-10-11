@@ -59,7 +59,7 @@
 {% if !trend_24h.is_empty() %}
 <script>
 (function() {
-    const data = [{% for val in trend_24h %}{{ val }},{% endfor %}];
+    const data = {{ trend_24h|json|safe }};
     const canvas = document.getElementById('errorSparkline');
     if (!canvas || data.length === 0) return;
 

@@ -33,11 +33,7 @@ period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if !status.is_empty() 
 </div>
 <script>
 (function() {
-    const data = [
-        {% for point in hourly_errors %}
-        { label: "{{ point.hour }}", count: {{ point.count }} },
-        {% endfor %}
-    ];
+    const data = {{ hourly_errors|json|safe }};
 
     const dangerColor = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim() || '#e74c3c';
     const textMuted = getComputedStyle(document.documentElement).getPropertyValue('--text-muted').trim() || '#8b95a8';
@@ -123,7 +119,7 @@ period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if !status.is_empty() 
             if (i % labelStep === 0 || i === data.length - 1) {
                 const x = padding.left + i * stepX;
                 // Extract just the hour from "2026-01-04 01:00" format
-                const hour = d.label.split(' ')[1] || d.label;
+                const hour = d.hour.split(' ')[1] || d.hour;
                 ctx.fillText(hour, x, height - 5);
             }
         });

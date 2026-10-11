@@ -5,7 +5,7 @@ use rama::http::service::web::extract::State;
 use crate::template::HtmlTemplate;
 use mini_apm::{
     DbPool,
-    models::{self, deploy::Deploy, span},
+    models::{self, span},
 };
 
 use super::project_context::WebProjectContext;
@@ -21,7 +21,7 @@ pub struct DashboardTemplate {
     pub recent_errors: Vec<models::AppError>,
     pub slow_requests: Vec<span::TraceSummary>,
     pub hourly_stats: Vec<span::TimeSeriesPoint>,
-    pub deploys: Vec<Deploy>,
+    pub deploy_hours: Vec<String>,
     pub ctx: WebProjectContext,
 }
 
@@ -60,10 +60,13 @@ pub async fn index(
         .await
         .inspect_err(|e| tracing::error!("Failed to load hourly stats: {e:#}"))
         .unwrap_or_default();
-    let deploys = models::deploy::list_since(&pool, project_id, since)
+    let deploy_hours = models::deploy::list_since(&pool, project_id, since)
         .await
         .inspect_err(|e| tracing::error!("Failed to load deploys: {e:#}"))
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .map(|deploy| deploy.deployed_at.hour_label())
+        .collect();
 
     HtmlTemplate(DashboardTemplate {
         requests_24h,
@@ -74,7 +77,7 @@ pub async fn index(
         recent_errors,
         slow_requests,
         hourly_stats,
-        deploys,
+        deploy_hours,
         ctx,
     })
 }
