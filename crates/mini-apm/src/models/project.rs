@@ -1,7 +1,6 @@
 use crate::DbPool;
 use crate::db::Db;
 use crate::time::Stamp;
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -15,9 +14,7 @@ pub struct Project {
 
 /// Generate a random API key for a project
 fn generate_api_key() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 24] = rng.r#gen();
-    format!("proj_{}", hex::encode(bytes))
+    format!("proj_{}", hex::encode(rand::random::<[u8; 24]>()))
 }
 
 /// Generate a slug from project name

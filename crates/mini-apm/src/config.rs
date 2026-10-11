@@ -1,4 +1,3 @@
-use rand::Rng;
 use std::env;
 use std::path::Path;
 
@@ -46,8 +45,7 @@ impl Config {
             // This shouldn't happen due to the check above, but just in case
             assert!(!enable_user_accounts, "SESSION_SECRET is required");
             // In single-user mode, generate a random secret per run
-            let bytes: [u8; 32] = rand::thread_rng().r#gen();
-            hex::encode(bytes)
+            hex::encode(rand::random::<[u8; 32]>())
         });
 
         Ok(Self {

@@ -1,11 +1,9 @@
 use crate::DbPool;
 use crate::time::Stamp;
-use argon2::{
-    Argon2,
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
-};
+use anyhow::Context;
+use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use jiff::{SignedDuration, Timestamp};
-use rand::Rng;
+use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -89,21 +87,16 @@ pub fn validate_username(username: &str) -> Result<(), UsernameValidationError> 
 
 /// Hash a password using Argon2
 pub fn hash_password(password: &str) -> anyhow::Result<String> {
-    let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-    let hash = argon2
-        .hash_password(password.as_bytes(), &salt)
-        .map_err(|e| anyhow::anyhow!("Failed to hash password: {e}"))?;
+    let hash = Argon2::default()
+        .hash_password(password.as_bytes())
+        .context("Failed to hash password")?;
     Ok(hash.to_string())
 }
 
 /// Verify a password against a hash
 pub fn verify_password(password: &str, hash: &str) -> bool {
-    let Ok(parsed_hash) = PasswordHash::new(hash) else {
-        return false;
-    };
     Argon2::default()
-        .verify_password(password.as_bytes(), &parsed_hash)
+        .verify_password(password.as_bytes(), hash)
         .is_ok()
 }
 
@@ -113,21 +106,12 @@ fn generate_token() -> String {
 }
 
 fn random_hex<const N: usize>() -> String {
-    let mut bytes = [0u8; N];
-    rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
-    hex::encode(bytes)
+    hex::encode(rand::random::<[u8; N]>())
 }
 
 /// Generate a random password (16 alphanumeric characters)
 fn generate_random_password() -> String {
-    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let mut rng = rand::thread_rng();
-    (0..16)
-        .map(|_| {
-            let idx = rng.gen_range(0..CHARSET.len());
-            CHARSET[idx] as char
-        })
-        .collect()
+    Alphanumeric.sample_string(&mut rand::rng(), 16)
 }
 
 /// Create the default admin user if no users exist
