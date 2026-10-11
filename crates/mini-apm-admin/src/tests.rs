@@ -220,3 +220,43 @@ async fn test_dashboard_marks_deploys_on_their_chart_hour() {
     assert!(html.contains(&format!(r#""hour":"{hour}""#)));
     assert!(html.contains(&format!(r#"const deployHours = ["{hour}"];"#)));
 }
+
+#[tokio::test]
+async fn test_error_page_offers_only_allowed_status_changes() {
+    use mini_apm::models::error::{self, ErrorStatusEvent::*};
+
+    let pool = mini_apm::db::test_pool().await;
+    let incoming = error::IncomingError {
+        exception_class: "BoomError".into(),
+        message: "boom".into(),
+        backtrace: vec![],
+        fingerprint: "fp".into(),
+        request_id: None,
+        user_id: None,
+        params: None,
+        timestamp: None,
+        source_context: None,
+    };
+    let id = error::insert(&pool, &incoming, None).await.unwrap();
+    let app = make_app(pool.clone());
+
+    for (event, offered) in [
+        (None, ["resolved", "ignored"]),
+        (Some(Resolve), ["ignored", "open"]),
+        (Some(Ignore), ["resolved", "open"]),
+    ] {
+        let label = format!("{event:?}");
+        if let Some(event) = event {
+            error::apply(&pool, id, event).await.unwrap();
+        }
+        let page = html(&app, &format!("/errors/{id}")).await;
+        for status in ["resolved", "ignored", "open"] {
+            let button = format!(r#"name="status" value="{status}""#);
+            assert_eq!(
+                page.contains(&button),
+                offered.contains(&status),
+                "{label} {status}"
+            );
+        }
+    }
+}

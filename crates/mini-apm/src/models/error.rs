@@ -33,6 +33,13 @@ pub struct AppError {
     pub status: String,
 }
 
+impl AppError {
+    /// Whether the error's current status allows `event`
+    pub fn allows(&self, event: ErrorStatusEvent) -> bool {
+        status::transition(&self.status, event).is_some()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ErrorOccurrence {
     pub id: i64,

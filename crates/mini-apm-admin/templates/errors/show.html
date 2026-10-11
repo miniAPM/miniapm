@@ -35,19 +35,19 @@
         {% endif %}
     </div>
     <div class="error-actions">
-        {% if e.status != "resolved" %}
+        {% if e.allows(ErrorStatusEvent::Resolve) %}
         <form method="POST" action="/errors/{{ e.id }}/status" class="inline-status-form">
             <input type="hidden" name="status" value="resolved">
             <button type="submit" class="btn btn-success btn-sm">Mark Resolved</button>
         </form>
         {% endif %}
-        {% if e.status != "ignored" %}
+        {% if e.allows(ErrorStatusEvent::Ignore) %}
         <form method="POST" action="/errors/{{ e.id }}/status" class="inline-status-form">
             <input type="hidden" name="status" value="ignored">
             <button type="submit" class="btn btn-muted btn-sm">Ignore</button>
         </form>
         {% endif %}
-        {% if e.status != "open" %}
+        {% if e.allows(ErrorStatusEvent::Reopen) %}
         <form method="POST" action="/errors/{{ e.id }}/status" class="inline-status-form">
             <input type="hidden" name="status" value="open">
             <button type="submit" class="btn btn-outline btn-sm">Reopen</button>
