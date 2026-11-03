@@ -82,7 +82,10 @@ pub fn make_app(
     state: AppState,
 ) -> impl Service<Request, Output = Response, Error = Infallible> + Clone {
     // Ingestion API (API key auth required)
-    let admission = api::admission::Admission::new(state.config.ingest_admission.as_ref());
+    let admission = api::admission::Admission::new(
+        state.config.ingest_admission.as_ref(),
+        state.config.ingest_max_in_flight,
+    );
     let ingest = Router::new_with_state(state.clone())
         .with_post("/deploys", api::ingest_deploys)
         .with_match_route(

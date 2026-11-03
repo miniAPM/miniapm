@@ -86,3 +86,17 @@ fn ingestion_environment_settings_are_strict_and_opt_in() {
     assert!(super::parse_ingest_admission(absent(), Ok("1".into()), absent()).is_err());
     assert!(super::parse_ingest_admission(absent(), absent(), Ok("1".into())).is_err());
 }
+#[test]
+fn ingestion_concurrency_is_independent_and_bounded() {
+    assert!(
+        super::parse_in_flight(Err(std::env::VarError::NotPresent))
+            .unwrap()
+            .is_none()
+    );
+    for value in ["1", "4", "8"] {
+        assert!(super::parse_in_flight(Ok(value.into())).unwrap().is_some());
+    }
+    for value in ["", "0", "-1", "9", "NaN", "1.5", "invalid"] {
+        assert!(super::parse_in_flight(Ok(value.into())).is_err(), "{value}");
+    }
+}

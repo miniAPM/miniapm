@@ -8,6 +8,7 @@ use rama::extensions::ExtensionsRef;
 use rama::http::service::web::response::IntoResponse;
 use rama::http::{Request, Response, StatusCode};
 use throttle_machines::{GcraParams, KeyedGcra};
+use tokio::sync::Semaphore;
 
 use super::ProjectContext;
 
@@ -39,19 +40,37 @@ impl AdmissionConfig {
     }
 }
 
+/// Maximum simultaneous ingestion handlers in one collector (not a queue).
+///
+/// The ceiling leaves headroom in the normal ten-connection database pool.
+#[derive(Clone, Copy, Debug)]
+pub struct InFlightLimit(usize);
+
+impl InFlightLimit {
+    pub fn new(limit: usize) -> anyhow::Result<Self> {
+        anyhow::ensure!(
+            (1..=8).contains(&limit),
+            "INGEST_MAX_IN_FLIGHT must be between 1 and 8"
+        );
+        Ok(Self(limit))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Admission {
     limiter: Option<Arc<KeyedGcra<i64>>>,
+    capacity: Option<Arc<Semaphore>>,
 }
 
 impl Admission {
-    pub(crate) fn new(config: Option<&AdmissionConfig>) -> Self {
+    pub(crate) fn new(config: Option<&AdmissionConfig>, in_flight: Option<InFlightLimit>) -> Self {
         Self {
             limiter: config.map(|config| {
                 Arc::new(
                     KeyedGcra::new(config.params).max_keys_per_shard(config.max_keys_per_shard),
                 )
             }),
+            capacity: in_flight.map(|limit| Arc::new(Semaphore::new(limit.0))),
         }
     }
 
@@ -85,6 +104,16 @@ where
     type Error = S::Error;
 
     async fn serve(&self, req: Request) -> Result<Response, Self::Error> {
+        // Acquire before spending rate budget; rejected work does not queue or consume quota.
+        // The guard spans body reads and persistence and drops on every return/cancellation.
+        let _permit = if let Some(capacity) = &self.admission.capacity {
+            match capacity.try_acquire() {
+                Ok(permit) => Some(permit),
+                Err(_) => return Ok(refusal(self.transport, Refusal::Capacity)),
+            }
+        } else {
+            None
+        };
         if let Some(limiter) = &self.admission.limiter {
             // A missing context is a wiring error: never admit unauthenticated work.
             let Some(project_id) = req
@@ -96,30 +125,41 @@ where
             };
             let decision = limiter.check(&project_id);
             if !decision.allowed {
-                return Ok(refusal(self.transport, decision.retry_after));
+                return Ok(refusal(self.transport, Refusal::Rate(decision.retry_after)));
             }
         }
         self.inner.serve(req).await
     }
 }
 
-fn refusal(transport: Transport, retry_after: f64) -> Response {
+#[derive(Clone, Copy, Debug)]
+enum Refusal {
+    Capacity,
+    Rate(f64),
+}
+
+fn refusal(transport: Transport, reason: Refusal) -> Response {
+    let (status, retry_after, message) = match reason {
+        Refusal::Capacity => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            1.0,
+            "Ingestion concurrency limit reached",
+        ),
+        Refusal::Rate(delay) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            delay,
+            "Ingestion admission limit reached",
+        ),
+    };
     match transport {
         Transport::Http => {
             // The validated bounds keep the library's finite retry hint representable.
             let seconds = Duration::from_secs_f64(retry_after.ceil().max(1.0)).as_secs();
-            (
-                StatusCode::TOO_MANY_REQUESTS,
-                [("retry-after", seconds.to_string())],
-                "Ingestion admission limit reached",
-            )
-                .into_response()
+            (status, [("retry-after", seconds.to_string())], message).into_response()
         }
-        Transport::Grpc => {
-            rama::http::grpc::Status::unavailable("Ingestion admission limit reached")
-                .try_into_http()
-                .expect("static gRPC status contains valid headers")
-        }
+        Transport::Grpc => rama::http::grpc::Status::unavailable(message)
+            .try_into_http()
+            .expect("static gRPC status contains valid headers"),
     }
 }
 

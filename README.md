@@ -213,8 +213,9 @@ Leave all three unset to disable admission limits. Rate must be finite and betwe
 Burst defaults to 100 and keys per shard to 4096 when a rate is configured.
 The burst and storage settings require a rate.
 
-Each authenticated request/export costs one admission, including batches and
-malformed payloads. HTTP JSON/protobuf, errors, deploys, and OTLP gRPC share the
+Each request/export that passes the concurrency gate costs one rate admission,
+including batches and malformed payloads. HTTP JSON/protobuf, errors, deploys,
+and OTLP gRPC share the
 same project budget. Limits run after authentication but before reading bodies;
 authentication still queries the database. Existing 10 MiB body limits remain.
 
@@ -226,6 +227,24 @@ This is **process-local protection**, not a durable or distributed quota:
 restarts reset budgets and multiple collectors each have their own budget.
 The limiter has 16 bounded shards; recovered project entries are reclaimed.
 Health checks, the dashboard/MCP, and internal self-monitoring are excluded.
+
+### Bounded ingestion concurrency
+
+Independently of the rate budget, set `INGEST_MAX_IN_FLIGHT=4` to allow at most
+four simultaneous ingestion handlers **across all projects and transports in
+one collector**. Unset means unlimited. Valid values are 1–8; the ceiling leaves
+headroom in the normal ten-connection pool. Start conservatively (for example, 1)
+for SQLite's single writer and tune using representative traffic.
+
+The gate never queues requests. Capacity exhaustion returns HTTP `503` with
+`Retry-After: 1` or gRPC `UNAVAILABLE`, without consuming rate budget. A permit
+covers body parsing and storage and is released on completion, errors, or
+cancellation. Slow uploads therefore occupy slots. Limits are fixed, not adaptive.
+
+Authentication still happens first, so authentication queries and database
+contention can delay even rejected requests. Health checks bypass the gate but
+share the database pool: this is not a guaranteed health-query reservation.
+There is no cross-project fairness or distributed limit across collectors.
 
 ## Multi-User Mode
 

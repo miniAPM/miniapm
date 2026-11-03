@@ -63,6 +63,9 @@ throttle-machines = "0.5.0"
 mcp-host = { version = "0.13.1", features = ["http", "macros"] }
 schemars = "1.2.3"
 
+# Test fixtures
+tempfile = "3.27.0"
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 unused_must_use = "warn"

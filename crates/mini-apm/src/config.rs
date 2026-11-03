@@ -13,6 +13,7 @@ pub struct Config {
     pub enable_projects: bool,
     pub session_secret: String,
     pub ingest_admission: Option<crate::api::admission::AdmissionConfig>,
+    pub ingest_max_in_flight: Option<crate::api::admission::InFlightLimit>,
 }
 
 pub fn env_flag(name: &str) -> bool {
@@ -62,6 +63,7 @@ impl Config {
             enable_projects: env_flag("ENABLE_PROJECTS"),
             session_secret,
             ingest_admission: ingest_admission_from_env()?,
+            ingest_max_in_flight: parse_in_flight(env::var("INGEST_MAX_IN_FLIGHT"))?,
         })
     }
 
@@ -142,6 +144,7 @@ impl Config {
             self.slow_request_threshold_ms
         );
         tracing::info!("  Ingestion admission: {:?}", self.ingest_admission);
+        tracing::info!("  Ingestion concurrency: {:?}", self.ingest_max_in_flight);
     }
 }
 
@@ -158,6 +161,7 @@ impl Default for Config {
             enable_projects: false,
             session_secret: "test-secret".to_string(),
             ingest_admission: None,
+            ingest_max_in_flight: None,
         }
     }
 }
@@ -203,6 +207,21 @@ fn parse_ingest_admission(
         burst,
         keys as usize,
     )?))
+}
+
+fn parse_in_flight(
+    value: Result<String, env::VarError>,
+) -> anyhow::Result<Option<crate::api::admission::InFlightLimit>> {
+    use anyhow::Context;
+    match value {
+        Err(env::VarError::NotPresent) => Ok(None),
+        value => Ok(Some(crate::api::admission::InFlightLimit::new(
+            value
+                .context("Invalid INGEST_MAX_IN_FLIGHT")?
+                .parse()
+                .context("Invalid INGEST_MAX_IN_FLIGHT")?,
+        )?)),
+    }
 }
 
 #[cfg(test)]
