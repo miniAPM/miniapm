@@ -7,6 +7,12 @@ cargo test --workspace
 cargo fmt --all -- --check
 ```
 
+PostgreSQL job-lock tests also keep the original pool alive while cancelling a
+running job, then acquire its advisory lock through an independent collector
+session. Normal success/failure paths must release the lock and reuse healthy
+connections. Cancellation discards the possibly locked session; it does **not**
+undo committed job work or make an arbitrary job safe to retry.
+
 ## Conventions
 
 - Keep tests in `<module>/tests.rs`, wired with `#[cfg(test)] mod tests;`.
