@@ -67,7 +67,8 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
 
     // MiniAPM records its own requests and errors into the `self` project
     let self_project = models::project::ensure_self_project(&pool).await?;
-    SelfMonitor::start(pool.clone(), self_project.id, "miniapm").install();
+    let (monitor, writer) = SelfMonitor::start(pool.clone(), self_project.id, "miniapm");
+    monitor.install();
 
     // Start background jobs
     let jobs = jobs::start(pool.clone(), config.clone());
@@ -81,6 +82,9 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
     tracing::info!("MiniAPM collector listening on http://{} (API only)", addr);
 
     let result = serve_with_jobs(addr, app, Some(jobs)).await;
+    if let Err(error) = writer.shutdown().await {
+        tracing::warn!(%error, "Self-monitor shutdown incomplete");
+    }
     // Maintenance tasks have finished or been cancelled and joined, even when
     // HTTP draining failed. Close sessions only after releasing their guards.
     pool.close().await;

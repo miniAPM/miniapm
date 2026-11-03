@@ -42,6 +42,9 @@ collector maintenance jobs and without them (the admin server path), including
 connection cleanup without sending an OS signal.
 Injected shutdown notifications cover successful shutdown and signal-source
 errors, preserving the underlying error after listener and maintenance cleanup.
+Self-monitor tests explicitly drain the writer while sender clones remain alive,
+verify buffered spans and errors in the database without polling sleeps, and
+cover multiple queued batches, late records, and a writer blocked on pool capacity.
 
 ## Ingestion load experiment
 

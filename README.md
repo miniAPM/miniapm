@@ -76,6 +76,12 @@ cancelled and joined before the collector closes its database pool.
 Shutdown-signal registration or reception failures use the same cleanup path
 and return an error rather than panicking or reporting a successful shutdown.
 
+After HTTP and maintenance stop, both binaries give the self-monitor writer up
+to five additional seconds to flush accepted telemetry before closing the pool.
+New self-monitor records are dropped during this flush. A stalled writer is
+cancelled and joined; a warning reports discarded records without masking the
+server's result. Self-monitor storage remains best-effort.
+
 ## Quick Start
 
 ### Docker Compose (recommended)

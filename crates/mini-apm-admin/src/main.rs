@@ -26,9 +26,15 @@ async fn main() -> anyhow::Result<()> {
 
     // MiniAPM records its own requests and errors into the `self` project
     let self_project = models::project::ensure_self_project(&pool).await?;
-    SelfMonitor::start(pool.clone(), self_project.id, "miniapm-admin").install();
+    let (monitor, writer) = SelfMonitor::start(pool.clone(), self_project.id, "miniapm-admin");
+    monitor.install();
 
-    run(pool, port).await
+    let result = run(pool.clone(), port).await;
+    if let Err(error) = writer.shutdown().await {
+        tracing::warn!(%error, "Self-monitor shutdown incomplete");
+    }
+    pool.close().await;
+    result
 }
 
 async fn run(pool: DbPool, port: u16) -> anyhow::Result<()> {
