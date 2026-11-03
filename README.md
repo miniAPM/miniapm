@@ -215,6 +215,8 @@ Feature flags accept `true`/`false` (case-insensitive) or `1`/`0`. Unset flags
 default to false; invalid values fail startup rather than silently disabling features.
 Retention defaults apply only when unset. Explicit values must be positive whole
 days and produce a cutoff within the supported timestamp range.
+`SLOW_REQUEST_THRESHOLD_MS` must be finite and positive; its 500 ms default applies
+only when unset.
 
 ### Collector (`miniapm`)
 

@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn slow_thresholds_default_only_when_absent_and_require_finite_positive_values() {
+    assert_eq!(
+        parse_threshold(Err(env::VarError::NotPresent)).unwrap(),
+        500.0
+    );
+    assert_eq!(parse_threshold(Ok("12.5".into())).unwrap(), 12.5);
+    for value in ["", "invalid", "0", "-1", "NaN", "inf", "-inf"] {
+        assert!(
+            parse_threshold(Ok(value.into()))
+                .unwrap_err()
+                .to_string()
+                .contains("SLOW_REQUEST_THRESHOLD_MS")
+        );
+    }
+    assert!(parse_threshold(Err(env::VarError::NotUnicode("invalid".into()))).is_err());
+    for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, 0.0] {
+        let config = Config {
+            slow_request_threshold_ms: value,
+            ..Config::default()
+        };
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("SLOW_REQUEST_THRESHOLD_MS")
+        );
+    }
+}
+
+#[test]
 fn retention_defaults_only_when_absent_and_rejects_unsafe_cutoffs() {
     for (name, default) in [("RETENTION_DAYS_ERRORS", 30), ("RETENTION_DAYS_SPANS", 7)] {
         assert_eq!(

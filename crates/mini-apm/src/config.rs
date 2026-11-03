@@ -29,12 +29,19 @@ fn parse_flag(name: &str, value: Result<String, env::VarError>) -> anyhow::Resul
     }
 }
 
-fn env_positive<T: std::str::FromStr + PartialOrd + Default>(name: &str, default: T) -> T {
-    env::var(name)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .filter(|v| *v > T::default())
-        .unwrap_or(default)
+fn parse_threshold(value: Result<String, env::VarError>) -> anyhow::Result<f64> {
+    let threshold: f64 = match value {
+        Err(env::VarError::NotPresent) => 500.0,
+        Ok(value) => value
+            .parse()
+            .map_err(|_| anyhow::anyhow!("Invalid SLOW_REQUEST_THRESHOLD_MS"))?,
+        Err(_) => anyhow::bail!("SLOW_REQUEST_THRESHOLD_MS must contain valid UTF-8"),
+    };
+    anyhow::ensure!(
+        threshold.is_finite() && threshold > 0.0,
+        "SLOW_REQUEST_THRESHOLD_MS must be finite and positive"
+    );
+    Ok(threshold)
 }
 
 fn retention_supported(days: i64) -> bool {
@@ -101,7 +108,7 @@ impl Config {
                 env::var("RETENTION_DAYS_SPANS"),
                 7,
             )?,
-            slow_request_threshold_ms: env_positive("SLOW_REQUEST_THRESHOLD_MS", 500.0),
+            slow_request_threshold_ms: parse_threshold(env::var("SLOW_REQUEST_THRESHOLD_MS"))?,
             mini_apm_url: env::var("MINI_APM_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".to_string()),
             enable_user_accounts,
@@ -140,9 +147,9 @@ impl Config {
         }
 
         // Validate slow request threshold is positive
-        if self.slow_request_threshold_ms <= 0.0 {
+        if !self.slow_request_threshold_ms.is_finite() || self.slow_request_threshold_ms <= 0.0 {
             errors.push(format!(
-                "SLOW_REQUEST_THRESHOLD_MS must be positive, got: {}",
+                "SLOW_REQUEST_THRESHOLD_MS must be finite and positive, got: {}",
                 self.slow_request_threshold_ms
             ));
         }
