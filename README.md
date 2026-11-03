@@ -220,6 +220,8 @@ only when unset.
 `SESSION_SECRET` must be nonblank when supplied and at least 32 characters when
 accounts are enabled. Only an absent secret in single-user mode is generated
 automatically. Configuration debug output redacts session secrets and database URLs.
+`SQLITE_PATH`, `DATABASE_URL`, and `MINI_APM_URL` must be nonblank UTF-8 when
+supplied; defaults or absence apply only when the environment variable is unset.
 
 ### Collector (`miniapm`)
 
@@ -241,7 +243,7 @@ automatically. Configuration debug output redacts session secrets and database U
 | `DATABASE_URL` | | PostgreSQL connection URL, same as collector (PostgreSQL builds) |
 | `ENABLE_USER_ACCOUNTS` | `false` | Enable multi-user authentication |
 | `SESSION_SECRET` | (required) | Secret for session cookies |
-| `MINI_APM_URL` | `http://localhost:3001` | URL for generating links |
+| `MINI_APM_URL` | `http://localhost:3000` | URL for generating links; set to your public dashboard URL |
 | `ADMIN_PORT` | `3001` | Dashboard listen port (0–65535); invalid values abort startup |
 
 ## Ingestion admission

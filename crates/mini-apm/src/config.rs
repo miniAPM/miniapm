@@ -63,6 +63,20 @@ fn parse_session_secret(
     Ok(secret)
 }
 
+fn parse_optional_text(
+    name: &str,
+    value: Result<String, env::VarError>,
+) -> anyhow::Result<Option<String>> {
+    match value {
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(_) => anyhow::bail!("{name} must contain valid UTF-8"),
+        Ok(value) => {
+            anyhow::ensure!(!value.trim().is_empty(), "{name} must not be blank");
+            Ok(Some(value))
+        }
+    }
+}
+
 pub fn env_flag(name: &str) -> anyhow::Result<bool> {
     parse_flag(name, env::var(name))
 }
@@ -128,9 +142,9 @@ impl Config {
             parse_session_secret(env::var("SESSION_SECRET"), enable_user_accounts)?;
 
         Ok(Self {
-            sqlite_path: env::var("SQLITE_PATH")
-                .unwrap_or_else(|_| "./data/miniapm.db".to_string()),
-            database_url: env::var("DATABASE_URL").ok(),
+            sqlite_path: parse_optional_text("SQLITE_PATH", env::var("SQLITE_PATH"))?
+                .unwrap_or_else(|| "./data/miniapm.db".to_string()),
+            database_url: parse_optional_text("DATABASE_URL", env::var("DATABASE_URL"))?,
             retention_days_errors: parse_retention(
                 "RETENTION_DAYS_ERRORS",
                 env::var("RETENTION_DAYS_ERRORS"),
@@ -142,8 +156,8 @@ impl Config {
                 7,
             )?,
             slow_request_threshold_ms: parse_threshold(env::var("SLOW_REQUEST_THRESHOLD_MS"))?,
-            mini_apm_url: env::var("MINI_APM_URL")
-                .unwrap_or_else(|_| "http://localhost:3000".to_string()),
+            mini_apm_url: parse_optional_text("MINI_APM_URL", env::var("MINI_APM_URL"))?
+                .unwrap_or_else(|| "http://localhost:3000".to_string()),
             enable_user_accounts,
             enable_projects: env_flag("ENABLE_PROJECTS")?,
             session_secret,
@@ -156,6 +170,16 @@ impl Config {
     /// Returns Ok(()) if all validations pass.
     pub fn validate(&self) -> anyhow::Result<()> {
         let mut errors = Vec::new();
+        if self.sqlite_path.trim().is_empty() {
+            errors.push("SQLITE_PATH must not be blank".to_string());
+        }
+        if self
+            .database_url
+            .as_ref()
+            .is_some_and(|url| url.trim().is_empty())
+        {
+            errors.push("DATABASE_URL must not be blank when supplied".to_string());
+        }
 
         // Validate MINI_APM_URL is a valid URL
         if !self.mini_apm_url.starts_with("http://") && !self.mini_apm_url.starts_with("https://") {

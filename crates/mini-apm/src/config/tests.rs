@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn text_settings_preserve_explicit_values_and_reject_invalid_present_values() {
+    for name in ["SQLITE_PATH", "DATABASE_URL", "MINI_APM_URL"] {
+        assert!(
+            parse_optional_text(name, Err(env::VarError::NotPresent))
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            parse_optional_text(name, Ok("configured value".into()))
+                .unwrap()
+                .as_deref(),
+            Some("configured value")
+        );
+        for value in ["", "   "] {
+            assert!(
+                parse_optional_text(name, Ok(value.into()))
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+        let error =
+            parse_optional_text(name, Err(env::VarError::NotUnicode("private-value".into())))
+                .unwrap_err();
+        assert!(error.to_string().contains(name));
+        assert!(!format!("{error:#}").contains("private-value"));
+    }
+    let error = Config {
+        sqlite_path: String::new(),
+        database_url: Some(String::new()),
+        ..Config::default()
+    }
+    .validate()
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("SQLITE_PATH"));
+    assert!(error.contains("DATABASE_URL"));
+}
+
+#[test]
 fn session_secrets_distinguish_absence_from_invalid_values() {
     assert!(parse_session_secret(Err(env::VarError::NotPresent), true).is_err());
     assert_ne!(

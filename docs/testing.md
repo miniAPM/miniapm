@@ -48,6 +48,8 @@ cover multiple queued batches, late records, and a writer blocked on pool capaci
 Stored self-monitor SQL spans must also identify the selected database backend.
 Admin-port tests inject environment lookup results without mutating process-wide
 variables: only an absent `ADMIN_PORT` defaults to 3001; invalid values must fail.
+Shared configuration tests likewise inject lookup results to cover strict flags,
+safe retention cutoffs, finite thresholds, secret redaction, and invalid text settings.
 
 ## Ingestion load experiment
 
