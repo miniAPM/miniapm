@@ -16,8 +16,17 @@ pub struct Config {
     pub ingest_max_in_flight: Option<crate::api::admission::InFlightLimit>,
 }
 
-pub fn env_flag(name: &str) -> bool {
-    env::var(name).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+pub fn env_flag(name: &str) -> anyhow::Result<bool> {
+    parse_flag(name, env::var(name))
+}
+
+fn parse_flag(name: &str, value: Result<String, env::VarError>) -> anyhow::Result<bool> {
+    match value {
+        Err(env::VarError::NotPresent) => Ok(false),
+        Ok(value) if value == "1" || value.eq_ignore_ascii_case("true") => Ok(true),
+        Ok(value) if value == "0" || value.eq_ignore_ascii_case("false") => Ok(false),
+        _ => anyhow::bail!("{name} must be true, false, 1, or 0"),
+    }
 }
 
 fn env_positive<T: std::str::FromStr + PartialOrd + Default>(name: &str, default: T) -> T {
@@ -31,7 +40,7 @@ fn env_positive<T: std::str::FromStr + PartialOrd + Default>(name: &str, default
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         // SESSION_SECRET is required when user accounts are enabled
-        let enable_user_accounts = env_flag("ENABLE_USER_ACCOUNTS");
+        let enable_user_accounts = env_flag("ENABLE_USER_ACCOUNTS")?;
 
         let session_secret = env::var("SESSION_SECRET").ok();
 
@@ -60,7 +69,7 @@ impl Config {
             mini_apm_url: env::var("MINI_APM_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".to_string()),
             enable_user_accounts,
-            enable_projects: env_flag("ENABLE_PROJECTS"),
+            enable_projects: env_flag("ENABLE_PROJECTS")?,
             session_secret,
             ingest_admission: ingest_admission_from_env()?,
             ingest_max_in_flight: parse_in_flight(env::var("INGEST_MAX_IN_FLIGHT"))?,

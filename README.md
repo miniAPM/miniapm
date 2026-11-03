@@ -211,6 +211,9 @@ curl -X POST http://localhost:3000/ingest/deploys \
 
 ## Configuration
 
+Feature flags accept `true`/`false` (case-insensitive) or `1`/`0`. Unset flags
+default to false; invalid values fail startup rather than silently disabling features.
+
 ### Collector (`miniapm`)
 
 | Variable | Default | Description |

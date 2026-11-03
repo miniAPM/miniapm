@@ -1,4 +1,30 @@
-use super::Config;
+use super::*;
+
+#[test]
+fn feature_flags_default_only_when_absent_and_reject_typos() {
+    for name in ["ENABLE_USER_ACCOUNTS", "ENABLE_PROJECTS"] {
+        assert!(!parse_flag(name, Err(env::VarError::NotPresent)).unwrap());
+        for (value, expected) in [
+            ("true", true),
+            ("TRUE", true),
+            ("1", true),
+            ("false", false),
+            ("FALSE", false),
+            ("0", false),
+        ] {
+            assert_eq!(parse_flag(name, Ok(value.into())).unwrap(), expected);
+        }
+        for value in ["", "treu", "yes"] {
+            assert!(
+                parse_flag(name, Ok(value.into()))
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+        assert!(parse_flag(name, Err(env::VarError::NotUnicode("invalid".into()))).is_err());
+    }
+}
 
 #[test]
 fn validation_reports_all_configuration_errors() {

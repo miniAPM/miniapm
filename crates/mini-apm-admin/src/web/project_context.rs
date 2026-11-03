@@ -68,8 +68,10 @@ impl FromPartsStateRefPair<AppState> for WebProjectContext {
         Ok(Self {
             current_project,
             projects,
-            projects_enabled: env_flag("ENABLE_PROJECTS"),
-            accounts_enabled: env_flag("ENABLE_USER_ACCOUNTS"),
+            projects_enabled: env_flag("ENABLE_PROJECTS")
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+            accounts_enabled: env_flag("ENABLE_USER_ACCOUNTS")
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
         })
     }
 }
