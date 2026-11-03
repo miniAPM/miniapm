@@ -68,14 +68,21 @@ pub async fn run(pool: DbPool, config: Config, port: u16) -> anyhow::Result<()> 
     SelfMonitor::start(pool.clone(), self_project.id, "miniapm").install();
 
     // Start background jobs
-    jobs::start(pool.clone(), config.clone());
+    let jobs = jobs::start(pool.clone(), config.clone());
 
-    let app = make_app(AppState { pool, config });
+    let app = make_app(AppState {
+        pool: pool.clone(),
+        config,
+    });
 
     let addr = format!("0.0.0.0:{port}");
     tracing::info!("MiniAPM collector listening on http://{} (API only)", addr);
 
-    serve_with_graceful_shutdown(addr, app).await
+    let result = serve_with_jobs(addr, app, Some(jobs)).await;
+    // Maintenance tasks have finished or been cancelled and joined, even when
+    // HTTP draining failed. Close sessions only after releasing their guards.
+    pool.close().await;
+    result
 }
 
 pub fn make_app(
@@ -148,7 +155,21 @@ where
     S: Service<Request, Output = Resp, Error = Infallible> + Clone + 'static,
     Resp: IntoResponse + Send + 'static,
 {
-    let graceful = Shutdown::default();
+    serve_with_jobs(addr, app, None).await
+}
+
+async fn serve_with_jobs<S, Resp>(
+    addr: String,
+    app: S,
+    jobs: Option<jobs::Jobs>,
+) -> anyhow::Result<()>
+where
+    S: Service<Request, Output = Resp, Error = Infallible> + Clone + 'static,
+    Resp: IntoResponse + Send + 'static,
+{
+    // Signals are handled below, once, for both HTTP and maintenance tasks.
+    let (shutdown, signal) = tokio::sync::oneshot::channel::<()>();
+    let graceful = Shutdown::new(signal);
 
     graceful.spawn_task_fn(move |guard| async move {
         let app = AddInputExtensionLayer::new(ShutdownSignal(guard.clone_weak())).into_layer(app);
@@ -181,13 +202,32 @@ where
         }
     }
 
-    graceful
-        .shutdown_with_limit(Duration::from_secs(30))
-        .await
-        .map_err(|e| anyhow::anyhow!("Graceful shutdown failed: {e:?}"))?;
+    if shutdown.send(()).is_err() {
+        tracing::warn!("HTTP shutdown signal receiver already closed");
+    }
+    drain(graceful, jobs, Duration::from_secs(30)).await?;
 
     tracing::info!("Server shutdown complete");
     Ok(())
+}
+
+pub(crate) async fn drain(
+    graceful: Shutdown,
+    jobs: Option<jobs::Jobs>,
+    grace: Duration,
+) -> anyhow::Result<()> {
+    if let Some(jobs) = &jobs {
+        jobs.stop();
+    }
+    // Both drains run even if HTTP times out; never detach maintenance jobs on
+    // an early error. Their grace runs concurrently, not after HTTP's grace.
+    let (http, ()) = tokio::join!(graceful.shutdown_with_limit(grace), async move {
+        if let Some(jobs) = jobs {
+            jobs.shutdown(grace).await;
+        }
+    });
+    http.map(|_| ())
+        .map_err(|e| anyhow::anyhow!("Graceful shutdown failed: {e:?}"))
 }
 
 #[cfg(test)]

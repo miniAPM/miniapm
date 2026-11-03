@@ -62,6 +62,14 @@ and discards the lock session safely.
 These bounds cover attempts and backoff, not database query duration. Ingestion
 handlers and retention jobs do not acquire any new retries.
 
+### Shutdown
+
+On Ctrl+C or SIGTERM, the collector stops scheduling maintenance jobs and drains
+HTTP requests and running jobs concurrently, with a 30-second grace period.
+Unfinished jobs are then cancelled and joined before the database pool closes,
+including when HTTP draining times out. PostgreSQL advisory-lock sessions are
+discarded safely on cancellation. Cancellation does not undo work already committed.
+
 ## Quick Start
 
 ### Docker Compose (recommended)

@@ -32,6 +32,12 @@ and cancellation—not the crate's delay calculations or attempt arithmetic.
 Backoff sleepers are injected to avoid timing-dependent tests; production uses Tokio timers and
 the published `chrono-machines` async retry driver.
 
+Maintenance shutdown tests cover stopping before the first scheduled run,
+allowing a running job to commit during grace, and cancelling uncommitted work
+even when HTTP draining times out. PostgreSQL tests also acquire the cancelled
+job's lock from an independent pool while its original pool remains alive.
+These exercise MiniAPM's lifecycle wiring, not Tokio's scheduling algorithms.
+
 ## Ingestion load experiment
 
 Run the ignored, release-mode in-process experiment against a temporary on-disk
