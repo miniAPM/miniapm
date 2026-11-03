@@ -37,6 +37,34 @@ fn env_positive<T: std::str::FromStr + PartialOrd + Default>(name: &str, default
         .unwrap_or(default)
 }
 
+fn retention_supported(days: i64) -> bool {
+    days > 0
+        && days.checked_mul(86_400).is_some_and(|seconds| {
+            jiff::Timestamp::now()
+                .checked_sub(jiff::SignedDuration::from_secs(seconds))
+                .is_ok()
+        })
+}
+
+fn parse_retention(
+    name: &str,
+    value: Result<String, env::VarError>,
+    default: i64,
+) -> anyhow::Result<i64> {
+    let days = match value {
+        Err(env::VarError::NotPresent) => default,
+        Ok(value) => value
+            .parse()
+            .map_err(|_| anyhow::anyhow!("Invalid {name}"))?,
+        Err(_) => anyhow::bail!("{name} must contain valid UTF-8"),
+    };
+    anyhow::ensure!(
+        retention_supported(days),
+        "{name} must be positive and within the supported timestamp range"
+    );
+    Ok(days)
+}
+
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         // SESSION_SECRET is required when user accounts are enabled
@@ -63,8 +91,16 @@ impl Config {
             sqlite_path: env::var("SQLITE_PATH")
                 .unwrap_or_else(|_| "./data/miniapm.db".to_string()),
             database_url: env::var("DATABASE_URL").ok(),
-            retention_days_errors: env_positive("RETENTION_DAYS_ERRORS", 30),
-            retention_days_spans: env_positive("RETENTION_DAYS_SPANS", 7),
+            retention_days_errors: parse_retention(
+                "RETENTION_DAYS_ERRORS",
+                env::var("RETENTION_DAYS_ERRORS"),
+                30,
+            )?,
+            retention_days_spans: parse_retention(
+                "RETENTION_DAYS_SPANS",
+                env::var("RETENTION_DAYS_SPANS"),
+                7,
+            )?,
             slow_request_threshold_ms: env_positive("SLOW_REQUEST_THRESHOLD_MS", 500.0),
             mini_apm_url: env::var("MINI_APM_URL")
                 .unwrap_or_else(|_| "http://localhost:3000".to_string()),
@@ -90,15 +126,15 @@ impl Config {
         }
 
         // Validate retention days are positive
-        if self.retention_days_errors <= 0 {
+        if !retention_supported(self.retention_days_errors) {
             errors.push(format!(
-                "RETENTION_DAYS_ERRORS must be positive, got: {}",
+                "RETENTION_DAYS_ERRORS must be positive and within the supported timestamp range, got: {}",
                 self.retention_days_errors
             ));
         }
-        if self.retention_days_spans <= 0 {
+        if !retention_supported(self.retention_days_spans) {
             errors.push(format!(
-                "RETENTION_DAYS_SPANS must be positive, got: {}",
+                "RETENTION_DAYS_SPANS must be positive and within the supported timestamp range, got: {}",
                 self.retention_days_spans
             ));
         }

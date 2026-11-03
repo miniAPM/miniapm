@@ -1,6 +1,43 @@
 use super::*;
 
 #[test]
+fn retention_defaults_only_when_absent_and_rejects_unsafe_cutoffs() {
+    for (name, default) in [("RETENTION_DAYS_ERRORS", 30), ("RETENTION_DAYS_SPANS", 7)] {
+        assert_eq!(
+            parse_retention(name, Err(env::VarError::NotPresent), default).unwrap(),
+            default
+        );
+        assert_eq!(parse_retention(name, Ok("90".into()), default).unwrap(), 90);
+        for value in ["", "invalid", "0", "-1", "9223372036854775807"] {
+            assert!(
+                parse_retention(name, Ok(value.into()), default)
+                    .unwrap_err()
+                    .to_string()
+                    .contains(name)
+            );
+        }
+        assert!(
+            parse_retention(
+                name,
+                Err(env::VarError::NotUnicode("invalid".into())),
+                default
+            )
+            .is_err()
+        );
+    }
+    let invalid = Config {
+        retention_days_errors: i64::MAX,
+        retention_days_spans: i64::MAX,
+        ..Config::default()
+    }
+    .validate()
+    .unwrap_err()
+    .to_string();
+    assert!(invalid.contains("RETENTION_DAYS_ERRORS"));
+    assert!(invalid.contains("RETENTION_DAYS_SPANS"));
+}
+
+#[test]
 fn feature_flags_default_only_when_absent_and_reject_typos() {
     for name in ["ENABLE_USER_ACCOUNTS", "ENABLE_PROJECTS"] {
         assert!(!parse_flag(name, Err(env::VarError::NotPresent)).unwrap());

@@ -213,6 +213,8 @@ curl -X POST http://localhost:3000/ingest/deploys \
 
 Feature flags accept `true`/`false` (case-insensitive) or `1`/`0`. Unset flags
 default to false; invalid values fail startup rather than silently disabling features.
+Retention defaults apply only when unset. Explicit values must be positive whole
+days and produce a cutoff within the supported timestamp range.
 
 ### Collector (`miniapm`)
 
