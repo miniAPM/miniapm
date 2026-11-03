@@ -56,7 +56,16 @@ anyhow = "1"
 argon2 = "0.6"
 
 # State machines
-state-machines = "0.31.0"
+state-machines = "0.32.1"
+throttle-machines = "0.5.0"
+chrono-machines = { version = "0.10.0", features = ["async"] }
+
+# MCP
+mcp-host = { version = "0.19.0", features = ["http", "macros"] }
+schemars = "1.2.3"
+
+# Test fixtures
+tempfile = "3.27.0"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

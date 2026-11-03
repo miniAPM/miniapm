@@ -28,6 +28,7 @@ async fn migrations_create_schema_and_preserve_data_when_reapplied() -> anyhow::
             "deploys",
             "error_occurrences",
             "errors",
+            "mcp_tokens",
             "projects",
             "sessions",
             "settings",
@@ -104,12 +105,110 @@ async fn jobs_skip_while_another_instance_holds_them() -> anyhow::Result<()> {
     assert!(!ran.load(std::sync::atomic::Ordering::Relaxed));
 
     sqlx::query(unlock).execute(&mut *other_instance).await?;
+    let pid_before: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&pool)
+        .await?;
     let failing = async { Err::<(), _>(anyhow::anyhow!("boom")) };
-    assert!(exclusively(&pool, "test.lock", failing).await.is_err());
+    assert_eq!(
+        exclusively(&pool, "test.lock", failing)
+            .await
+            .unwrap_err()
+            .to_string(),
+        "boom"
+    );
+    let available: bool = sqlx::query_scalar(
+        "SELECT pg_try_advisory_lock(hashtext('miniapm'), hashtext('test.lock'))",
+    )
+    .fetch_one(&mut *other_instance)
+    .await?;
+    assert!(
+        available,
+        "a failed run releases the lock for a different session"
+    );
+    sqlx::query(unlock).execute(&mut *other_instance).await?;
     assert!(
         exclusively(&pool, "test.lock", async { Ok(()) }).await?,
-        "a failed run releases the lock"
+        "a successful run can acquire the released lock"
     );
+    let pid_after: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(
+        pid_after, pid_before,
+        "normal completion must keep the healthy session reusable"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn cancelled_jobs_release_their_session_lock() -> anyhow::Result<()> {
+    use std::time::Duration;
+    use tokio::sync::oneshot;
+
+    let pool = test_pool().await;
+    let observer = PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with((*pool.connect_options()).clone())
+        .await?;
+    let schema: String = sqlx::query_scalar("SELECT current_schema()")
+        .fetch_one(&pool)
+        .await?;
+    let name = format!("{schema}.cancelled");
+    let (started, running) = oneshot::channel();
+    let worker = tokio::spawn({
+        let pool = pool.clone();
+        let name = name.clone();
+        async move {
+            exclusively(&pool, &name, async {
+                started.send(()).expect("job observer alive");
+                std::future::pending::<anyhow::Result<()>>().await
+            })
+            .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(5), running).await??;
+    assert!(
+        !exclusively(&observer, &name, async { Ok(()) }).await?,
+        "another collector must skip while the job runs"
+    );
+    worker.abort();
+    assert!(worker.await.unwrap_err().is_cancelled());
+
+    // Keep the original pool alive: closing the whole pool would hide a leaked lock.
+    let mut observer_session = observer.acquire().await?;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        sqlx::query("SELECT pg_advisory_lock(hashtext('miniapm'), hashtext($1))")
+            .bind(&name)
+            .execute(&mut *observer_session),
+    )
+    .await
+    .context("cancelled job left its advisory lock held")??;
+    let unlocked: bool =
+        sqlx::query_scalar("SELECT pg_advisory_unlock(hashtext('miniapm'), hashtext($1))")
+            .bind(&name)
+            .fetch_one(&mut *observer_session)
+            .await?;
+    assert!(
+        unlocked,
+        "the other collector acquired and released the lock"
+    );
+    drop(observer_session);
+    // The lock connection must also give its pool slot back. The test pool has
+    // two slots: one for the next lock holder and one for its database work.
+    assert!(
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            exclusively(&pool, &name, async {
+                let value: i32 = sqlx::query_scalar("SELECT 1").fetch_one(&pool).await?;
+                assert_eq!(value, 1);
+                Ok(())
+            })
+        )
+        .await??
+    );
+    observer.close().await;
+    pool.close().await;
     Ok(())
 }
 

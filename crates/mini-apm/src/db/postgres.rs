@@ -73,29 +73,59 @@ pub const fn text_list<'a>(items: &'a [&'a str]) -> &'a [&'a str] {
     items
 }
 
-/// Run `job` unless another `MiniAPM` instance on this database is running the
-/// job called `name`, and say whether it ran. The advisory lock lives on one
-/// connection, so a crashed instance releases it.
+/// Run `job` unless another collector holds the advisory lock called `name`.
+///
+/// Returns whether the job ran. The lock lives on one connection.
+/// Cancellation discards that session rather than returning a
+/// possibly locked connection to the pool; normal completion reuses it.
 pub async fn exclusively(
     pool: &DbPool,
     name: &str,
     job: impl Future<Output = anyhow::Result<()>>,
 ) -> anyhow::Result<bool> {
-    let mut lock = pool.acquire().await?;
+    // Arm cleanup before sending the acquisition query: cancellation can leave
+    // its outcome unknown, just as it can interrupt the job or unlock query.
+    let mut lock = JobLockConnection {
+        connection: pool.acquire().await?,
+        discard_on_drop: true,
+    };
     let locked: bool =
         sqlx::query_scalar("SELECT pg_try_advisory_lock(hashtext('miniapm'), hashtext($1))")
             .bind(name)
-            .fetch_one(&mut *lock)
+            .fetch_one(&mut *lock.connection)
             .await?;
     if !locked {
+        lock.discard_on_drop = false;
         return Ok(false);
     }
     let result = job.await;
-    sqlx::query("SELECT pg_advisory_unlock(hashtext('miniapm'), hashtext($1))")
-        .bind(name)
-        .execute(&mut *lock)
-        .await?;
+    let unlocked: bool =
+        sqlx::query_scalar("SELECT pg_advisory_unlock(hashtext('miniapm'), hashtext($1))")
+            .bind(name)
+            .fetch_one(&mut *lock.connection)
+            .await?;
+    anyhow::ensure!(
+        unlocked,
+        "Job advisory lock was unexpectedly absent: {name}"
+    );
+    lock.discard_on_drop = false;
     result.map(|()| true)
+}
+
+/// Never pool a session whose advisory-lock state has not been confirmed safe.
+#[derive(Debug)]
+struct JobLockConnection {
+    connection: sqlx::pool::PoolConnection<sqlx::Postgres>,
+    discard_on_drop: bool,
+}
+
+impl Drop for JobLockConnection {
+    fn drop(&mut self) {
+        if self.discard_on_drop {
+            // SQLx owns asynchronous connection closure and pool accounting.
+            self.connection.close_on_drop();
+        }
+    }
 }
 
 /// Create day partitions from yesterday to a week ahead, so retention can

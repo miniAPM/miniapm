@@ -71,6 +71,13 @@ where
         let enable_user_accounts = mini_apm::config::env_flag("ENABLE_USER_ACCOUNTS");
 
         async move {
+            let enable_user_accounts = match enable_user_accounts {
+                Ok(enabled) => enabled,
+                Err(error) => {
+                    tracing::error!(%error, "Invalid authentication configuration");
+                    return Ok(StatusCode::INTERNAL_SERVER_ERROR.into_response());
+                }
+            };
             let path = req
                 .uri()
                 .path()

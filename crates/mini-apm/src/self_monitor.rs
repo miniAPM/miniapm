@@ -5,12 +5,16 @@
 use std::convert::Infallible;
 use std::fmt::{self, Write as _};
 use std::future::Future;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
 
+use anyhow::Context as _;
 use jiff::{SignedDuration, Timestamp};
 use rama::http::{Request, Response};
 use rama::{Layer, Service};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinSet;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Instrument, Level, Subscriber};
 use tracing_subscriber::filter::Targets;
@@ -28,6 +32,11 @@ mod tests;
 const QUEUE: usize = 1024;
 /// Most spans written in one batch
 const BATCH: usize = 256;
+const DATABASE_SYSTEM: &str = if cfg!(feature = "postgres") {
+    "postgresql"
+} else {
+    "sqlite"
+};
 
 static GLOBAL: OnceLock<SelfMonitor> = OnceLock::new();
 
@@ -46,14 +55,64 @@ enum Record {
 #[derive(Clone)]
 pub struct SelfMonitor {
     tx: mpsc::Sender<Record>,
+    closing: Arc<AtomicBool>,
+}
+
+/// Owns the self-monitor writer. Dropping it aborts unfinished work.
+#[derive(Debug)]
+#[must_use = "keep the writer alive and shut it down before closing the database"]
+pub struct MonitorWriter {
+    stop: oneshot::Sender<()>,
+    closing: Arc<AtomicBool>,
+    tasks: JoinSet<()>,
+}
+
+impl MonitorWriter {
+    /// Stop accepting records and flush buffered telemetry for up to five seconds.
+    /// Storage failures remain best-effort and are logged by the writer.
+    ///
+    /// # Errors
+    /// Returns an error if flushing times out or the writer task panics.
+    pub async fn shutdown(self) -> anyhow::Result<()> {
+        self.drain(Duration::from_secs(5)).await
+    }
+
+    async fn drain(mut self, grace: Duration) -> anyhow::Result<()> {
+        self.closing.store(true, Ordering::Release);
+        if self.stop.send(()).is_err() {
+            tracing::debug!("Self-monitor writer already stopped");
+        }
+        match tokio::time::timeout(grace, self.tasks.join_next()).await {
+            Ok(Some(result)) => result.context("Self-monitor writer failed")?,
+            Ok(None) => {}
+            Err(_) => {
+                self.tasks.shutdown().await;
+                anyhow::bail!("Self-monitor flush exceeded {grace:?}; remaining records discarded");
+            }
+        }
+        Ok(())
+    }
 }
 
 impl SelfMonitor {
-    /// Start the background writer for `project_id`, reporting as `service`
-    pub fn start(pool: DbPool, project_id: i64, service: &'static str) -> Self {
+    /// Start an owned background writer for `project_id`, reporting as `service`.
+    pub fn start(pool: DbPool, project_id: i64, service: &'static str) -> (Self, MonitorWriter) {
         let (tx, rx) = mpsc::channel(QUEUE);
-        tokio::spawn(WRITING.scope((), write(pool, project_id, service, rx)));
-        Self { tx }
+        let (stop, stopped) = oneshot::channel();
+        let closing = Arc::new(AtomicBool::new(false));
+        let mut tasks = JoinSet::new();
+        tasks.spawn(WRITING.scope((), write(pool, project_id, service, rx, stopped)));
+        (
+            Self {
+                tx,
+                closing: closing.clone(),
+            },
+            MonitorWriter {
+                stop,
+                closing,
+                tasks,
+            },
+        )
     }
 
     /// Make this the process-wide monitor behind [`CaptureLayer`] and
@@ -69,8 +128,10 @@ impl SelfMonitor {
     }
 
     fn record(&self, record: Record) {
-        // A full queue drops the record: monitoring must never slow the app
-        self.tx.try_send(record).ok();
+        if !self.closing.load(Ordering::Acquire) {
+            // Full or closed queues drop the record: monitoring must never wait.
+            self.tx.try_send(record).ok();
+        }
     }
 
     pub async fn trace_job<F, T>(&self, name: &str, job: F) -> anyhow::Result<T>
@@ -102,7 +163,7 @@ impl SelfMonitor {
             start_time_unix_nano: nanos(q.start),
             end_time_unix_nano: nanos(q.end),
             attributes: Some(vec![
-                attribute("db.system", "sqlite"),
+                attribute("db.system", DATABASE_SYSTEM),
                 attribute("db.statement", q.statement),
             ]),
             events: None,
@@ -223,8 +284,23 @@ fn attribute(key: &str, value: impl Into<String>) -> span::KeyValue {
     }
 }
 
-async fn write(pool: DbPool, project_id: i64, service: &str, mut rx: mpsc::Receiver<Record>) {
-    while let Some(first) = rx.recv().await {
+async fn write(
+    pool: DbPool,
+    project_id: i64,
+    service: &str,
+    mut rx: mpsc::Receiver<Record>,
+    mut stop: oneshot::Receiver<()>,
+) {
+    loop {
+        let first = tokio::select! {
+            biased;
+            _ = &mut stop, if !rx.is_closed() => {
+                rx.close();
+                rx.recv().await
+            }
+            record = rx.recv() => record,
+        };
+        let Some(first) = first else { break };
         let (mut spans, mut errors) = (Vec::new(), Vec::new());
         let mut next = Some(first);
         while let Some(record) = next {

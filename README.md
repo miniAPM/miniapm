@@ -47,6 +47,41 @@ drops whole days, so data can outlive its retention period by up to a day.
 Several collectors can share one database: each background job runs on one of
 them at a time.
 
+### Background maintenance retries
+
+Expired-session cleanup gets at most three attempts, using `chrono-machines`
+exponential backoff with full jitter (up to 100 ms then 200 ms). Jiff remains the
+date/time library. Every attempt uses the same expiration cutoff.
+
+Only SQLite `BUSY` errors (including extended variants) and PostgreSQL `40001`,
+`40P01`, and `55P03` are retryable. Connection failures, pool timeouts, query
+cancellations, and permanent errors are not retried. PostgreSQL's job lock stays
+held during backoff; another collector skips that run. Cancellation stops retries
+and discards the lock session safely.
+
+These bounds cover attempts and backoff, not database query duration. Ingestion
+handlers and retention jobs do not acquire any new retries.
+
+### Shutdown
+
+On Ctrl+C or SIGTERM, the collector stops scheduling maintenance jobs and drains
+HTTP requests and running jobs concurrently, with a 30-second grace period.
+Unfinished jobs are then cancelled and joined before the database pool closes,
+including when HTTP draining times out. PostgreSQL advisory-lock sessions are
+discarded safely on cancellation. Cancellation does not undo work already committed.
+
+If the HTTP listener fails (for example, because its port is occupied), the
+process returns an error without waiting for a signal. Maintenance jobs are
+cancelled and joined before the collector closes its database pool.
+Shutdown-signal registration or reception failures use the same cleanup path
+and return an error rather than panicking or reporting a successful shutdown.
+
+After HTTP and maintenance stop, both binaries give the self-monitor writer up
+to five additional seconds to flush accepted telemetry before closing the pool.
+New self-monitor records are dropped during this flush. A stalled writer is
+cancelled and joined; a warning reports discarded records without masking the
+server's result. Self-monitor storage remains best-effort.
+
 ## Quick Start
 
 ### Docker Compose (recommended)
@@ -176,6 +211,18 @@ curl -X POST http://localhost:3000/ingest/deploys \
 
 ## Configuration
 
+Feature flags accept `true`/`false` (case-insensitive) or `1`/`0`. Unset flags
+default to false; invalid values fail startup rather than silently disabling features.
+Retention defaults apply only when unset. Explicit values must be positive whole
+days and produce a cutoff within the supported timestamp range.
+`SLOW_REQUEST_THRESHOLD_MS` must be finite and positive; its 500 ms default applies
+only when unset.
+`SESSION_SECRET` must be nonblank when supplied and at least 32 characters when
+accounts are enabled. Only an absent secret in single-user mode is generated
+automatically. Configuration debug output redacts session secrets and database URLs.
+`SQLITE_PATH`, `DATABASE_URL`, and `MINI_APM_URL` must be nonblank UTF-8 when
+supplied; defaults or absence apply only when the environment variable is unset.
+
 ### Collector (`miniapm`)
 
 | Variable | Default | Description |
@@ -196,7 +243,56 @@ curl -X POST http://localhost:3000/ingest/deploys \
 | `DATABASE_URL` | | PostgreSQL connection URL, same as collector (PostgreSQL builds) |
 | `ENABLE_USER_ACCOUNTS` | `false` | Enable multi-user authentication |
 | `SESSION_SECRET` | (required) | Secret for session cookies |
-| `MINI_APM_URL` | `http://localhost:3001` | URL for generating links |
+| `MINI_APM_URL` | `http://localhost:3000` | URL for generating links; set to your public dashboard URL |
+| `ADMIN_PORT` | `3001` | Dashboard listen port (0–65535); invalid values abort startup |
+
+## Ingestion admission
+
+The collector can optionally limit ingestion requests per project:
+
+```sh
+INGEST_REQUESTS_PER_SECOND=100
+INGEST_BURST=100
+INGEST_MAX_KEYS_PER_SHARD=4096
+```
+
+Leave all three unset to disable admission limits. Rate must be finite and between
+0.000001 and 1000000; burst is 1–1000000; keys per shard is 1–65536.
+Burst defaults to 100 and keys per shard to 4096 when a rate is configured.
+The burst and storage settings require a rate.
+
+Each request/export that passes the concurrency gate costs one rate admission,
+including batches and malformed payloads. HTTP JSON/protobuf, errors, deploys,
+and OTLP gRPC share the
+same project budget. Limits run after authentication but before reading bodies;
+authentication still queries the database. Existing 10 MiB body limits remain.
+
+HTTP refusals return `429` with a rounded-up `Retry-After` in seconds; gRPC
+returns retryable `UNAVAILABLE`. Both quota exhaustion and full limiter shards
+are retryable admission refusals. Clients should back off with jitter.
+
+This is **process-local protection**, not a durable or distributed quota:
+restarts reset budgets and multiple collectors each have their own budget.
+The limiter has 16 bounded shards; recovered project entries are reclaimed.
+Health checks, the dashboard/MCP, and internal self-monitoring are excluded.
+
+### Bounded ingestion concurrency
+
+Independently of the rate budget, set `INGEST_MAX_IN_FLIGHT=4` to allow at most
+four simultaneous ingestion handlers **across all projects and transports in
+one collector**. Unset means unlimited. Valid values are 1–8; the ceiling leaves
+headroom in the normal ten-connection pool. Start conservatively (for example, 1)
+for SQLite's single writer and tune using representative traffic.
+
+The gate never queues requests. Capacity exhaustion returns HTTP `503` with
+`Retry-After: 1` or gRPC `UNAVAILABLE`, without consuming rate budget. A permit
+covers body parsing and storage and is released on completion, errors, or
+cancellation. Slow uploads therefore occupy slots. Limits are fixed, not adaptive.
+
+Authentication still happens first, so authentication queries and database
+contention can delay even rejected requests. Health checks bypass the gate but
+share the database pool: this is not a guaranteed health-query reservation.
+There is no cross-project fairness or distributed limit across collectors.
 
 ## Multi-User Mode
 

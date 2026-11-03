@@ -1,7 +1,7 @@
 use std::env;
 use std::path::Path;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Config {
     pub sqlite_path: String,
     pub database_url: Option<String>,
@@ -12,54 +12,157 @@ pub struct Config {
     pub enable_user_accounts: bool,
     pub enable_projects: bool,
     pub session_secret: String,
+    pub ingest_admission: Option<crate::api::admission::AdmissionConfig>,
+    pub ingest_max_in_flight: Option<crate::api::admission::InFlightLimit>,
 }
 
-pub fn env_flag(name: &str) -> bool {
-    env::var(name).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+impl std::fmt::Debug for Config {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Config")
+            .field("sqlite_path", &self.sqlite_path)
+            .field(
+                "database_url",
+                &self.database_url.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("retention_days_errors", &self.retention_days_errors)
+            .field("retention_days_spans", &self.retention_days_spans)
+            .field("slow_request_threshold_ms", &self.slow_request_threshold_ms)
+            .field("mini_apm_url", &self.mini_apm_url)
+            .field("enable_user_accounts", &self.enable_user_accounts)
+            .field("enable_projects", &self.enable_projects)
+            .field("session_secret", &"[REDACTED]")
+            .field("ingest_admission", &self.ingest_admission)
+            .field("ingest_max_in_flight", &self.ingest_max_in_flight)
+            .finish()
+    }
 }
 
-fn env_positive<T: std::str::FromStr + PartialOrd + Default>(name: &str, default: T) -> T {
-    env::var(name)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .filter(|v| *v > T::default())
-        .unwrap_or(default)
+fn parse_session_secret(
+    value: Result<String, env::VarError>,
+    accounts: bool,
+) -> anyhow::Result<String> {
+    let secret = match value {
+        Ok(secret) => secret,
+        Err(env::VarError::NotPresent) if !accounts => {
+            return Ok(hex::encode(rand::random::<[u8; 32]>()));
+        }
+        Err(env::VarError::NotPresent) => anyhow::bail!(
+            "SESSION_SECRET is required when ENABLE_USER_ACCOUNTS=true. Generate one with: openssl rand -hex 32"
+        ),
+        Err(_) => anyhow::bail!("SESSION_SECRET must contain valid UTF-8"),
+    };
+    anyhow::ensure!(
+        !secret.trim().is_empty(),
+        "SESSION_SECRET must not be blank"
+    );
+    anyhow::ensure!(
+        !accounts || secret.len() >= 32,
+        "SESSION_SECRET must be at least 32 characters when user accounts are enabled"
+    );
+    Ok(secret)
+}
+
+fn parse_optional_text(
+    name: &str,
+    value: Result<String, env::VarError>,
+) -> anyhow::Result<Option<String>> {
+    match value {
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(_) => anyhow::bail!("{name} must contain valid UTF-8"),
+        Ok(value) => {
+            anyhow::ensure!(!value.trim().is_empty(), "{name} must not be blank");
+            Ok(Some(value))
+        }
+    }
+}
+
+pub fn env_flag(name: &str) -> anyhow::Result<bool> {
+    parse_flag(name, env::var(name))
+}
+
+fn parse_flag(name: &str, value: Result<String, env::VarError>) -> anyhow::Result<bool> {
+    match value {
+        Err(env::VarError::NotPresent) => Ok(false),
+        Ok(value) if value == "1" || value.eq_ignore_ascii_case("true") => Ok(true),
+        Ok(value) if value == "0" || value.eq_ignore_ascii_case("false") => Ok(false),
+        _ => anyhow::bail!("{name} must be true, false, 1, or 0"),
+    }
+}
+
+fn parse_threshold(value: Result<String, env::VarError>) -> anyhow::Result<f64> {
+    let threshold: f64 = match value {
+        Err(env::VarError::NotPresent) => 500.0,
+        Ok(value) => value
+            .parse()
+            .map_err(|_| anyhow::anyhow!("Invalid SLOW_REQUEST_THRESHOLD_MS"))?,
+        Err(_) => anyhow::bail!("SLOW_REQUEST_THRESHOLD_MS must contain valid UTF-8"),
+    };
+    anyhow::ensure!(
+        threshold.is_finite() && threshold > 0.0,
+        "SLOW_REQUEST_THRESHOLD_MS must be finite and positive"
+    );
+    Ok(threshold)
+}
+
+fn retention_supported(days: i64) -> bool {
+    days > 0
+        && days.checked_mul(86_400).is_some_and(|seconds| {
+            jiff::Timestamp::now()
+                .checked_sub(jiff::SignedDuration::from_secs(seconds))
+                .is_ok()
+        })
+}
+
+fn parse_retention(
+    name: &str,
+    value: Result<String, env::VarError>,
+    default: i64,
+) -> anyhow::Result<i64> {
+    let days = match value {
+        Err(env::VarError::NotPresent) => default,
+        Ok(value) => value
+            .parse()
+            .map_err(|_| anyhow::anyhow!("Invalid {name}"))?,
+        Err(_) => anyhow::bail!("{name} must contain valid UTF-8"),
+    };
+    anyhow::ensure!(
+        retention_supported(days),
+        "{name} must be positive and within the supported timestamp range"
+    );
+    Ok(days)
 }
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         // SESSION_SECRET is required when user accounts are enabled
-        let enable_user_accounts = env_flag("ENABLE_USER_ACCOUNTS");
+        let enable_user_accounts = env_flag("ENABLE_USER_ACCOUNTS")?;
 
-        let session_secret = env::var("SESSION_SECRET").ok();
-
-        if enable_user_accounts && session_secret.is_none() {
-            anyhow::bail!(
-                "SESSION_SECRET environment variable is required when ENABLE_USER_ACCOUNTS=true. \
-                Generate one with: openssl rand -hex 32"
-            );
-        }
-
-        // Warn if using default secret in development
-        let session_secret = session_secret.unwrap_or_else(|| {
-            // This shouldn't happen due to the check above, but just in case
-            assert!(!enable_user_accounts, "SESSION_SECRET is required");
-            // In single-user mode, generate a random secret per run
-            hex::encode(rand::random::<[u8; 32]>())
-        });
+        let session_secret =
+            parse_session_secret(env::var("SESSION_SECRET"), enable_user_accounts)?;
 
         Ok(Self {
-            sqlite_path: env::var("SQLITE_PATH")
-                .unwrap_or_else(|_| "./data/miniapm.db".to_string()),
-            database_url: env::var("DATABASE_URL").ok(),
-            retention_days_errors: env_positive("RETENTION_DAYS_ERRORS", 30),
-            retention_days_spans: env_positive("RETENTION_DAYS_SPANS", 7),
-            slow_request_threshold_ms: env_positive("SLOW_REQUEST_THRESHOLD_MS", 500.0),
-            mini_apm_url: env::var("MINI_APM_URL")
-                .unwrap_or_else(|_| "http://localhost:3000".to_string()),
+            sqlite_path: parse_optional_text("SQLITE_PATH", env::var("SQLITE_PATH"))?
+                .unwrap_or_else(|| "./data/miniapm.db".to_string()),
+            database_url: parse_optional_text("DATABASE_URL", env::var("DATABASE_URL"))?,
+            retention_days_errors: parse_retention(
+                "RETENTION_DAYS_ERRORS",
+                env::var("RETENTION_DAYS_ERRORS"),
+                30,
+            )?,
+            retention_days_spans: parse_retention(
+                "RETENTION_DAYS_SPANS",
+                env::var("RETENTION_DAYS_SPANS"),
+                7,
+            )?,
+            slow_request_threshold_ms: parse_threshold(env::var("SLOW_REQUEST_THRESHOLD_MS"))?,
+            mini_apm_url: parse_optional_text("MINI_APM_URL", env::var("MINI_APM_URL"))?
+                .unwrap_or_else(|| "http://localhost:3000".to_string()),
             enable_user_accounts,
-            enable_projects: env_flag("ENABLE_PROJECTS"),
+            enable_projects: env_flag("ENABLE_PROJECTS")?,
             session_secret,
+            ingest_admission: ingest_admission_from_env()?,
+            ingest_max_in_flight: parse_in_flight(env::var("INGEST_MAX_IN_FLIGHT"))?,
         })
     }
 
@@ -67,6 +170,16 @@ impl Config {
     /// Returns Ok(()) if all validations pass.
     pub fn validate(&self) -> anyhow::Result<()> {
         let mut errors = Vec::new();
+        if self.sqlite_path.trim().is_empty() {
+            errors.push("SQLITE_PATH must not be blank".to_string());
+        }
+        if self
+            .database_url
+            .as_ref()
+            .is_some_and(|url| url.trim().is_empty())
+        {
+            errors.push("DATABASE_URL must not be blank when supplied".to_string());
+        }
 
         // Validate MINI_APM_URL is a valid URL
         if !self.mini_apm_url.starts_with("http://") && !self.mini_apm_url.starts_with("https://") {
@@ -77,30 +190,32 @@ impl Config {
         }
 
         // Validate retention days are positive
-        if self.retention_days_errors <= 0 {
+        if !retention_supported(self.retention_days_errors) {
             errors.push(format!(
-                "RETENTION_DAYS_ERRORS must be positive, got: {}",
+                "RETENTION_DAYS_ERRORS must be positive and within the supported timestamp range, got: {}",
                 self.retention_days_errors
             ));
         }
-        if self.retention_days_spans <= 0 {
+        if !retention_supported(self.retention_days_spans) {
             errors.push(format!(
-                "RETENTION_DAYS_SPANS must be positive, got: {}",
+                "RETENTION_DAYS_SPANS must be positive and within the supported timestamp range, got: {}",
                 self.retention_days_spans
             ));
         }
 
         // Validate slow request threshold is positive
-        if self.slow_request_threshold_ms <= 0.0 {
+        if !self.slow_request_threshold_ms.is_finite() || self.slow_request_threshold_ms <= 0.0 {
             errors.push(format!(
-                "SLOW_REQUEST_THRESHOLD_MS must be positive, got: {}",
+                "SLOW_REQUEST_THRESHOLD_MS must be finite and positive, got: {}",
                 self.slow_request_threshold_ms
             ));
         }
 
         // Validate session secret is long enough when user accounts are enabled
-        if self.enable_user_accounts && self.session_secret.len() < 32 {
-            errors.push("SESSION_SECRET should be at least 32 characters for security".to_string());
+        if self.session_secret.trim().is_empty()
+            || (self.enable_user_accounts && self.session_secret.len() < 32)
+        {
+            errors.push("SESSION_SECRET must be nonblank and at least 32 characters when user accounts are enabled".to_string());
         }
 
         // Validate sqlite_path parent directory exists or can be created (skip for :memory:)
@@ -139,6 +254,8 @@ impl Config {
             "  Slow request threshold: {}ms",
             self.slow_request_threshold_ms
         );
+        tracing::info!("  Ingestion admission: {:?}", self.ingest_admission);
+        tracing::info!("  Ingestion concurrency: {:?}", self.ingest_max_in_flight);
     }
 }
 
@@ -154,7 +271,67 @@ impl Default for Config {
             enable_user_accounts: false,
             enable_projects: false,
             session_secret: "test-secret".to_string(),
+            ingest_admission: None,
+            ingest_max_in_flight: None,
         }
+    }
+}
+
+fn ingest_admission_from_env() -> anyhow::Result<Option<crate::api::admission::AdmissionConfig>> {
+    parse_ingest_admission(
+        env::var("INGEST_REQUESTS_PER_SECOND"),
+        env::var("INGEST_BURST"),
+        env::var("INGEST_MAX_KEYS_PER_SHARD"),
+    )
+}
+
+fn parse_ingest_admission(
+    rate: Result<String, env::VarError>,
+    burst: Result<String, env::VarError>,
+    keys: Result<String, env::VarError>,
+) -> anyhow::Result<Option<crate::api::admission::AdmissionConfig>> {
+    use anyhow::Context;
+    if matches!(rate, Err(env::VarError::NotPresent)) {
+        anyhow::ensure!(
+            matches!(burst, Err(env::VarError::NotPresent))
+                && matches!(keys, Err(env::VarError::NotPresent)),
+            "INGEST_BURST and INGEST_MAX_KEYS_PER_SHARD require INGEST_REQUESTS_PER_SECOND"
+        );
+        return Ok(None);
+    }
+    let rate = rate
+        .context("Invalid INGEST_REQUESTS_PER_SECOND")?
+        .parse()
+        .context("Invalid INGEST_REQUESTS_PER_SECOND")?;
+    let parse_optional =
+        |value: Result<String, env::VarError>, default, name| -> anyhow::Result<u32> {
+            match value {
+                Ok(value) => value.parse().with_context(|| format!("Invalid {name}")),
+                Err(env::VarError::NotPresent) => Ok(default),
+                Err(error) => Err(error).with_context(|| format!("Invalid {name}")),
+            }
+        };
+    let burst = parse_optional(burst, 100, "INGEST_BURST")?;
+    let keys = parse_optional(keys, 4096, "INGEST_MAX_KEYS_PER_SHARD")?;
+    Ok(Some(crate::api::admission::AdmissionConfig::new(
+        rate,
+        burst,
+        keys as usize,
+    )?))
+}
+
+fn parse_in_flight(
+    value: Result<String, env::VarError>,
+) -> anyhow::Result<Option<crate::api::admission::InFlightLimit>> {
+    use anyhow::Context;
+    match value {
+        Err(env::VarError::NotPresent) => Ok(None),
+        value => Ok(Some(crate::api::admission::InFlightLimit::new(
+            value
+                .context("Invalid INGEST_MAX_IN_FLIGHT")?
+                .parse()
+                .context("Invalid INGEST_MAX_IN_FLIGHT")?,
+        )?)),
     }
 }
 

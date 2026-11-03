@@ -4,6 +4,7 @@ pub mod auth_middleware;
 pub mod dashboard;
 pub mod deploys;
 pub mod errors;
+pub mod mcp_tokens;
 pub mod performance;
 pub mod project_context;
 pub mod projects;

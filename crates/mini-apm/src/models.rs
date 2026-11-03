@@ -1,5 +1,6 @@
 pub mod deploy;
 pub mod error;
+pub mod mcp_token;
 pub mod project;
 pub mod span;
 pub mod user;
