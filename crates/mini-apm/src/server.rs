@@ -1,7 +1,9 @@
 use std::convert::Infallible;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Context as _;
 use rama::Layer;
 use rama::Service;
 use rama::conversion::FromRef;
@@ -168,6 +170,19 @@ where
     S: Service<Request, Output = Resp, Error = Infallible> + Clone + 'static,
     Resp: IntoResponse + Send + 'static,
 {
+    serve_until(addr, app, jobs, shutdown_signal()).await
+}
+
+async fn serve_until<S, Resp>(
+    addr: String,
+    app: S,
+    jobs: Option<jobs::Jobs>,
+    stop: impl Future<Output = anyhow::Result<()>> + Send,
+) -> anyhow::Result<()>
+where
+    S: Service<Request, Output = Resp, Error = Infallible> + Clone + 'static,
+    Resp: IntoResponse + Send + 'static,
+{
     // Signals are handled below, once, for both HTTP and maintenance tasks.
     let (shutdown, signal) = tokio::sync::oneshot::channel::<()>();
     let graceful = Shutdown::new(signal);
@@ -183,39 +198,20 @@ where
     });
 
     // A failed listener must not leave a headless collector running jobs.
-    let listener_result = tokio::select! {
-        result = &mut listener => Some(match result {
+    let (listener_result, signal_result) = tokio::select! {
+        result = &mut listener => (Some(match result {
             Ok(Err(error)) => Err(error),
             Ok(Ok(())) => Err(anyhow::anyhow!("HTTP listener stopped unexpectedly")),
             Err(error) => Err(anyhow::anyhow!("HTTP listener task failed: {error}")),
-        }),
-        _ = tokio::signal::ctrl_c() => {
-            tracing::info!("Received Ctrl+C, starting graceful shutdown...");
-            None
-        }
-        () = async {
-            #[cfg(unix)]
-            {
-                let mut sigterm = tokio::signal::unix::signal(
-                    tokio::signal::unix::SignalKind::terminate()
-                ).expect("Failed to install SIGTERM handler");
-                sigterm.recv().await;
-            }
-            #[cfg(not(unix))]
-            {
-                std::future::pending::<()>().await;
-            }
-        } => {
-            tracing::info!("Received SIGTERM, starting graceful shutdown...");
-            None
-        }
+        }), Ok(())),
+        result = stop => (None, result.context("Shutdown signal failed")),
     };
 
     if shutdown.send(()).is_err() {
         tracing::warn!("HTTP shutdown signal receiver already closed");
     }
-    // No traffic can be served after listener failure: cancel maintenance now.
-    let grace = if listener_result.is_some() {
+    // A failed listener or signal source requires immediate cleanup.
+    let grace = if listener_result.is_some() || signal_result.is_err() {
         Duration::ZERO
     } else {
         Duration::from_secs(30)
@@ -236,9 +232,35 @@ where
     if let Err(error) = &drained {
         tracing::error!(%error, "HTTP draining failed");
     }
-    served.and(drained)?;
+    signal_result.and(served).and(drained)?;
 
     tracing::info!("Server shutdown complete");
+    Ok(())
+}
+
+async fn shutdown_signal() -> anyhow::Result<()> {
+    tokio::select! {
+        result = tokio::signal::ctrl_c() => {
+            result.context("Could not receive Ctrl+C")?;
+            tracing::info!("Received Ctrl+C, starting graceful shutdown...");
+        }
+        result = async {
+            #[cfg(unix)]
+            {
+                let mut sigterm = tokio::signal::unix::signal(
+                    tokio::signal::unix::SignalKind::terminate(),
+                ).context("Could not install SIGTERM handler")?;
+                sigterm.recv().await.context("SIGTERM signal stream closed")
+            }
+            #[cfg(not(unix))]
+            {
+                std::future::pending::<anyhow::Result<()>>().await
+            }
+        } => {
+            result?;
+            tracing::info!("Received SIGTERM, starting graceful shutdown...");
+        }
+    }
     Ok(())
 }
 

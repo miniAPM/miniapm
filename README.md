@@ -73,6 +73,8 @@ discarded safely on cancellation. Cancellation does not undo work already commit
 If the HTTP listener fails (for example, because its port is occupied), the
 process returns an error without waiting for a signal. Maintenance jobs are
 cancelled and joined before the collector closes its database pool.
+Shutdown-signal registration or reception failures use the same cleanup path
+and return an error rather than panicking or reporting a successful shutdown.
 
 ## Quick Start
 

@@ -40,6 +40,8 @@ These exercise MiniAPM's lifecycle wiring, not Tokio's scheduling algorithms.
 An occupied-port regression test covers listener-error propagation both with
 collector maintenance jobs and without them (the admin server path), including
 connection cleanup without sending an OS signal.
+Injected shutdown notifications cover successful shutdown and signal-source
+errors, preserving the underlying error after listener and maintenance cleanup.
 
 ## Ingestion load experiment
 
