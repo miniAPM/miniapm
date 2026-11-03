@@ -46,6 +46,8 @@ Self-monitor tests explicitly drain the writer while sender clones remain alive,
 verify buffered spans and errors in the database without polling sleeps, and
 cover multiple queued batches, late records, and a writer blocked on pool capacity.
 Stored self-monitor SQL spans must also identify the selected database backend.
+Admin-port tests inject environment lookup results without mutating process-wide
+variables: only an absent `ADMIN_PORT` defaults to 3001; invalid values must fail.
 
 ## Ingestion load experiment
 

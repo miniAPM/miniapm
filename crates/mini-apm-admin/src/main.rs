@@ -3,12 +3,11 @@ use mini_apm::server::serve_with_graceful_shutdown;
 use mini_apm::{DbPool, config::Config, db, init_tracing, models};
 use mini_apm_admin::make_app;
 
+mod port;
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let port = std::env::var("ADMIN_PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(3001);
+    let port = port::from_env()?;
 
     // Binary, admin library, and shared collector library targets
     init_tracing("miniapm_admin=info,mini_apm_admin=info,mini_apm=info");

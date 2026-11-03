@@ -232,6 +232,7 @@ curl -X POST http://localhost:3000/ingest/deploys \
 | `ENABLE_USER_ACCOUNTS` | `false` | Enable multi-user authentication |
 | `SESSION_SECRET` | (required) | Secret for session cookies |
 | `MINI_APM_URL` | `http://localhost:3001` | URL for generating links |
+| `ADMIN_PORT` | `3001` | Dashboard listen port (0–65535); invalid values abort startup |
 
 ## Ingestion admission
 
