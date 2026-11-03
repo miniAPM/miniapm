@@ -1,6 +1,7 @@
 use super::*;
 use crate::db;
 use crate::models::span::{self, RootSpanType};
+use rama::http::body::util::BodyExt;
 use rama::http::{Body, Method, StatusCode};
 
 fn post_error(authorization: Option<&str>, message: &str) -> Request {
@@ -45,6 +46,165 @@ async fn setup() -> (
         config: Config::default(),
     });
     (app, pool, project)
+}
+
+#[tokio::test]
+async fn ingestion_admission_is_shared_and_tenant_isolated() {
+    let pool = db::test_pool().await;
+    let project = models::project::ensure_default_project(&pool)
+        .await
+        .unwrap();
+    let other = models::project::create(&pool, "Other").await.unwrap();
+    let app = make_app(AppState {
+        pool: pool.clone(),
+        config: Config {
+            ingest_admission: Some(api::admission::AdmissionConfig::new(0.001, 1, 4096).unwrap()),
+            ..Config::default()
+        },
+    });
+    let auth = format!("Bearer {}", project.api_key);
+    assert_eq!(
+        app.serve(post_error(None, "unauthenticated"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        app.serve(post_error(Some(&auth), "accepted"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+
+    // All HTTP encodings/endpoints and cloned services share one authenticated budget.
+    for (uri, content_type) in [
+        ("/ingest/errors", "application/json"),
+        ("/ingest/errors/batch", "application/json"),
+        ("/ingest/deploys", "application/json"),
+        ("/ingest/v1/traces", "application/json"),
+        ("/ingest/v1/traces", "application/x-protobuf"),
+    ] {
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri(uri)
+            .header("Authorization", &auth)
+            .header("Content-Type", content_type)
+            .body(Body::from("not even valid input"))
+            .unwrap();
+        let response = app.clone().serve(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS, "{uri}");
+        assert!(
+            response.headers()["retry-after"]
+                .to_str()
+                .unwrap()
+                .parse::<u64>()
+                .unwrap()
+                > 0
+        );
+    }
+    let grpc = Request::builder()
+        .method(Method::POST)
+        .uri("/opentelemetry.proto.collector.trace.v1.TraceService/Export")
+        .header("Authorization", &auth)
+        .header("Content-Type", "application/grpc")
+        .body(Body::from("invalid grpc frame"))
+        .unwrap();
+    let response = app.serve(grpc).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["grpc-status"], "14");
+    assert_eq!(
+        app.serve(get("/health")).await.unwrap().status(),
+        StatusCode::OK
+    );
+    let other_auth = format!("Bearer {}", other.api_key);
+    assert_eq!(
+        app.serve(post_error(Some(&other_auth), "other accepted"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::ACCEPTED
+    );
+    let rows: Vec<(i64, String, i64)> = sqlx::query_as(
+        "SELECT project_id, message, occurrence_count FROM errors ORDER BY project_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        [
+            (project.id, "accepted".into(), 1),
+            (other.id, "other accepted".into(), 1)
+        ]
+    );
+    for table in ["spans", "deploys"] {
+        let count: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(count, 0, "{table}: rejected requests must not write");
+    }
+}
+
+#[tokio::test]
+async fn batch_and_grpc_each_consume_one_shared_admission() -> anyhow::Result<()> {
+    let pool = db::test_pool().await;
+    let project = models::project::ensure_default_project(&pool).await?;
+    let app = make_app(AppState {
+        pool: pool.clone(),
+        config: Config {
+            ingest_admission: Some(api::admission::AdmissionConfig::new(0.001, 2, 4096)?),
+            ..Config::default()
+        },
+    });
+    let auth = format!("Bearer {}", project.api_key);
+    let errors: Vec<_> = ["First", "Second"]
+        .into_iter()
+        .map(|class| {
+            serde_json::json!({
+                "exception_class": class, "message": class, "backtrace": [], "fingerprint": class,
+            })
+        })
+        .collect();
+    assert_eq!(
+        app.serve(post_json(
+            "/ingest/errors/batch",
+            Some(&auth),
+            &serde_json::json!({"errors": errors})
+        ))
+        .await?
+        .status(),
+        StatusCode::ACCEPTED
+    );
+    let grpc = Request::builder()
+        .method(Method::POST)
+        .uri("/opentelemetry.proto.collector.trace.v1.TraceService/Export")
+        .header("Authorization", &auth)
+        .header("Content-Type", "application/grpc")
+        .body(Body::from(vec![0_u8; 5]))?;
+    let response = app.serve(grpc).await?;
+    assert_eq!(response.status(), StatusCode::OK);
+    // Consume the gRPC stream too, ensuring its handler has completed.
+    let collected = response.into_body().collect().await?;
+    assert_eq!(
+        collected
+            .trailers()
+            .and_then(|t| t.get("grpc-status"))
+            .and_then(|v| v.to_str().ok()),
+        Some("0")
+    );
+    assert_eq!(
+        app.serve(post_error(Some(&auth), "denied")).await?.status(),
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM error_occurrences")
+        .fetch_one(&pool)
+        .await?;
+    assert_eq!(count, 2);
+    Ok(())
 }
 
 #[tokio::test]

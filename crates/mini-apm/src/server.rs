@@ -82,6 +82,7 @@ pub fn make_app(
     state: AppState,
 ) -> impl Service<Request, Output = Response, Error = Infallible> + Clone {
     // Ingestion API (API key auth required)
+    let admission = api::admission::Admission::new(state.config.ingest_admission.as_ref());
     let ingest = Router::new_with_state(state.clone())
         .with_post("/deploys", api::ingest_deploys)
         .with_match_route(
@@ -96,10 +97,12 @@ pub fn make_app(
         .with_post("/errors", api::ingest_errors)
         .with_post("/errors/batch", api::ingest_errors_batch);
     let ingest = BodyLimitLayer::new(MAX_BODY_SIZE).into_layer(ingest);
+    let ingest = admission.wrap(ingest, api::admission::Transport::Http);
     let ingest = api::ProjectKeyAuthorizer::layer(state.pool.clone()).into_layer(ingest);
 
     let otlp_grpc = TraceServiceServer::new(api::OtlpTraceService::new(state.pool.clone()))
         .with_max_decoding_message_size(MAX_BODY_SIZE);
+    let otlp_grpc = admission.wrap(otlp_grpc, api::admission::Transport::Grpc);
     let otlp_grpc = api::ProjectKeyAuthorizer::layer(state.pool.clone()).into_layer(otlp_grpc);
 
     // Build router with API routes only

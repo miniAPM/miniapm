@@ -198,6 +198,35 @@ curl -X POST http://localhost:3000/ingest/deploys \
 | `SESSION_SECRET` | (required) | Secret for session cookies |
 | `MINI_APM_URL` | `http://localhost:3001` | URL for generating links |
 
+## Ingestion admission
+
+The collector can optionally limit ingestion requests per project:
+
+```sh
+INGEST_REQUESTS_PER_SECOND=100
+INGEST_BURST=100
+INGEST_MAX_KEYS_PER_SHARD=4096
+```
+
+Leave all three unset to disable admission limits. Rate must be finite and between
+0.000001 and 1000000; burst is 1–1000000; keys per shard is 1–65536.
+Burst defaults to 100 and keys per shard to 4096 when a rate is configured.
+The burst and storage settings require a rate.
+
+Each authenticated request/export costs one admission, including batches and
+malformed payloads. HTTP JSON/protobuf, errors, deploys, and OTLP gRPC share the
+same project budget. Limits run after authentication but before reading bodies;
+authentication still queries the database. Existing 10 MiB body limits remain.
+
+HTTP refusals return `429` with a rounded-up `Retry-After` in seconds; gRPC
+returns retryable `UNAVAILABLE`. Both quota exhaustion and full limiter shards
+are retryable admission refusals. Clients should back off with jitter.
+
+This is **process-local protection**, not a durable or distributed quota:
+restarts reset budgets and multiple collectors each have their own budget.
+The limiter has 16 bounded shards; recovered project entries are reclaimed.
+Health checks, the dashboard/MCP, and internal self-monitoring are excluded.
+
 ## Multi-User Mode
 
 To enable login and user management on the dashboard:

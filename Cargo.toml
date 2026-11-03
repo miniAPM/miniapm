@@ -57,6 +57,7 @@ argon2 = "0.6"
 
 # State machines
 state-machines = "0.32.1"
+throttle-machines = "0.5.0"
 
 # MCP
 mcp-host = { version = "0.13.1", features = ["http", "macros"] }

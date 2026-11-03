@@ -12,6 +12,7 @@ pub struct Config {
     pub enable_user_accounts: bool,
     pub enable_projects: bool,
     pub session_secret: String,
+    pub ingest_admission: Option<crate::api::admission::AdmissionConfig>,
 }
 
 pub fn env_flag(name: &str) -> bool {
@@ -60,6 +61,7 @@ impl Config {
             enable_user_accounts,
             enable_projects: env_flag("ENABLE_PROJECTS"),
             session_secret,
+            ingest_admission: ingest_admission_from_env()?,
         })
     }
 
@@ -139,6 +141,7 @@ impl Config {
             "  Slow request threshold: {}ms",
             self.slow_request_threshold_ms
         );
+        tracing::info!("  Ingestion admission: {:?}", self.ingest_admission);
     }
 }
 
@@ -154,8 +157,52 @@ impl Default for Config {
             enable_user_accounts: false,
             enable_projects: false,
             session_secret: "test-secret".to_string(),
+            ingest_admission: None,
         }
     }
+}
+
+fn ingest_admission_from_env() -> anyhow::Result<Option<crate::api::admission::AdmissionConfig>> {
+    parse_ingest_admission(
+        env::var("INGEST_REQUESTS_PER_SECOND"),
+        env::var("INGEST_BURST"),
+        env::var("INGEST_MAX_KEYS_PER_SHARD"),
+    )
+}
+
+fn parse_ingest_admission(
+    rate: Result<String, env::VarError>,
+    burst: Result<String, env::VarError>,
+    keys: Result<String, env::VarError>,
+) -> anyhow::Result<Option<crate::api::admission::AdmissionConfig>> {
+    use anyhow::Context;
+    if matches!(rate, Err(env::VarError::NotPresent)) {
+        anyhow::ensure!(
+            matches!(burst, Err(env::VarError::NotPresent))
+                && matches!(keys, Err(env::VarError::NotPresent)),
+            "INGEST_BURST and INGEST_MAX_KEYS_PER_SHARD require INGEST_REQUESTS_PER_SECOND"
+        );
+        return Ok(None);
+    }
+    let rate = rate
+        .context("Invalid INGEST_REQUESTS_PER_SECOND")?
+        .parse()
+        .context("Invalid INGEST_REQUESTS_PER_SECOND")?;
+    let parse_optional =
+        |value: Result<String, env::VarError>, default, name| -> anyhow::Result<u32> {
+            match value {
+                Ok(value) => value.parse().with_context(|| format!("Invalid {name}")),
+                Err(env::VarError::NotPresent) => Ok(default),
+                Err(error) => Err(error).with_context(|| format!("Invalid {name}")),
+            }
+        };
+    let burst = parse_optional(burst, 100, "INGEST_BURST")?;
+    let keys = parse_optional(keys, 4096, "INGEST_MAX_KEYS_PER_SHARD")?;
+    Ok(Some(crate::api::admission::AdmissionConfig::new(
+        rate,
+        burst,
+        keys as usize,
+    )?))
 }
 
 #[cfg(test)]

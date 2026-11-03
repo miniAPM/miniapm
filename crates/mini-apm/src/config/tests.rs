@@ -58,3 +58,31 @@ fn validation_accepts_supported_urls_and_positive_boundaries() -> anyhow::Result
     }
     Ok(())
 }
+#[test]
+fn ingestion_environment_settings_are_strict_and_opt_in() {
+    let absent = || Err(std::env::VarError::NotPresent);
+    assert!(
+        super::parse_ingest_admission(absent(), absent(), absent())
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        super::parse_ingest_admission(Ok("100".into()), absent(), absent())
+            .unwrap()
+            .is_some()
+    );
+    for rate in ["", "invalid", "NaN", "inf", "0", "-1"] {
+        assert!(
+            super::parse_ingest_admission(Ok(rate.into()), absent(), absent()).is_err(),
+            "{rate}"
+        );
+    }
+    for burst in ["0", "-1", "1000001", "invalid"] {
+        assert!(super::parse_ingest_admission(Ok("1".into()), Ok(burst.into()), absent()).is_err());
+    }
+    for keys in ["0", "-1", "65537", "invalid"] {
+        assert!(super::parse_ingest_admission(Ok("1".into()), absent(), Ok(keys.into())).is_err());
+    }
+    assert!(super::parse_ingest_admission(absent(), Ok("1".into()), absent()).is_err());
+    assert!(super::parse_ingest_admission(absent(), absent(), Ok("1".into())).is_err());
+}
