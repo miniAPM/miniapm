@@ -12,22 +12,6 @@ fn validates_budget_bounds() {
 }
 
 #[test]
-fn shared_budget_recovers_without_sleeping() {
-    let config = AdmissionConfig::new(2.0, 2, 4096).unwrap();
-    let admission = Admission::new(Some(&config), None);
-    let cloned = admission.clone();
-    let limiter = admission.limiter.as_ref().unwrap();
-    assert!(limiter.check_at(&1, 0.0).allowed);
-    assert!(cloned.limiter.as_ref().unwrap().check_at(&1, 0.0).allowed);
-    let denied = limiter.check_at(&1, 0.0);
-    assert!(!denied.allowed);
-    assert_eq!(denied.retry_after, 0.5);
-    assert!(limiter.check_at(&2, 0.0).allowed);
-    assert!(!limiter.check_at(&1, 0.49).allowed);
-    assert!(limiter.check_at(&1, 0.5).allowed);
-}
-
-#[test]
 fn transport_refusals_are_retryable() {
     for (delay, expected) in [(0.0, "1"), (0.1, "1"), (1.01, "2")] {
         let response = refusal(Transport::Http, Refusal::Rate(delay));

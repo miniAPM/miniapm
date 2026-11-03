@@ -47,6 +47,21 @@ drops whole days, so data can outlive its retention period by up to a day.
 Several collectors can share one database: each background job runs on one of
 them at a time.
 
+### Background maintenance retries
+
+Expired-session cleanup gets at most three attempts, using `chrono-machines`
+exponential backoff with full jitter (up to 100 ms then 200 ms). Jiff remains the
+date/time library. Every attempt uses the same expiration cutoff.
+
+Only SQLite `BUSY` errors (including extended variants) and PostgreSQL `40001`,
+`40P01`, and `55P03` are retryable. Connection failures, pool timeouts, query
+cancellations, and permanent errors are not retried. PostgreSQL's job lock stays
+held during backoff; another collector skips that run. Cancellation stops retries
+and discards the lock session safely.
+
+These bounds cover attempts and backoff, not database query duration. Ingestion
+handlers and retention jobs do not acquire any new retries.
+
 ## Quick Start
 
 ### Docker Compose (recommended)

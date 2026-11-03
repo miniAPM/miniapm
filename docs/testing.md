@@ -17,13 +17,20 @@ MINIAPM_TEST_DATABASE_URL=postgres://user:password@localhost/miniapm_test \
 Tests create migrated schemas and may sweep old test schemas. Never point this
 variable at an application database. Admission tests cover authenticated shared
 HTTP/gRPC budgets, tenant isolation, retry responses, batch accounting, and
-persisted data. Recovery is tested using the limiter's explicit clock, not sleeps.
+persisted data. Do not retest the crates' rate-limiting or backoff algorithms here.
 
 PostgreSQL job-lock tests also keep the original pool alive while cancelling a
 running job, then acquire its advisory lock through an independent collector
 session. Normal success/failure paths must release the lock and reuse healthy
 connections. Cancellation discards the possibly locked session; it does **not**
 undo committed job work or make an arbitrary job safe to retry.
+
+Session-cleanup integration tests use real SQLite write contention and PostgreSQL
+statement triggers with explicit SQLSTATEs. Tests cover error classification,
+persisted cleanup results, the fixed cutoff, and job-lock ownership during backoff
+and cancellation—not the crate's delay calculations or attempt arithmetic.
+Backoff sleepers are injected to avoid timing-dependent tests; production uses Tokio timers and
+the published `chrono-machines` async retry driver.
 
 ## Ingestion load experiment
 

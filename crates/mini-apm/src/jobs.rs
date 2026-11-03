@@ -1,6 +1,7 @@
 mod retention;
+mod sessions;
 
-use crate::{DbPool, config::Config, db, models, self_monitor};
+use crate::{DbPool, config::Config, db, self_monitor};
 use std::future::Future;
 use std::time::Duration;
 use tokio::time::interval;
@@ -12,13 +13,7 @@ pub fn start(pool: DbPool, config: Config) {
     let p = pool.clone();
     every(pool.clone(), "sessions.cleanup", HOUR, move || {
         let p = p.clone();
-        async move {
-            let count = models::user::delete_expired_sessions(&p).await?;
-            if count > 0 {
-                tracing::info!("Cleaned up {} expired sessions", count);
-            }
-            Ok(())
-        }
+        async move { sessions::cleanup(&p).await }
     });
 
     let p = pool.clone();

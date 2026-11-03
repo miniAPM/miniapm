@@ -229,9 +229,15 @@ pub async fn delete_session(pool: &DbPool, token: &str) -> anyhow::Result<()> {
 
 /// Delete expired sessions (cleanup)
 pub async fn delete_expired_sessions(pool: &DbPool) -> anyhow::Result<u64> {
-    let now = Stamp::now();
+    Ok(delete_expired_sessions_before(pool, Stamp::now()).await?)
+}
+
+pub(crate) async fn delete_expired_sessions_before(
+    pool: &DbPool,
+    cutoff: Stamp,
+) -> sqlx::Result<u64> {
     let result = sqlx::query("DELETE FROM sessions WHERE expires_at < $1")
-        .bind(now)
+        .bind(cutoff)
         .execute(pool)
         .await?;
     Ok(result.rows_affected())
