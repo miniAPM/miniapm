@@ -16,7 +16,7 @@ fn request(uri: &str, peer: &str, forwarded_for: Option<&str>) -> Request {
 }
 
 async fn app() -> impl Service<Request, Output = Response, Error = Infallible> {
-    make_app(mini_apm::db::test_pool().await)
+    make_app(mini_apm::db::test_pool().await).unwrap()
 }
 
 async fn html(
@@ -101,7 +101,7 @@ async fn test_pages_follow_selected_project() {
     error::insert(&pool, &only_in_other, Some(other.id))
         .await
         .unwrap();
-    let app = make_app(pool);
+    let app = make_app(pool).unwrap();
 
     let page = async |uri: &str, cookie: Option<&str>| {
         let mut req = request(uri, "203.0.113.1", None);
@@ -218,7 +218,7 @@ async fn test_dashboard_marks_deploys_on_their_chart_hour() {
         .await
         .unwrap();
 
-    let html = html(&make_app(pool), "/").await;
+    let html = html(&make_app(pool).unwrap(), "/").await;
     let hour = at.hour_label();
     assert!(html.contains(&format!(r#""hour":"{hour}""#)));
     assert!(html.contains(&format!(r#"data-signals:_deploys='["{hour}"]'"#)));
@@ -280,7 +280,7 @@ async fn test_error_page_offers_only_allowed_status_changes() {
         source_context: None,
     };
     let id = error::insert(&pool, &incoming, None).await.unwrap();
-    let app = make_app(pool.clone());
+    let app = make_app(pool.clone()).unwrap();
 
     for (event, offered) in [
         (None, ["resolved", "ignored"]),

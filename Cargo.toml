@@ -56,7 +56,11 @@ anyhow = "1"
 argon2 = "0.6"
 
 # State machines
-state-machines = "0.31.0"
+state-machines = "0.32.1"
+
+# MCP
+mcp-host = { version = "0.13.1", features = ["http", "macros"] }
+schemars = "1.2.3"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

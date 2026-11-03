@@ -26,6 +26,9 @@ serde = { workspace = true }
 tracing = { workspace = true }
 anyhow = { workspace = true }
 tokio = { workspace = true }
+mcp-host = { workspace = true }
+schemars = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 mini-apm = { workspace = true, features = ["test-support"] }

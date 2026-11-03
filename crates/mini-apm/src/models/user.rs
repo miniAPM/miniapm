@@ -353,6 +353,14 @@ pub async fn find(pool: &DbPool, id: i64) -> anyhow::Result<Option<User>> {
     Ok(user)
 }
 
+/// The earliest admin, who acts for everyone while user accounts are off
+pub async fn first_admin(pool: &DbPool) -> anyhow::Result<Option<User>> {
+    let sql = format!("SELECT {USER_COLUMNS} FROM users WHERE is_admin ORDER BY id LIMIT 1");
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .fetch_optional(pool)
+        .await?)
+}
+
 /// Generate an invite token (12 bytes = 24 hex chars, short but secure)
 pub fn generate_invite_token() -> String {
     random_hex::<12>()

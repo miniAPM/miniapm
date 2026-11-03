@@ -1,0 +1,78 @@
+{% extends "layout.html" %}
+
+{% block title %}MCP Tokens - MiniAPM{% endblock %}
+
+{% block content %}
+<h1>MCP Tokens</h1>
+
+{% if let Some(err) = error %}
+<div class="alert alert-error">{{ err }}</div>
+{% endif %}
+
+<div class="card">
+    <h2>New Token</h2>
+    <p>MCP clients connect to <code>{{ endpoint }}</code> with a token in the <code>Authorization</code> header. A token acts as you; revoke it when the client no longer needs it.</p>
+
+    {% if let Some(token) = secret %}
+    <div class="alert alert-success">
+        <p>Copy this token now. It is not shown again.</p>
+        <div class="api-key-display">
+            <code class="api-key">{{ token }}</code>
+            <button type="button" class="btn btn-secondary" onclick="navigator.clipboard.writeText('{{ token }}')">Copy</button>
+        </div>
+    </div>
+    <pre><code>claude mcp add --transport http miniapm {{ endpoint }} --header "Authorization: Bearer {{ token }}"</code></pre>
+    {% endif %}
+
+    <form method="POST" action="/mcp-tokens/create" class="inline-form">
+        <input type="text" name="name" placeholder="Token name, e.g. laptop" maxlength="64" required>
+        <button type="submit" class="btn btn-primary">Create Token</button>
+    </form>
+</div>
+
+{% if tokens.is_empty() %}
+<p class="empty">No MCP tokens yet</p>
+{% else %}
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Created</th>
+                <th>Last used</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for token in tokens %}
+            <tr>
+                <td>{{ token.name }}</td>
+                <td>{{ token.created_at }}</td>
+                <td>{% if let Some(used) = token.last_used_at %}{{ used }}{% else %}Never{% endif %}</td>
+                <td class="actions">
+                    <form method="POST" action="/mcp-tokens/revoke" class="inline">
+                        <input type="hidden" name="id" value="{{ token.id }}">
+                        <button type="submit" class="btn-small btn-danger" onclick="return confirm('Revoke {{ token.name }}? Its MCP sessions end now.')">Revoke</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+<style>
+.api-key-display {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin: 1rem 0;
+}
+
+.api-key-display .api-key {
+    flex: 1;
+    word-break: break-all;
+}
+</style>
+{% endblock %}

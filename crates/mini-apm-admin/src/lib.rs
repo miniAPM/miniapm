@@ -1,3 +1,4 @@
+pub mod mcp;
 pub mod web;
 
 mod cookies;
@@ -30,6 +31,7 @@ use rama::service::Service;
 use rama::utils::include_dir::{Dir, include_dir};
 use rama::utils::rate::Rate;
 
+use mcp_host::prelude::HttpTransportSessionHandle;
 use mini_apm::DbPool;
 use mini_apm::self_monitor::SelfMonitorLayer;
 
@@ -40,6 +42,7 @@ const STATIC_ASSETS: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/static");
 #[derive(Clone)]
 pub struct AppState {
     pub pool: DbPool,
+    pub mcp_sessions: HttpTransportSessionHandle,
 }
 
 // Allow extracting DbPool from AppState
@@ -49,10 +52,23 @@ impl FromRef<AppState> for DbPool {
     }
 }
 
+impl FromRef<AppState> for HttpTransportSessionHandle {
+    fn from_ref(state: &AppState) -> Self {
+        state.mcp_sessions.clone()
+    }
+}
+
+/// The admin UI, with the MCP endpoint at `/mcp`. MCP clients authenticate
+/// with MCP tokens, so the endpoint sits outside the session auth, security
+/// headers and per-IP rate limit of the UI.
 pub fn make_app(
     pool: DbPool,
-) -> impl Service<Request, Output = Response, Error = Infallible> + Clone {
-    let state = AppState { pool };
+) -> anyhow::Result<impl Service<Request, Output = Response, Error = Infallible> + Clone> {
+    let mcp = mcp::Endpoint::new(pool.clone())?;
+    let state = AppState {
+        pool,
+        mcp_sessions: mcp.sessions(),
+    };
 
     let app = Router::new_with_state(state.clone())
         // Health check (no auth)
@@ -85,6 +101,9 @@ pub fn make_app(
         .with_post("/projects/regenerate-key", web::projects::regenerate_key)
         .with_get("/api-key", web::api_key::index)
         .with_post("/api-key/regenerate", web::api_key::regenerate)
+        .with_get("/mcp-tokens", web::mcp_tokens::index)
+        .with_post("/mcp-tokens/create", web::mcp_tokens::create)
+        .with_post("/mcp-tokens/revoke", web::mcp_tokens::revoke)
         // Static files
         .with_get("/static/datastar.js", DatastarScript::new())
         .with_endpoint_service("/static", ServeDir::new_embedded(STATIC_ASSETS))
@@ -123,7 +142,12 @@ pub fn make_app(
     });
     let with_rate_limit = rate_limit.into_layer(with_security);
 
-    Arc::new(SelfMonitorLayer::global().into_layer(with_rate_limit))
+    let app = Router::new()
+        .with_endpoint_service("/mcp", mcp)
+        .with_not_found(with_rate_limit);
+    let app = ErrorHandlerLayer::new().into_layer(app);
+
+    Ok(Arc::new(SelfMonitorLayer::global().into_layer(app)))
 }
 
 /// Rate limit key: the socket peer, unless that peer is a reverse proxy on

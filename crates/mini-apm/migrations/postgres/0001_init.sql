@@ -29,6 +29,17 @@ CREATE TABLE sessions (
 CREATE INDEX sessions_user_id ON sessions (user_id);
 CREATE INDEX sessions_expires_at ON sessions (expires_at);
 
+CREATE TABLE mcp_tokens (
+    id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL,
+    last_used_at TIMESTAMPTZ
+);
+
+CREATE INDEX mcp_tokens_user_id ON mcp_tokens (user_id);
+
 CREATE TABLE settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
