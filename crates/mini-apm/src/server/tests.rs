@@ -5,6 +5,7 @@ use rama::http::body::util::BodyExt;
 use rama::http::{Body, Method, StatusCode};
 
 mod concurrency;
+mod lifecycle;
 mod load;
 
 fn post_error(authorization: Option<&str>, message: &str) -> Request {

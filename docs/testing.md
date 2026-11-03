@@ -37,6 +37,9 @@ allowing a running job to commit during grace, and cancelling uncommitted work
 even when HTTP draining times out. PostgreSQL tests also acquire the cancelled
 job's lock from an independent pool while its original pool remains alive.
 These exercise MiniAPM's lifecycle wiring, not Tokio's scheduling algorithms.
+An occupied-port regression test covers listener-error propagation both with
+collector maintenance jobs and without them (the admin server path), including
+connection cleanup without sending an OS signal.
 
 ## Ingestion load experiment
 

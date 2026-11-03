@@ -150,6 +150,7 @@ impl ShutdownSignal {
 
 /// Run an HTTP server on `addr` until Ctrl+C/SIGTERM, then drain in-flight
 /// connections (up to 30s) before returning.
+/// Listener failures are returned instead of waiting for a shutdown signal.
 pub async fn serve_with_graceful_shutdown<S, Resp>(addr: String, app: S) -> anyhow::Result<()>
 where
     S: Service<Request, Output = Resp, Error = Infallible> + Clone + 'static,
@@ -171,19 +172,26 @@ where
     let (shutdown, signal) = tokio::sync::oneshot::channel::<()>();
     let graceful = Shutdown::new(signal);
 
-    graceful.spawn_task_fn(move |guard| async move {
+    let mut listener = graceful.spawn_task_fn(move |guard| async move {
         let app = AddInputExtensionLayer::new(ShutdownSignal(guard.clone_weak())).into_layer(app);
         let exec = Executor::graceful(guard);
 
-        if let Err(e) = HttpServer::auto(exec).listen(&addr, app).await {
-            tracing::error!("Server error: {}", e);
-        }
+        HttpServer::auto(exec)
+            .listen(&addr, app)
+            .await
+            .map_err(|error| anyhow::anyhow!("HTTP listener on {addr} failed: {error}"))
     });
 
-    // Wait for shutdown signal
-    tokio::select! {
+    // A failed listener must not leave a headless collector running jobs.
+    let listener_result = tokio::select! {
+        result = &mut listener => Some(match result {
+            Ok(Err(error)) => Err(error),
+            Ok(Ok(())) => Err(anyhow::anyhow!("HTTP listener stopped unexpectedly")),
+            Err(error) => Err(anyhow::anyhow!("HTTP listener task failed: {error}")),
+        }),
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Received Ctrl+C, starting graceful shutdown...");
+            None
         }
         () = async {
             #[cfg(unix)]
@@ -199,13 +207,36 @@ where
             }
         } => {
             tracing::info!("Received SIGTERM, starting graceful shutdown...");
+            None
         }
-    }
+    };
 
     if shutdown.send(()).is_err() {
         tracing::warn!("HTTP shutdown signal receiver already closed");
     }
-    drain(graceful, jobs, Duration::from_secs(30)).await?;
+    // No traffic can be served after listener failure: cancel maintenance now.
+    let grace = if listener_result.is_some() {
+        Duration::ZERO
+    } else {
+        Duration::from_secs(30)
+    };
+    let drained = drain(graceful, jobs, grace).await;
+    let served = if let Some(result) = listener_result {
+        result
+    } else {
+        // Do not detach the listener on HTTP-drain timeout. Joining after abort
+        // also handles the small race between guard release and task completion.
+        listener.abort();
+        match listener.await {
+            Ok(result) => result,
+            Err(error) if error.is_cancelled() => Ok(()),
+            Err(error) => Err(anyhow::anyhow!("HTTP listener task failed: {error}")),
+        }
+    };
+    if let Err(error) = &drained {
+        tracing::error!(%error, "HTTP draining failed");
+    }
+    served.and(drained)?;
 
     tracing::info!("Server shutdown complete");
     Ok(())

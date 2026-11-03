@@ -70,6 +70,10 @@ Unfinished jobs are then cancelled and joined before the database pool closes,
 including when HTTP draining times out. PostgreSQL advisory-lock sessions are
 discarded safely on cancellation. Cancellation does not undo work already committed.
 
+If the HTTP listener fails (for example, because its port is occupied), the
+process returns an error without waiting for a signal. Maintenance jobs are
+cancelled and joined before the collector closes its database pool.
+
 ## Quick Start
 
 ### Docker Compose (recommended)
