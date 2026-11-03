@@ -217,6 +217,9 @@ Retention defaults apply only when unset. Explicit values must be positive whole
 days and produce a cutoff within the supported timestamp range.
 `SLOW_REQUEST_THRESHOLD_MS` must be finite and positive; its 500 ms default applies
 only when unset.
+`SESSION_SECRET` must be nonblank when supplied and at least 32 characters when
+accounts are enabled. Only an absent secret in single-user mode is generated
+automatically. Configuration debug output redacts session secrets and database URLs.
 
 ### Collector (`miniapm`)
 

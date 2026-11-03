@@ -1,7 +1,7 @@
 use std::env;
 use std::path::Path;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Config {
     pub sqlite_path: String,
     pub database_url: Option<String>,
@@ -14,6 +14,53 @@ pub struct Config {
     pub session_secret: String,
     pub ingest_admission: Option<crate::api::admission::AdmissionConfig>,
     pub ingest_max_in_flight: Option<crate::api::admission::InFlightLimit>,
+}
+
+impl std::fmt::Debug for Config {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("Config")
+            .field("sqlite_path", &self.sqlite_path)
+            .field(
+                "database_url",
+                &self.database_url.as_ref().map(|_| "[REDACTED]"),
+            )
+            .field("retention_days_errors", &self.retention_days_errors)
+            .field("retention_days_spans", &self.retention_days_spans)
+            .field("slow_request_threshold_ms", &self.slow_request_threshold_ms)
+            .field("mini_apm_url", &self.mini_apm_url)
+            .field("enable_user_accounts", &self.enable_user_accounts)
+            .field("enable_projects", &self.enable_projects)
+            .field("session_secret", &"[REDACTED]")
+            .field("ingest_admission", &self.ingest_admission)
+            .field("ingest_max_in_flight", &self.ingest_max_in_flight)
+            .finish()
+    }
+}
+
+fn parse_session_secret(
+    value: Result<String, env::VarError>,
+    accounts: bool,
+) -> anyhow::Result<String> {
+    let secret = match value {
+        Ok(secret) => secret,
+        Err(env::VarError::NotPresent) if !accounts => {
+            return Ok(hex::encode(rand::random::<[u8; 32]>()));
+        }
+        Err(env::VarError::NotPresent) => anyhow::bail!(
+            "SESSION_SECRET is required when ENABLE_USER_ACCOUNTS=true. Generate one with: openssl rand -hex 32"
+        ),
+        Err(_) => anyhow::bail!("SESSION_SECRET must contain valid UTF-8"),
+    };
+    anyhow::ensure!(
+        !secret.trim().is_empty(),
+        "SESSION_SECRET must not be blank"
+    );
+    anyhow::ensure!(
+        !accounts || secret.len() >= 32,
+        "SESSION_SECRET must be at least 32 characters when user accounts are enabled"
+    );
+    Ok(secret)
 }
 
 pub fn env_flag(name: &str) -> anyhow::Result<bool> {
@@ -77,22 +124,8 @@ impl Config {
         // SESSION_SECRET is required when user accounts are enabled
         let enable_user_accounts = env_flag("ENABLE_USER_ACCOUNTS")?;
 
-        let session_secret = env::var("SESSION_SECRET").ok();
-
-        if enable_user_accounts && session_secret.is_none() {
-            anyhow::bail!(
-                "SESSION_SECRET environment variable is required when ENABLE_USER_ACCOUNTS=true. \
-                Generate one with: openssl rand -hex 32"
-            );
-        }
-
-        // Warn if using default secret in development
-        let session_secret = session_secret.unwrap_or_else(|| {
-            // This shouldn't happen due to the check above, but just in case
-            assert!(!enable_user_accounts, "SESSION_SECRET is required");
-            // In single-user mode, generate a random secret per run
-            hex::encode(rand::random::<[u8; 32]>())
-        });
+        let session_secret =
+            parse_session_secret(env::var("SESSION_SECRET"), enable_user_accounts)?;
 
         Ok(Self {
             sqlite_path: env::var("SQLITE_PATH")
@@ -155,8 +188,10 @@ impl Config {
         }
 
         // Validate session secret is long enough when user accounts are enabled
-        if self.enable_user_accounts && self.session_secret.len() < 32 {
-            errors.push("SESSION_SECRET should be at least 32 characters for security".to_string());
+        if self.session_secret.trim().is_empty()
+            || (self.enable_user_accounts && self.session_secret.len() < 32)
+        {
+            errors.push("SESSION_SECRET must be nonblank and at least 32 characters when user accounts are enabled".to_string());
         }
 
         // Validate sqlite_path parent directory exists or can be created (skip for :memory:)

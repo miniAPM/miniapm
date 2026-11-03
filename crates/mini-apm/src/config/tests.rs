@@ -1,6 +1,50 @@
 use super::*;
 
 #[test]
+fn session_secrets_distinguish_absence_from_invalid_values() {
+    assert!(parse_session_secret(Err(env::VarError::NotPresent), true).is_err());
+    assert_ne!(
+        parse_session_secret(Err(env::VarError::NotPresent), false).unwrap(),
+        ""
+    );
+    for accounts in [false, true] {
+        for value in ["", "   "] {
+            assert!(parse_session_secret(Ok(value.into()), accounts).is_err());
+        }
+        let error = parse_session_secret(
+            Err(env::VarError::NotUnicode("private-value".into())),
+            accounts,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("SESSION_SECRET"));
+        assert!(!format!("{error:#}").contains("private-value"));
+    }
+    assert!(parse_session_secret(Ok("short".into()), true).is_err());
+    assert_eq!(
+        parse_session_secret(Ok("development".into()), false).unwrap(),
+        "development"
+    );
+    assert_eq!(
+        parse_session_secret(Ok("x".repeat(32)), true).unwrap(),
+        "x".repeat(32)
+    );
+}
+
+#[test]
+fn configuration_debug_output_redacts_credentials() {
+    let config = Config {
+        session_secret: "private-session-value".into(),
+        database_url: Some("postgres://user:private-password@localhost/miniapm".into()),
+        ..Config::default()
+    };
+    let debug = format!("{config:?}");
+    assert!(!debug.contains("private-session-value"));
+    assert!(!debug.contains("private-password"));
+    assert!(debug.contains("[REDACTED]"));
+    assert!(debug.contains("retention_days_errors"));
+}
+
+#[test]
 fn slow_thresholds_default_only_when_absent_and_require_finite_positive_values() {
     assert_eq!(
         parse_threshold(Err(env::VarError::NotPresent)).unwrap(),
@@ -126,6 +170,8 @@ fn validation_reports_all_configuration_errors() {
 fn session_secret_requirement_depends_on_account_mode() {
     for (accounts, secret, valid) in [
         (false, "short".to_string(), true),
+        (false, String::new(), false),
+        (true, " ".repeat(32), false),
         (true, "x".repeat(31), false),
         (true, "x".repeat(32), true),
     ] {
