@@ -86,6 +86,19 @@ async fn test_records_requests_jobs_queries_and_errors() {
     ];
     let errors = vec!["disk full disk=\"sda\"".to_string()];
     assert_eq!((recorded_traces, recorded_errors), (traces, errors));
+    let systems: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT db_system FROM spans WHERE project_id = $1 AND db_statement IS NOT NULL",
+    )
+    .bind(project.id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let expected = if cfg!(feature = "postgres") {
+        "postgresql"
+    } else {
+        "sqlite"
+    };
+    assert_eq!(systems, [expected]);
     pool.close().await;
 }
 

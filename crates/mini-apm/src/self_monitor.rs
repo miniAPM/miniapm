@@ -32,6 +32,11 @@ mod tests;
 const QUEUE: usize = 1024;
 /// Most spans written in one batch
 const BATCH: usize = 256;
+const DATABASE_SYSTEM: &str = if cfg!(feature = "postgres") {
+    "postgresql"
+} else {
+    "sqlite"
+};
 
 static GLOBAL: OnceLock<SelfMonitor> = OnceLock::new();
 
@@ -158,7 +163,7 @@ impl SelfMonitor {
             start_time_unix_nano: nanos(q.start),
             end_time_unix_nano: nanos(q.end),
             attributes: Some(vec![
-                attribute("db.system", "sqlite"),
+                attribute("db.system", DATABASE_SYSTEM),
                 attribute("db.statement", q.statement),
             ]),
             events: None,

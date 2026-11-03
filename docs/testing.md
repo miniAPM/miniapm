@@ -45,6 +45,7 @@ errors, preserving the underlying error after listener and maintenance cleanup.
 Self-monitor tests explicitly drain the writer while sender clones remain alive,
 verify buffered spans and errors in the database without polling sleeps, and
 cover multiple queued batches, late records, and a writer blocked on pool capacity.
+Stored self-monitor SQL spans must also identify the selected database backend.
 
 ## Ingestion load experiment
 
