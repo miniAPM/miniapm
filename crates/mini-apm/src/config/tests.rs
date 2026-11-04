@@ -40,6 +40,19 @@ fn text_settings_preserve_explicit_values_and_reject_invalid_present_values() {
     assert!(error.contains("DATABASE_URL"));
 }
 
+#[cfg(all(feature = "sqlite", not(feature = "postgres")))]
+#[test]
+fn sqlite_build_rejects_a_postgres_database_url() {
+    let config = Config {
+        database_url: Some("postgres://localhost/miniapm".into()),
+        ..Config::default()
+    };
+
+    let error = config.validate().unwrap_err().to_string();
+    assert!(error.contains("built with SQLite"));
+    assert!(error.contains("--features postgres"));
+}
+
 #[test]
 fn session_secrets_distinguish_absence_from_invalid_values() {
     assert!(parse_session_secret(Err(env::VarError::NotPresent), true).is_err());

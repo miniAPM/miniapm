@@ -11,13 +11,18 @@ use super::project_context::WebProjectContext;
 #[template(path = "api_key/index.html")]
 pub struct ApiKeyTemplate {
     pub api_key: String,
+    pub ingest_base_url: Option<String>,
     pub ctx: WebProjectContext,
 }
 
 pub async fn index(ctx: WebProjectContext) -> HtmlTemplate<ApiKeyTemplate> {
     let api_key = ctx.api_key("Error loading API key");
 
-    HtmlTemplate(ApiKeyTemplate { api_key, ctx })
+    HtmlTemplate(ApiKeyTemplate {
+        api_key,
+        ingest_base_url: crate::ingest_base_url(),
+        ctx,
+    })
 }
 
 pub async fn regenerate(State(pool): State<DbPool>, ctx: WebProjectContext) -> impl IntoResponse {

@@ -738,6 +738,10 @@ tbody tr:last-child td {
     padding: 2rem;
 }
 
+.auth-container-postgres {
+    background: radial-gradient(ellipse at top, rgba(51, 103, 145, 0.22), transparent 68%);
+}
+
 .auth-card {
     background: var(--bg-card);
     border: 1px solid var(--border);

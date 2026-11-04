@@ -24,6 +24,13 @@
 <div class="card" style="margin-top: 2rem;">
     <h2>Integration</h2>
     <p>Add the MiniAPM gem to your Rails application and configure it with your API key:</p>
+    {% match ingest_base_url %}
+    {% when Some with (base_url) %}
+    <p>Collector base URL: <code>{{ base_url }}</code></p>
+    {% when None %}
+    <p>Set <code>MINI_APM_INGEST_URL</code> on the admin service to your externally reachable collector base URL.
+       The collector listens separately from the dashboard.</p>
+    {% endmatch %}
 
     <h3>1. Add to your Gemfile</h3>
     <pre><code>gem 'miniapm'</code></pre>
@@ -32,7 +39,7 @@
     <pre><code># config/initializers/miniapm.rb
 MiniAPM.configure do |config|
   config.api_key = "{{ api_key }}"
-  config.endpoint = "http://localhost:3000"
+  config.endpoint = "{% match ingest_base_url %}{% when Some with (base_url) %}{{ base_url }}{% when None %}http://localhost:3000{% endmatch %}"
   config.service_name = "my-app"
   config.environment = Rails.env
 end</code></pre>
@@ -41,7 +48,7 @@ end</code></pre>
     <p>For better security, use environment variables:</p>
     <pre><code># .env or your environment
 MINI_APM_API_KEY={{ api_key }}
-MINI_APM_ENDPOINT=http://localhost:3000
+MINI_APM_ENDPOINT={% match ingest_base_url %}{% when Some with (base_url) %}{{ base_url }}{% when None %}http://localhost:3000{% endmatch %}
 
 # config/initializers/miniapm.rb
 MiniAPM.configure do |config|

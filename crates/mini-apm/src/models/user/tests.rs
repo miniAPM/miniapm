@@ -25,14 +25,24 @@ fn username_validation_handles_boundaries_and_character_rules() {
 #[tokio::test]
 async fn admin_bootstrap_is_idempotent_and_requires_password_change() -> anyhow::Result<()> {
     let pool = test_pool().await;
-    ensure_default_admin(&pool).await?;
-    ensure_default_admin(&pool).await?;
+    assert!(create_default_admin(&pool, "initial-password").await?);
+    assert!(!create_default_admin(&pool, "different-password").await?);
     let users = list_all(&pool).await?;
     assert_eq!(users.len(), 1);
     let admin = &users[0];
     assert_eq!(admin.username, "admin");
     assert!(admin.is_admin);
     assert!(admin.must_change_password);
+    assert!(
+        authenticate(&pool, "admin", "initial-password")
+            .await?
+            .is_some()
+    );
+    assert!(
+        authenticate(&pool, "admin", "different-password")
+            .await?
+            .is_none()
+    );
 
     change_password(&pool, admin.id, "chosen-password").await?;
     let authenticated = authenticate(&pool, "admin", "chosen-password")

@@ -180,6 +180,14 @@ impl Config {
         {
             errors.push("DATABASE_URL must not be blank when supplied".to_string());
         }
+        #[cfg(all(feature = "sqlite", not(feature = "postgres")))]
+        if self.database_url.is_some() {
+            errors.push(
+                "DATABASE_URL is set, but this binary was built with SQLite; \
+                 rebuild with --no-default-features --features postgres"
+                    .to_string(),
+            );
+        }
 
         // Validate MINI_APM_URL is a valid URL
         if !self.mini_apm_url.starts_with("http://") && !self.mini_apm_url.starts_with("https://") {

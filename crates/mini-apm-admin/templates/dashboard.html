@@ -3,7 +3,31 @@
 {% block title %}Dashboard - MiniAPM{% endblock %}
 
 {% block content %}
-<h1>Dashboard</h1>
+<div class="dashboard-heading">
+    <h1>Dashboard</h1>
+    <span class="database-backend-badge database-backend-{{ database_backend_class }}">
+        Database: {{ database_backend }}
+    </span>
+</div>
+
+<section class="card ingress-card">
+    <h2>Ingest endpoints</h2>
+    {% match ingest_base_url %}
+    {% when Some with (base_url) %}
+    <p>Collector base URL: <code>{{ base_url }}</code></p>
+    <div class="ingress-list">
+        <div><strong>Errors</strong><code>POST {{ base_url }}/ingest/errors</code></div>
+        <div><strong>Batch errors</strong><code>POST {{ base_url }}/ingest/errors/batch</code></div>
+        <div><strong>Deploys</strong><code>POST {{ base_url }}/ingest/deploys</code></div>
+        <div><strong>OTLP/HTTP traces</strong><code>POST {{ base_url }}/ingest/v1/traces</code></div>
+        <div><strong>OTLP/gRPC traces</strong><code>{{ base_url }}/opentelemetry.proto.collector.trace.v1.TraceService/Export</code></div>
+    </div>
+    {% when None %}
+    <p>Collector URL is not configured for display. Set <code>MINI_APM_INGEST_URL</code>
+       in the admin service to the externally reachable collector base URL (for example,
+       <code>http://localhost:3000</code>). This is separate from the dashboard listener.</p>
+    {% endmatch %}
+</section>
 
 <div data-init="@get('/dashboard/live', {retry: 'always'})">
     {{ live|safe }}
@@ -147,4 +171,18 @@
 })();
 </script>
 <script type="module" src="/static/datastar.js"></script>
+<style>
+.dashboard-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.database-backend-badge { border: 1px solid currentColor; border-radius: 999px; padding: .35rem .75rem; font-size: .8rem; font-weight: 600; white-space: nowrap; }
+.database-backend-postgres { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.database-backend-sqlite { color: var(--primary); background: color-mix(in srgb, var(--primary) 14%, transparent); }
+.ingress-card { margin-bottom: 1.5rem; }
+.ingress-list { display: grid; gap: .65rem; }
+.ingress-list > div { display: grid; grid-template-columns: 10rem minmax(0, 1fr); gap: 1rem; align-items: baseline; }
+.ingress-list code { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+    .dashboard-heading { align-items: flex-start; }
+    .ingress-list > div { grid-template-columns: 1fr; gap: .2rem; }
+}
+</style>
 {% endblock %}

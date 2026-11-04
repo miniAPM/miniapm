@@ -243,7 +243,9 @@ supplied; defaults or absence apply only when the environment variable is unset.
 | `DATABASE_URL` | | PostgreSQL connection URL, same as collector (PostgreSQL builds) |
 | `ENABLE_USER_ACCOUNTS` | `false` | Enable multi-user authentication |
 | `SESSION_SECRET` | (required) | Secret for session cookies |
+| `MINI_APM_ADMIN_PASSWORD` | (unset) | Bootstrap password, required only when the users table is empty |
 | `MINI_APM_URL` | `http://localhost:3000` | URL for generating links; set to your public dashboard URL |
+| `MINI_APM_INGEST_URL` | (unset) | Public base URL of the collector, shown in the dashboard integration instructions |
 | `ADMIN_PORT` | `3001` | Dashboard listen port (0–65535); invalid values abort startup |
 
 ## Ingestion admission
@@ -303,10 +305,11 @@ export SESSION_SECRET=$(openssl rand -hex 32)
 export ENABLE_USER_ACCOUNTS=true
 ```
 
-Default admin credentials on first run:
-- Username: `admin`
-- Password: randomly generated and printed in the dashboard's startup logs
-  (you'll be prompted to change it)
+On the first run against an empty users table, set `MINI_APM_ADMIN_PASSWORD`
+through your secret manager before starting the dashboard. The account is
+`admin`; the supplied password is required to change after first login and is
+never printed to logs. This variable is only consulted when there are no users,
+so setting it later does not reset an existing account.
 
 ## CLI Commands
 

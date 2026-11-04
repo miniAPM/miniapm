@@ -25,6 +25,9 @@ const LIVE_INTERVAL: Duration = Duration::from_secs(10);
 #[template(path = "dashboard.html")]
 pub struct DashboardTemplate {
     pub live: DashboardLive,
+    pub ingest_base_url: Option<String>,
+    pub database_backend: &'static str,
+    pub database_backend_class: &'static str,
     pub ctx: WebProjectContext,
 }
 
@@ -107,7 +110,18 @@ pub async fn index(
     ctx: WebProjectContext,
 ) -> HtmlTemplate<DashboardTemplate> {
     let live = DashboardLive::load(&pool, ctx.project_id()).await;
-    HtmlTemplate(DashboardTemplate { live, ctx })
+    let (database_backend, database_backend_class) = if cfg!(feature = "postgres") {
+        ("PostgreSQL", "postgres")
+    } else {
+        ("SQLite", "sqlite")
+    };
+    HtmlTemplate(DashboardTemplate {
+        live,
+        ingest_base_url: crate::ingest_base_url(),
+        database_backend,
+        database_backend_class,
+        ctx,
+    })
 }
 
 /// Datastar stream patching the live dashboard right away, then every

@@ -3,7 +3,6 @@ use crate::time::Stamp;
 use anyhow::Context;
 use argon2::{Argon2, PasswordHasher, PasswordVerifier};
 use jiff::{SignedDuration, Timestamp};
-use rand::distr::{Alphanumeric, SampleString};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -109,40 +108,43 @@ fn random_hex<const N: usize>() -> String {
     hex::encode(rand::random::<[u8; N]>())
 }
 
-/// Generate a random password (16 alphanumeric characters)
-fn generate_random_password() -> String {
-    Alphanumeric.sample_string(&mut rand::rng(), 16)
-}
-
 /// Create the default admin user if no users exist
 pub async fn ensure_default_admin(pool: &DbPool) -> anyhow::Result<()> {
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(pool)
         .await?;
 
-    if count == 0 {
-        let password = generate_random_password();
-        let password_hash = hash_password(&password)?;
-        let now = Stamp::now();
-
-        sqlx::query(
-            "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) VALUES ($1, $2, TRUE, TRUE, $3)",
-        )
-        .bind("admin")
-        .bind(&password_hash)
-        .bind(now)
-        .execute(pool)
-        .await?;
-
-        tracing::info!("============================================================");
-        tracing::info!("Created default admin user");
-        tracing::info!("Username: admin");
-        tracing::info!("Password: {}", password);
-        tracing::info!("Please change this password after first login!");
-        tracing::info!("============================================================");
+    if count > 0 {
+        return Ok(());
     }
 
+    let password = std::env::var("MINI_APM_ADMIN_PASSWORD")
+        .context("no users exist; set MINI_APM_ADMIN_PASSWORD to bootstrap the admin account")?;
+    if create_default_admin(pool, &password).await? {
+        tracing::info!(
+            "Created default admin user; sign in as `admin` and change the bootstrap password"
+        );
+    }
     Ok(())
+}
+
+async fn create_default_admin(pool: &DbPool, password: &str) -> anyhow::Result<bool> {
+    let password_hash = hash_password(password)?;
+    let now = Stamp::now();
+    let inserted: Option<i64> = sqlx::query_scalar(
+        "INSERT INTO users (username, password_hash, is_admin, must_change_password, created_at) \
+         SELECT $1, $2, TRUE, TRUE, $3 \
+         WHERE NOT EXISTS (SELECT 1 FROM users) \
+         ON CONFLICT (username) DO NOTHING \
+         RETURNING id",
+    )
+    .bind("admin")
+    .bind(password_hash)
+    .bind(now)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(inserted.is_some())
 }
 
 /// Authenticate a user and return them if successful

@@ -22,6 +22,7 @@ const SESSION_COOKIE: &str = "miniapm_session";
 #[template(path = "auth/login.html")]
 pub struct LoginTemplate {
     pub error: Option<String>,
+    pub database_backend_class: &'static str,
 }
 
 #[derive(Template)]
@@ -97,13 +98,18 @@ async fn sign_in(pool: &DbPool, user_id: i64, location: &'static str) -> anyhow:
 // Handlers
 
 pub async fn login_page() -> Response {
-    HtmlTemplate(LoginTemplate { error: None }).into_response()
+    HtmlTemplate(LoginTemplate {
+        error: None,
+        database_backend_class: database_backend_class(),
+    })
+    .into_response()
 }
 
 pub async fn login_submit(State(pool): State<DbPool>, Form(form): Form<LoginForm>) -> Response {
     let fail = |error: &str| {
         HtmlTemplate(LoginTemplate {
             error: Some(error.to_string()),
+            database_backend_class: database_backend_class(),
         })
         .into_response()
     };
@@ -124,6 +130,14 @@ pub async fn login_submit(State(pool): State<DbPool>, Form(form): Form<LoginForm
         }
         Ok(None) => fail("Invalid username or password"),
         Err(_) => fail("Authentication error"),
+    }
+}
+
+fn database_backend_class() -> &'static str {
+    if cfg!(feature = "postgres") {
+        "postgres"
+    } else {
+        "sqlite"
     }
 }
 

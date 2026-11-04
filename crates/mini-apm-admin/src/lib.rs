@@ -45,6 +45,14 @@ pub struct AppState {
     pub mcp_sessions: HttpTransportSessionHandle,
 }
 
+/// Public base URL of the collector's HTTP listener, if configured.
+pub fn ingest_base_url() -> Option<String> {
+    std::env::var("MINI_APM_INGEST_URL")
+        .ok()
+        .map(|url| url.trim().trim_end_matches('/').to_owned())
+        .filter(|url| !url.is_empty())
+}
+
 // Allow extracting DbPool from AppState
 impl FromRef<AppState> for DbPool {
     fn from_ref(state: &AppState) -> Self {
