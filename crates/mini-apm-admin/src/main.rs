@@ -1,12 +1,27 @@
+use anyhow::{Context, ensure};
 use mini_apm::self_monitor::SelfMonitor;
 use mini_apm::server::serve_with_graceful_shutdown;
-use mini_apm::{DbPool, config::Config, db, init_tracing, models};
+use mini_apm::{DbPool, cli, config::Config, db, init_tracing, models};
 use mini_apm_admin::make_app;
+
+const USAGE: &str = include_str!("admin-cli.usage.kdl");
 
 mod port;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 {
+        let parsed = cli::parse(USAGE, &args).unwrap_or_else(|exit| exit.exit());
+        match parsed.cmd.name.as_str() {
+            "create-project" => {
+                let name = cli::value(&parsed, "name").context("project name")?;
+                return create_project(name).await;
+            }
+            command => anyhow::bail!("unknown command: {command}"),
+        }
+    }
+
     let port = port::from_env()?;
 
     // Binary, admin library, and shared collector library targets
@@ -34,6 +49,23 @@ async fn main() -> anyhow::Result<()> {
     }
     pool.close().await;
     result
+}
+
+async fn create_project(name: &str) -> anyhow::Result<()> {
+    let name = name.trim();
+    ensure!(!name.is_empty(), "project name must not be empty");
+
+    init_tracing("miniapm_admin=info,mini_apm_admin=info,mini_apm=info");
+    let config = Config::from_env()?;
+    config.validate()?;
+    let pool = db::init(&config).await?;
+    let result = models::project::create(&pool, name).await;
+    pool.close().await;
+    let project = result.context("creating MiniAPM project")?;
+
+    println!("Project created: {} ({})", project.name, project.slug);
+    println!("API key: {}", project.api_key);
+    Ok(())
 }
 
 async fn run(pool: DbPool, port: u16) -> anyhow::Result<()> {

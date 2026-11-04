@@ -1,0 +1,5 @@
+bin "miniapm-admin"
+about "MiniAPM admin dashboard and project administration"
+cmd "create-project" help="Create a project and print its API key" {
+    arg "<name>" help="Project name"
+}
