@@ -5,17 +5,26 @@ use crate::time::{self, Stamp};
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+/// A root GET span is treated as a long-lived stream when at least 60 seconds
+/// of recorded idle time covers 95% or more of its duration.
+pub(super) const LONG_LIVED_STREAM: &str = r"(
+    http_method = 'GET'
+    AND duration_ms >= 60000
+    AND CAST(COALESCE(json_extract(attributes_json, '$.idle_ns'), '0') AS REAL)
+        >= duration_ms * 950000
+)";
+
 pub async fn hourly_stats(
     pool: &DbPool,
     project_id: Option<i64>,
     hours: i64,
 ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
-    let rows: Vec<(String, i64, f64, i64)> = sqlx::query_as(
-        r"
+    let rows: Vec<(String, i64, f64, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        r#"
         SELECT
             strftime('%Y-%m-%d %H:00', happened_at) as hour,
             COUNT(*) as count,
-            COALESCE(AVG(duration_ms), 0.0) as avg_ms,
+            COALESCE(AVG(CASE WHEN NOT {LONG_LIVED_STREAM} THEN duration_ms END), 0.0) as avg_ms,
             SUM(CASE WHEN status_code = 2 OR http_status_code >= 500 THEN 1 ELSE 0 END) as error_count
         FROM spans
         WHERE parent_span_id IS NULL
@@ -23,8 +32,8 @@ pub async fn hourly_stats(
           AND happened_at >= $2
         GROUP BY strftime('%Y-%m-%d %H:00', happened_at)
         ORDER BY hour ASC
-        ",
-    )
+        "#
+    )))
     .bind(project_id)
     .bind(time::hours_ago(hours))
     .fetch_all(pool)
@@ -139,9 +148,14 @@ pub async fn latency_stats_since(
     project_id: Option<i64>,
     since: Stamp,
 ) -> anyhow::Result<LatencyStats> {
-    let values: Vec<f64> = sqlx::query_scalar(
-        "SELECT duration_ms FROM spans WHERE parent_span_id IS NULL AND happened_at >= $1 AND ($2 IS NULL OR project_id = $2) ORDER BY duration_ms ASC",
-    )
+    let values: Vec<f64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT duration_ms FROM spans
+         WHERE parent_span_id IS NULL
+           AND happened_at >= $1
+           AND ($2 IS NULL OR project_id = $2)
+           AND NOT {LONG_LIVED_STREAM}
+         ORDER BY duration_ms ASC"
+    )))
     .bind(since)
     .bind(project_id)
     .fetch_all(pool)
@@ -164,7 +178,7 @@ pub async fn latency_stats_since(
     })
 }
 
-/// p95 and p99 of each route in `paths`, computed from its root span durations
+/// p95 and p99 of each route in `paths`, excluding long-lived streams
 pub(super) async fn route_percentiles(
     pool: &DbPool,
     project_id: Option<i64>,
@@ -186,15 +200,16 @@ async fn route_durations(
 ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
     let in_paths = db::in_text_list(3);
     let rows: Vec<(String, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        r"
+        r#"
         SELECT name AS path, duration_ms
         FROM spans
         WHERE parent_span_id IS NULL
           AND ($1 IS NULL OR project_id = $1)
           AND happened_at >= $2
+          AND NOT {LONG_LIVED_STREAM}
           AND name {in_paths}
         ORDER BY duration_ms ASC
-        "
+        "#
     )))
     .bind(project_id)
     .bind(since)

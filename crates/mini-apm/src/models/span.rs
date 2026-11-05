@@ -1022,6 +1022,7 @@ pub struct RouteSummary {
     pub path: String,
     pub method: String,
     pub request_count: i64,
+    pub stream_count: i64,
     pub avg_ms: i64,
     pub p95_ms: i64,
     pub p99_ms: i64,
@@ -1050,23 +1051,25 @@ pub async fn routes_summary(
     limit: i64,
 ) -> anyhow::Result<Vec<RouteSummary>> {
     // Get unique routes with basic stats
-    let routes: Vec<(String, String, i64, f64, f64, f64, i64)> =
+    let long_lived_stream = backend::LONG_LIVED_STREAM;
+    let routes: Vec<(String, String, i64, i64, f64, f64, f64, i64)> =
         sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        r"
+        r#"
         SELECT
             name AS path,
             COALESCE(http_method, 'GET') as method,
             COUNT(*) as request_count,
-            AVG(duration_ms) as avg_ms,
-            MAX(duration_ms) as max_ms,
-            MIN(duration_ms) as min_ms,
+            SUM(CASE WHEN {long_lived_stream} THEN 1 ELSE 0 END) as stream_count,
+            COALESCE(AVG(CASE WHEN NOT {long_lived_stream} THEN duration_ms END), 0) as avg_ms,
+            COALESCE(MAX(CASE WHEN NOT {long_lived_stream} THEN duration_ms END), 0) as max_ms,
+            COALESCE(MIN(CASE WHEN NOT {long_lived_stream} THEN duration_ms END), 0) as min_ms,
             SUM(CASE WHEN status_code = 2 OR http_status_code >= 500 THEN 1 ELSE 0 END) as error_count
         FROM spans
         {ROUTE_FILTER}
         GROUP BY name, COALESCE(http_method, 'GET')
         ORDER BY request_count DESC
         LIMIT $4
-        "
+        "#
     )))
     .bind(project_id)
     .bind(since)
@@ -1080,7 +1083,7 @@ pub async fn routes_summary(
     let db_stats = route_db_stats(pool, project_id, since, &paths).await?;
 
     let mut result = Vec::new();
-    for (path, method, request_count, avg_ms, max_ms, min_ms, error_count) in routes {
+    for (path, method, request_count, stream_count, avg_ms, max_ms, min_ms, error_count) in routes {
         let (p95, p99) = percentiles.get(&path).copied().unwrap_or((0, 0));
         let (avg_db_ms, avg_db_count) = db_stats.get(&path).copied().unwrap_or((0, 0));
         let error_rate = if request_count > 0 {
@@ -1092,6 +1095,7 @@ pub async fn routes_summary(
             path,
             method,
             request_count,
+            stream_count,
             avg_ms: round_i64(avg_ms),
             p95_ms: p95,
             p99_ms: p99,
@@ -1143,6 +1147,7 @@ async fn route_db_stats(
     paths: &[&str],
 ) -> anyhow::Result<HashMap<String, (i64, i64)>> {
     let in_paths = db::in_text_list(3);
+    let long_lived_stream = backend::LONG_LIVED_STREAM;
     let rows: Vec<(String, f64, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         r"
         WITH roots AS (
@@ -1151,6 +1156,7 @@ async fn route_db_stats(
             WHERE parent_span_id IS NULL
               AND ($1 IS NULL OR project_id = $1)
               AND happened_at >= $2
+              AND NOT {long_lived_stream}
               AND name {in_paths}
         ),
         db AS (

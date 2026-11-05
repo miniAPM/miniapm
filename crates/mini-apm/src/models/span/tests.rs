@@ -227,6 +227,33 @@ async fn insert_span(
     Ok(())
 }
 
+async fn insert_route_sample(
+    pool: &DbPool,
+    id: usize,
+    duration_ms: f64,
+    long_idle_get: bool,
+) -> sqlx::Result<()> {
+    let query = if long_idle_get {
+        "INSERT INTO spans (trace_id, span_id, start_time_unix_nano, end_time_unix_nano,
+            duration_ms, name, http_method, span_category, root_span_type, attributes_json,
+            happened_at)
+         VALUES ('mcp-trace', $1, 0, 1, $2, 'GET /mcp', 'GET', 'http_server', 'web',
+            '{\"idle_ns\":\"4981533304459\",\"busy_ns\":\"3043635\"}', $3)"
+    } else {
+        "INSERT INTO spans (trace_id, span_id, start_time_unix_nano, end_time_unix_nano,
+            duration_ms, name, http_method, span_category, root_span_type, attributes_json,
+            happened_at)
+         VALUES ('mcp-trace', $1, 0, 1, $2, 'GET /mcp', 'GET', 'http_server', 'web', '{}', $3)"
+    };
+    sqlx::query(query)
+        .bind(format!("{id:016x}"))
+        .bind(duration_ms)
+        .bind(Stamp::now())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 #[tokio::test]
 async fn hourly_stats_bucket_root_spans_inside_the_window() -> anyhow::Result<()> {
     let pool = crate::db::test_pool().await;
@@ -304,6 +331,32 @@ async fn latency_percentiles_use_the_nearest_rank() -> anyhow::Result<()> {
         .map(|r| (r.path.as_str(), r.p95_ms, r.p99_ms))
         .collect();
     assert_eq!(percentiles, [("GET /", 31, 32)]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn long_idle_get_streams_count_but_do_not_inflate_latency() -> anyhow::Result<()> {
+    let pool = crate::db::test_pool().await;
+    let since = crate::time::hours_ago(1);
+    insert_route_sample(&pool, 1, 10.0, false).await?;
+    insert_route_sample(&pool, 2, 20.0, false).await?;
+    insert_route_sample(&pool, 3, 4_981_536.346, true).await?;
+
+    let stats = latency_stats_since(&pool, None, since).await?;
+    assert_eq!((stats.avg_ms, stats.p95_ms, stats.p99_ms), (15, 20, 20));
+
+    let routes = routes_summary(&pool, None, since, None, "requests", 10).await?;
+    let route = routes.first().expect("MCP route summary");
+    assert_eq!(route.path, "GET /mcp");
+    assert_eq!((route.request_count, route.stream_count), (3, 1));
+    assert_eq!(
+        (route.avg_ms, route.p95_ms, route.p99_ms, route.max_ms),
+        (15, 20, 20, 20)
+    );
+
+    let points = hourly_stats(&pool, None, 1).await?;
+    assert_eq!(points[0].count, 3);
+    assert_eq!(points[0].avg_ms, 15.0);
     Ok(())
 }
 

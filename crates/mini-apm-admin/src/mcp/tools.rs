@@ -512,6 +512,8 @@ impl MiniApm {
     }
 
     /// Web routes with request count, latency percentiles, database time and error rate.
+    /// Long-lived idle GET streams are included in request_count and stream_count,
+    /// but excluded from latency statistics.
     #[mcp_tool(name = "slow_routes", read_only = true, idempotent = true)]
     async fn slow_routes(&self, _ctx: Ctx<'_>, params: Parameters<SlowRoutesParams>) -> ToolResult {
         #[derive(Serialize)]

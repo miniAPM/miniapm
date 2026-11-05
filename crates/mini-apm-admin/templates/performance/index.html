@@ -22,7 +22,7 @@ period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if !search.is_empty() 
 
 {% block content %}
 <h1>Routes</h1>
-<p class="subtitle">{{ total_count }} route{{ total_count|pluralize }} found</p>
+<p class="subtitle">{{ total_count }} route{{ total_count|pluralize }} found. Long-lived idle GET streams stay in request counts but are excluded from latency metrics.</p>
 
 <div class="filter-bar">
     <div class="filter-group">
@@ -84,6 +84,9 @@ period={{ period|urlencode }}&sort={{ sort|urlencode }}{% if !search.is_empty() 
                 <div class="bar bar-requests" style="width: {{ (route.request_count * 100 / max_requests) }}%;"></div>
             </div>
             <span class="value">{{ route.request_count }}</span>
+            {% if route.stream_count > 0 %}
+            <span class="stream-count" title="Long-lived streams are excluded from latency metrics">{{ route.stream_count }} stream{{ route.stream_count|pluralize }}</span>
+            {% endif %}
         </div>
         <div class="col-timing">
             <span class="timing-avg {% if route.avg_ms > 500 %}timing-slow{% else if route.avg_ms > 200 %}timing-medium{% endif %}">{{ route.avg_ms }}ms</span>

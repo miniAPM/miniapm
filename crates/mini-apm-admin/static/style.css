@@ -1455,6 +1455,12 @@ td.actions form.inline {
     text-align: right;
 }
 
+.col-requests .stream-count {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
 .col-timing {
     font-size: 0.8125rem;
 }

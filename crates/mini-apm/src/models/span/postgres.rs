@@ -5,25 +5,40 @@ use crate::time::Stamp;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+/// A root GET span is treated as a long-lived stream when at least 60 seconds
+/// of recorded idle time covers 95% or more of its duration.
+pub(super) const LONG_LIVED_STREAM: &str = r"(
+    http_method = 'GET'
+    AND duration_ms >= 60000
+    AND CASE
+        WHEN attributes_json->>'idle_ns' ~ '^[0-9]+$'
+        THEN (attributes_json->>'idle_ns')::numeric >= duration_ms * 950000
+        ELSE FALSE
+    END
+)";
+
 pub async fn hourly_stats(
     pool: &DbPool,
     project_id: Option<i64>,
     hours: i64,
 ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
-    let rows: Vec<(String, i64, f64, i64)> = sqlx::query_as(
-        r"
+    let rows: Vec<(String, i64, f64, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        r#"
         SELECT
             to_char(b.hour, 'YYYY-MM-DD HH24:00'),
-            COALESCE(SUM(r.requests), 0)::bigint,
-            COALESCE(SUM(r.duration_ms) / NULLIF(SUM(r.timed), 0), 0),
-            COALESCE(SUM(r.errors), 0)::bigint
+            COUNT(s.id)::bigint,
+            COALESCE(AVG(CASE WHEN NOT {LONG_LIVED_STREAM} THEN s.duration_ms END), 0),
+            COALESCE(SUM(CASE WHEN s.status_code = 2 OR s.http_status_code >= 500 THEN 1 ELSE 0 END), 0)::bigint
         FROM hour_buckets($2, $3::int) AS b(hour)
-        LEFT JOIN span_rollups r
-            ON r.hour = b.hour AND ($1::bigint IS NULL OR r.project_id = $1)
+        LEFT JOIN spans s
+            ON s.happened_at >= b.hour
+           AND s.happened_at < b.hour + interval '1 hour'
+           AND s.parent_span_id IS NULL
+           AND ($1::bigint IS NULL OR s.project_id = $1)
         GROUP BY b.hour
         ORDER BY b.hour
-        ",
-    )
+        "#
+    )))
     .bind(project_id)
     .bind(Stamp::now())
     .bind(hours)
@@ -139,23 +154,27 @@ fn ms(duration: Option<f64>) -> i64 {
     duration.map_or(0, super::round_i64)
 }
 
-/// Average and nearest-rank p95/p99 of root span durations since `since`
+/// Average and nearest-rank p95/p99 of non-stream root span durations since `since`
 pub async fn latency_stats_since(
     pool: &DbPool,
     project_id: Option<i64>,
     since: Stamp,
 ) -> anyhow::Result<LatencyStats> {
-    let (avg, p95, p99): (Option<f64>, Option<f64>, Option<f64>) = sqlx::query_as(
-        "SELECT AVG(duration_ms),
+    let (avg, p95, p99): (Option<f64>, Option<f64>, Option<f64>) =
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT AVG(duration_ms),
                 percentile_disc(0.95) WITHIN GROUP (ORDER BY duration_ms),
                 percentile_disc(0.99) WITHIN GROUP (ORDER BY duration_ms)
          FROM spans
-         WHERE parent_span_id IS NULL AND happened_at >= $1 AND ($2 IS NULL OR project_id = $2)",
-    )
-    .bind(since)
-    .bind(project_id)
-    .fetch_one(pool)
-    .await?;
+         WHERE parent_span_id IS NULL
+           AND happened_at >= $1
+           AND ($2 IS NULL OR project_id = $2)
+           AND NOT {LONG_LIVED_STREAM}"
+        )))
+        .bind(since)
+        .bind(project_id)
+        .fetch_one(pool)
+        .await?;
     Ok(LatencyStats {
         avg_ms: ms(avg),
         p95_ms: ms(p95),
@@ -163,7 +182,7 @@ pub async fn latency_stats_since(
     })
 }
 
-/// Nearest-rank p95 and p99 of each route in `paths`
+/// Nearest-rank p95 and p99 of non-stream root spans for each route in `paths`
 pub(super) async fn route_percentiles(
     pool: &DbPool,
     project_id: Option<i64>,
@@ -179,6 +198,7 @@ pub(super) async fn route_percentiles(
          WHERE parent_span_id IS NULL
            AND ($1 IS NULL OR project_id = $1)
            AND happened_at >= $2
+           AND NOT {LONG_LIVED_STREAM}
            AND name {}
          GROUP BY name",
             db::in_text_list(3)
