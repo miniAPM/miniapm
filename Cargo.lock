@@ -1930,6 +1930,7 @@ dependencies = [
  "hex",
  "jiff",
  "jiff-sqlx",
+ "miniapm-protocol",
  "rama",
  "rand 0.10.3",
  "serde",
@@ -1971,6 +1972,15 @@ dependencies = [
  "mini-apm",
  "tokio",
  "usage-lib",
+]
+
+[[package]]
+name = "miniapm-protocol"
+version = "1.0.0"
+dependencies = [
+ "jiff",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

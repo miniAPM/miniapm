@@ -78,27 +78,7 @@ impl SourceContext {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct IncomingError {
-    pub exception_class: String,
-    pub message: String,
-    pub backtrace: Vec<String>,
-    pub fingerprint: String,
-    pub request_id: Option<String>,
-    pub user_id: Option<String>,
-    pub params: Option<serde_json::Value>,
-    pub timestamp: Option<Timestamp>,
-    pub source_context: Option<IncomingSourceContext>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct IncomingSourceContext {
-    pub file: String,
-    pub lineno: i64,
-    pub pre_context: Option<Vec<String>>,
-    pub context_line: String,
-    pub post_context: Option<Vec<String>>,
-}
+pub use miniapm_protocol::{IncomingError, IncomingSourceContext};
 
 /// Minimum similarity threshold for grouping errors (50%)
 const SIMILARITY_THRESHOLD: f64 = 0.5;

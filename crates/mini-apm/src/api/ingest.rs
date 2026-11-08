@@ -10,7 +10,6 @@ use rama::http::grpc::service::opentelemetry::proto::collector::trace::v1::{
     ExportTraceServiceRequest, ExportTraceServiceResponse, trace_service_server::TraceService,
 };
 use rama::http::service::web::extract::{Bytes, Json, State};
-use serde::Deserialize;
 
 use crate::api::auth::ProjectContext;
 use crate::api::extract::Extension;
@@ -19,10 +18,7 @@ use crate::{
     models::{deploy, error as app_error, span},
 };
 
-#[derive(Debug, Deserialize)]
-pub struct IncomingErrorBatch {
-    pub errors: Vec<app_error::IncomingError>,
-}
+pub use miniapm_protocol::IncomingErrorBatch;
 
 pub async fn ingest_spans(
     State(pool): State<DbPool>,

@@ -1,0 +1,22 @@
+[package]
+name = "miniapm-protocol"
+version = "1.0.0"
+description = "Wire types for the MiniAPM ingest API"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors = ["Chris Hasinski <krzysztof.hasinski@gmail.com>", "Abdelkader Boudih <terminale@gmail.com>"]
+repository.workspace = true
+homepage.workspace = true
+keywords = ["apm", "monitoring", "errors", "protocol"]
+categories = ["development-tools", "web-programming"]
+readme = "README.md"
+include = ["src/lib.rs", "README.md"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+jiff = { workspace = true }
+
+[lints]
+workspace = true

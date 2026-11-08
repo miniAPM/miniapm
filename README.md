@@ -198,6 +198,9 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer proj_abc123...
 
 ### Error Tracking API
 
+Rust clients can use the [`miniapm-protocol`](crates/miniapm-protocol) crate, which holds the
+request types the collector deserializes.
+
 ```bash
 curl -X POST http://localhost:3000/ingest/errors \
   -H "Authorization: Bearer proj_abc123..." \

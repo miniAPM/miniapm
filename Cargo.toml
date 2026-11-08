@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/mini-apm", "crates/mini-apm-cli", "crates/mini-apm-admin"]
+members = ["crates/mini-apm", "crates/mini-apm-cli", "crates/mini-apm-admin", "crates/miniapm-protocol"]
 resolver = "3"
 
 [workspace.package]
@@ -17,6 +17,7 @@ categories = ["development-tools", "web-programming"]
 # Internal crates
 mini-apm = { path = "crates/mini-apm", default-features = false }
 mini-apm-admin = { path = "crates/mini-apm-admin" }
+miniapm-protocol = { path = "crates/miniapm-protocol", version = "1.0.0" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

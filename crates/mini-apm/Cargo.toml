@@ -19,6 +19,7 @@ test-support = []
 postgres = ["sqlx/postgres", "sqlx/tls-rustls-ring-webpki", "dep:jiff-sqlx", "jiff-sqlx/postgres"]
 
 [dependencies]
+miniapm-protocol = { workspace = true }
 tokio = { workspace = true }
 rama = { workspace = true }
 sqlx = { workspace = true }

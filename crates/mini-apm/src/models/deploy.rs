@@ -25,15 +25,7 @@ impl Deploy {
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct IncomingDeploy {
-    pub git_sha: String,
-    pub version: Option<String>,
-    pub env: Option<String>,
-    pub description: Option<String>,
-    pub deployer: Option<String>,
-    pub timestamp: Option<Timestamp>,
-}
+pub use miniapm_protocol::IncomingDeploy;
 
 pub async fn insert(
     pool: &DbPool,
