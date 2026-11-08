@@ -20,7 +20,7 @@ pub async fn hourly_stats(
     hours: i64,
 ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
     let rows: Vec<(String, i64, f64, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        r#"
+        r"
         SELECT
             strftime('%Y-%m-%d %H:00', happened_at) as hour,
             COUNT(*) as count,
@@ -32,7 +32,7 @@ pub async fn hourly_stats(
           AND happened_at >= $2
         GROUP BY strftime('%Y-%m-%d %H:00', happened_at)
         ORDER BY hour ASC
-        "#
+        "
     )))
     .bind(project_id)
     .bind(time::hours_ago(hours))
@@ -200,7 +200,7 @@ async fn route_durations(
 ) -> anyhow::Result<HashMap<String, Vec<f64>>> {
     let in_paths = db::in_text_list(3);
     let rows: Vec<(String, f64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        r#"
+        r"
         SELECT name AS path, duration_ms
         FROM spans
         WHERE parent_span_id IS NULL
@@ -209,7 +209,7 @@ async fn route_durations(
           AND NOT {LONG_LIVED_STREAM}
           AND name {in_paths}
         ORDER BY duration_ms ASC
-        "#
+        "
     )))
     .bind(project_id)
     .bind(since)

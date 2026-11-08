@@ -23,7 +23,7 @@ pub async fn hourly_stats(
     hours: i64,
 ) -> anyhow::Result<Vec<TimeSeriesPoint>> {
     let rows: Vec<(String, i64, f64, i64)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        r#"
+        r"
         SELECT
             to_char(b.hour, 'YYYY-MM-DD HH24:00'),
             COUNT(s.id)::bigint,
@@ -37,7 +37,7 @@ pub async fn hourly_stats(
            AND ($1::bigint IS NULL OR s.project_id = $1)
         GROUP BY b.hour
         ORDER BY b.hour
-        "#
+        "
     )))
     .bind(project_id)
     .bind(Stamp::now())

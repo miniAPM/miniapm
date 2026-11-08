@@ -1042,6 +1042,8 @@ const ROUTE_FILTER: &str = "
       AND happened_at >= $2
       AND ($3 IS NULL OR LOWER(name) LIKE '%' || LOWER($3) || '%' OR LOWER(http_url) LIKE '%' || LOWER($3) || '%')";
 
+type RouteRow = (String, String, i64, i64, f64, f64, f64, i64);
+
 pub async fn routes_summary(
     pool: &DbPool,
     project_id: Option<i64>,
@@ -1052,9 +1054,9 @@ pub async fn routes_summary(
 ) -> anyhow::Result<Vec<RouteSummary>> {
     // Get unique routes with basic stats
     let long_lived_stream = backend::LONG_LIVED_STREAM;
-    let routes: Vec<(String, String, i64, i64, f64, f64, f64, i64)> =
+    let routes: Vec<RouteRow> =
         sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        r#"
+        r"
         SELECT
             name AS path,
             COALESCE(http_method, 'GET') as method,
@@ -1069,7 +1071,7 @@ pub async fn routes_summary(
         GROUP BY name, COALESCE(http_method, 'GET')
         ORDER BY request_count DESC
         LIMIT $4
-        "#
+        "
     )))
     .bind(project_id)
     .bind(since)

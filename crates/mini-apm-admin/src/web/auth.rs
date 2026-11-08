@@ -133,7 +133,7 @@ pub async fn login_submit(State(pool): State<DbPool>, Form(form): Form<LoginForm
     }
 }
 
-fn database_backend_class() -> &'static str {
+const fn database_backend_class() -> &'static str {
     if cfg!(feature = "postgres") {
         "postgres"
     } else {
