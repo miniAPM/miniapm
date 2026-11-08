@@ -1,6 +1,6 @@
 [package]
 name = "miniapm-protocol"
-version = "1.0.0"
+version = "1.0.1"
 description = "Wire types for the MiniAPM ingest API"
 edition.workspace = true
 rust-version.workspace = true
@@ -16,7 +16,7 @@ include = ["src/lib.rs", "README.md"]
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-jiff = { workspace = true }
+jiff = { version = "0.2", default-features = false, features = ["std", "serde"] }
 
 [lints]
 workspace = true
