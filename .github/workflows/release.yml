@@ -1,0 +1,140 @@
+name: release
+
+# A v* tag builds both flavors' gems on every platform natively, installs them with no Rust in
+# reach, smoke-tests them and attaches them to the release. `rake gem:download gem:push_all`
+# publishes. workflow_dispatch builds them all without releasing.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: x86_64-linux-gnu, runner: ubuntu-latest, image: "ruby:4.0-trixie" }
+          - { platform: aarch64-linux-gnu, runner: ubuntu-24.04-arm, image: "ruby:4.0-trixie" }
+          - { platform: x86_64-linux-musl, runner: ubuntu-latest, image: "ruby:4.0-alpine" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: seuros/setup-upkg@master
+      - run: sh tools/build_native_gem.sh ${{ matrix.platform }}
+      - name: Installs without Rust, runs every binary
+        run: |
+          mv "$HOME/.cargo" "$HOME/.cargo.off"
+          sh tools/smoke_gem.sh ruby/pkg/*-${{ matrix.platform }}.gem
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gem-${{ matrix.platform }}
+          path: ruby/pkg/*-${{ matrix.platform }}.gem
+          if-no-files-found: error
+
+  # JavaScript actions do not run in Alpine containers on arm64, so this one uses docker run.
+  linux-arm64-musl:
+    name: aarch64-linux-musl
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker run --rm -e GITHUB_API_TOKEN -v "$PWD:/src" -w /src ruby:4.0-alpine sh tools/build_native_gem.sh aarch64-linux-musl
+        env:
+          GITHUB_API_TOKEN: ${{ github.token }}
+      - name: Installs without Rust, runs every binary
+        run: docker run --rm -v "$PWD:/src:ro" ruby:4.0-alpine sh -c 'sh /src/tools/smoke_gem.sh /src/ruby/pkg/*-aarch64-linux-musl.gem'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gem-aarch64-linux-musl
+          path: ruby/pkg/*-aarch64-linux-musl.gem
+          if-no-files-found: error
+
+  macos:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: arm64-darwin, runner: macos-latest }
+          - { platform: x86_64-darwin, runner: macos-26-intel }
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+      - uses: dtolnay/rust-toolchain@1.99
+      - run: gem install rake --no-document && cd ruby && rake "gem:native[${{ matrix.platform }}]"
+      - name: Installs without Rust, runs every binary
+        run: |
+          GEM_HOME="$(mktemp -d)"
+          export GEM_HOME GEM_PATH=
+          PATH="$(dirname "$(which ruby)"):/usr/bin:/bin" sh tools/smoke_gem.sh ruby/pkg/*-${{ matrix.platform }}.gem
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gem-${{ matrix.platform }}
+          path: ruby/pkg/*-${{ matrix.platform }}.gem
+          if-no-files-found: error
+
+  freebsd:
+    name: FreeBSD 15.1
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      # The VM's fetch sends no token: resolve the version here, pin it in there.
+      - uses: seuros/setup-upkg@master
+        id: upkg
+        with:
+          update: "false"
+      - uses: vmactions/freebsd-vm@v1
+        env:
+          INPUT_VERSION: ${{ steps.upkg.outputs.version }}
+        with:
+          release: "15.1"
+          usesh: true
+          copyback: true
+          envs: INPUT_VERSION
+          prepare: |
+            fetch -qo /tmp/setup-upkg.sh https://raw.githubusercontent.com/seuros/setup-upkg/master/setup.sh
+            sh /tmp/setup-upkg.sh
+            upkg install ruby40 git curl
+            printf '%s\n' '#!/bin/sh' 'exec ruby40 -e "require %q(rubygems/gem_runner); Gem::GemRunner.new.run(ARGV)" -- "$@"' > /usr/local/bin/gem
+            chmod +x /usr/local/bin/gem
+            ln -sf ruby40 /usr/local/bin/ruby
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.99
+          run: |
+            . "$HOME/.cargo/env"
+            gem install rake --no-document
+            (cd ruby && ruby -e 'require "rake"; Rake.application.run(["gem:native"])')
+            mv "$HOME/.cargo" "$HOME/.cargo.off"
+            sh tools/smoke_gem.sh ruby/pkg/*-freebsd*.gem
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gem-freebsd
+          path: ruby/pkg/*-freebsd*.gem
+          if-no-files-found: error
+
+  attach:
+    needs: [linux, linux-arm64-musl, macos, freebsd]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: gems
+          merge-multiple: true
+      - name: Both flavors on seven platforms
+        run: |
+          ls -l gems
+          test "$(find gems -name '*.gem' | wc -l)" -eq 14
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: gems/*.gem

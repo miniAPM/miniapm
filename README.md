@@ -128,6 +128,17 @@ On first run, check collector logs for API key:
 INFO mini_apm::server: Single-project mode - API key: proj_abc123...
 ```
 
+### RubyGems
+
+Prebuilt binaries, no Rust toolchain needed:
+
+```bash
+gem install miniapm        # SQLite
+gem install miniapm-pg     # PostgreSQL 18+
+```
+
+Both install `miniapm`, `miniapm-admin` and `miniapm-cli`. See [ruby/README.md](ruby/README.md).
+
 ### From Source
 
 ```bash
@@ -149,19 +160,23 @@ persistent SQLite storage, automatic container restarts, logs, and backups.
 
 ## Sending Data
 
-### Rails with miniapm gem (recommended)
+### Rails with lapsoss
 
-Add to your Gemfile:
+The `miniapm` gem is the server since 2.0. To report from Rails, use
+[lapsoss](https://github.com/seuros/lapsoss):
+
 ```ruby
-gem 'miniapm'
+gem "lapsoss"
 ```
 
-Configure in `config/initializers/miniapm.rb`:
 ```ruby
-MiniAPM.configure do |config|
-  config.endpoint = "http://localhost:3000"
-  config.api_key = "proj_abc123..."
-  config.service_name = "my-app"
+# config/initializers/lapsoss.rb
+Lapsoss.configure do |config|
+  config.use_otlp(
+    endpoint: "http://localhost:3000/ingest",
+    api_key: ENV["MINIAPM_API_KEY"],
+    service_name: "my-app"
+  )
 end
 ```
 

@@ -1,0 +1,4 @@
+libexec/
+pkg/
+LICENSE
+*.gem

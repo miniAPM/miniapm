@@ -1,0 +1,5 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+bin = File.expand_path("../libexec/miniapm-cli", __dir__)
+exec [bin, bin], *ARGV

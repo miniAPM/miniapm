@@ -1,0 +1,82 @@
+# frozen_string_literal: true
+
+require "fileutils"
+require "json"
+require_relative "lib/miniapm/version"
+require_relative "flavors"
+
+WORKSPACE = File.expand_path("..", __dir__)
+PKG = File.join(__dir__, "pkg")
+LIBEXEC = File.join(__dir__, "libexec")
+
+def cargo_metadata
+  @cargo_metadata ||= Dir.chdir(WORKSPACE) { JSON.parse(`cargo metadata --no-deps --format-version 1`) }
+end
+
+def local_platform
+  local = Gem::Platform.local
+  local.os == "darwin" ? "#{local.cpu}-darwin" : local.to_s
+end
+
+def unbundled(&)
+  defined?(Bundler) ? Bundler.with_unbundled_env(&) : yield
+end
+
+def flavors(arg)
+  arg ? [arg].each { MiniAPM::FLAVORS.fetch(it) } : MiniAPM::FLAVORS.keys
+end
+
+def build_gem(flavor, platform)
+  FileUtils.mkdir_p(PKG)
+  name = [flavor, MiniAPM::VERSION, platform].join("-")
+  unbundled do
+    sh({ "MINIAPM_GEM_PLATFORM" => platform }, "gem", "build", "#{flavor}.gemspec", "--output", File.join(PKG, "#{name}.gem"))
+  end
+end
+
+desc "Check the gem version matches the Cargo workspace and stage the LICENSE"
+task :stage do
+  cargo = cargo_metadata.fetch("packages").find { it["name"] == "mini-apm" }.fetch("version")
+  abort "lib/miniapm/version.rb says #{MiniAPM::VERSION}, Cargo says #{cargo}" unless cargo == MiniAPM::VERSION
+
+  FileUtils.cp(File.join(WORKSPACE, "LICENSE"), File.join(__dir__, "LICENSE"))
+end
+
+namespace :gem do
+  desc "Build this machine's gems with binaries (gem:native[platform,flavor])"
+  task :native, [:platform, :flavor] => :stage do |_t, args|
+    platform = args[:platform] || local_platform
+    manifest = File.join(WORKSPACE, "Cargo.toml")
+    built = File.join(cargo_metadata.fetch("target_directory"), "release")
+
+    flavors(args[:flavor]).each do |flavor|
+      packages = %w[mini-apm mini-apm-admin mini-apm-cli].flat_map { ["-p", it] }
+      sh "cargo", "build", "--release", "--locked", "--manifest-path", manifest, *packages,
+         *MiniAPM::FLAVORS.fetch(flavor)[:features]
+
+      FileUtils.rm_rf(LIBEXEC)
+      FileUtils.mkdir_p(LIBEXEC)
+      MiniAPM::BINARIES.each { FileUtils.install(File.join(built, it), LIBEXEC, mode: 0o755) }
+      build_gem(flavor, platform)
+    end
+  ensure
+    FileUtils.rm_rf(LIBEXEC)
+  end
+
+  desc "Download a release's gems into pkg/ (gem:download[tag], default this version's)"
+  task :download, [:tag] do |_t, args|
+    tag = args[:tag] || "v#{MiniAPM::VERSION}"
+    FileUtils.mkdir_p(PKG)
+    sh "gh", "release", "download", tag, "--repo", "miniapm/miniapm", "--pattern", "*.gem", "--dir", PKG, "--clobber"
+  end
+
+  desc "Push every gem in pkg/ for this version to RubyGems"
+  task :push_all do
+    gems = MiniAPM::FLAVORS.keys.flat_map { Dir[File.join(PKG, "#{it}-#{MiniAPM::VERSION}-*.gem")] }
+    abort "no gems in pkg/ for #{MiniAPM::VERSION}: rake gem:download first" if gems.empty?
+
+    gems.each { sh "gem", "push", it }
+  end
+end
+
+task default: "gem:native"
