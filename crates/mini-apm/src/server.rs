@@ -12,7 +12,9 @@ use rama::graceful::{Shutdown, WeakShutdownGuard};
 use rama::http::grpc::service::opentelemetry::proto::collector::trace::v1::trace_service_server::TraceServiceServer;
 use rama::http::header::CONTENT_TYPE;
 use rama::http::layer::body_limit::BodyLimitLayer;
+use rama::http::layer::decompression::RequestDecompressionLayer;
 use rama::http::layer::error_handling::ErrorHandlerLayer;
+use rama::http::layer::map_request_body::MapRequestBodyLayer;
 use rama::http::matcher::HttpMatcher;
 use rama::http::server::HttpServer;
 use rama::http::service::web::response::IntoResponse;
@@ -137,7 +139,12 @@ pub fn make_app(
             Html("<h1>404 - Collector API Only</h1>".to_owned()),
         ));
 
-    let app = ErrorHandlerLayer::new().into_layer(app);
+    let app = (
+        ErrorHandlerLayer::new(),
+        RequestDecompressionLayer::new(),
+        MapRequestBodyLayer::new_boxed_streaming_body(),
+    )
+        .into_layer(app);
     Arc::new(SelfMonitorLayer::global().into_layer(app))
 }
 

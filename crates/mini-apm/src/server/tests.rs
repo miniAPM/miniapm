@@ -718,3 +718,58 @@ async fn empty_trace_batches_are_accepted_without_creating_spans() -> anyhow::Re
     assert_eq!(count, 0);
     Ok(())
 }
+
+#[tokio::test]
+async fn ingest_decompresses_bodies_within_the_size_limit() -> anyhow::Result<()> {
+    use flate2::{Compression, write::GzEncoder};
+    use std::io::Write as _;
+
+    let gzip = |body: &[u8]| -> anyhow::Result<Vec<u8>> {
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(body)?;
+        Ok(encoder.finish()?)
+    };
+    let (app, pool, project) = setup().await;
+    let auth = format!("Bearer {}", project.api_key);
+    let error = serde_json::json!({
+        "exception_class": "E", "message": "zipped", "backtrace": [], "fingerprint": "fp",
+    })
+    .to_string();
+    let bomb = serde_json::json!({
+        "exception_class": "E", "message": "x".repeat(MAX_BODY_SIZE), "backtrace": [], "fingerprint": "fp",
+    })
+    .to_string();
+
+    for (encoding, body, expected) in [
+        ("gzip", gzip(error.as_bytes())?, StatusCode::ACCEPTED),
+        ("gzip", gzip(bomb.as_bytes())?, StatusCode::BAD_REQUEST),
+        (
+            "compress",
+            error.clone().into_bytes(),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        ),
+    ] {
+        let size = body.len();
+        let req = Request::builder()
+            .method(Method::POST)
+            .uri("/ingest/errors")
+            .header("Content-Type", "application/json")
+            .header("Content-Encoding", encoding)
+            .header("Authorization", auth.as_str())
+            .body(Body::from(body))?;
+        let res = app.serve(req).await?;
+        assert_eq!(
+            res.status(),
+            expected,
+            "{encoding} ({size} bytes on the wire)"
+        );
+    }
+
+    let stored: Vec<String> =
+        sqlx::query_scalar("SELECT message FROM errors WHERE project_id = $1")
+            .bind(project.id)
+            .fetch_all(&pool)
+            .await?;
+    assert_eq!(stored, ["zipped"]);
+    Ok(())
+}

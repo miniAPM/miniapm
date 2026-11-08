@@ -189,6 +189,9 @@ OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer proj_abc123...
 ```
 
+HTTP ingest bodies may be compressed (`Content-Encoding: gzip`, `deflate`, `br` or `zstd`);
+the body size limit applies after decompression.
+
 or OTLP over gRPC:
 ```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3000

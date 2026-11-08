@@ -67,6 +67,7 @@ schemars = "1.2.3"
 
 # Test fixtures
 tempfile = "3.27.0"
+flate2 = "1"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
